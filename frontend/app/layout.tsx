@@ -86,7 +86,7 @@ export default function RootLayout({
           */}
           <div
             aria-hidden="true"
-            className="pointer-events-none fixed inset-x-0 top-0 z-40 h-[11px] bg-header-band [background-clip:text]"
+            className="ios-status-bar-blur-fix"
           />
           {/*
             iOS PWAではステータスバー直下に半透明の効果が重なるため、上端まで
