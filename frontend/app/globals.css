@@ -128,6 +128,24 @@
 }
 
 @layer utilities {
+  /*
+   * iOSのPWAは画面上端に固定ヘッダーを検出できないと、ステータスバー直下へ自動で
+   * 半透明のぼかしを重ねる（#517）。透明化や非表示は検出対象から外れるため、文字のない
+   * 要素の背景だけをクリップする。最前面に置いても見た目・操作には影響しない。
+   *
+   * `-webkit-` 接頭辞を明示し、WebKitで標準プロパティだけが無効になる経路を避ける。
+   */
+  .ios-status-bar-blur-fix {
+    position: fixed;
+    inset: 0 0 auto;
+    z-index: 2147483647;
+    height: 11px;
+    pointer-events: none;
+    background-color: var(--header-band);
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+
   .climate-card {
     @apply rounded-[20px] bg-card p-5;
   }

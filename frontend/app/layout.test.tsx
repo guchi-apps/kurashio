@@ -35,10 +35,13 @@ describe("iOS PWAの安全領域", () => {
     expect(css).toMatch(/html\s*\{\s*@apply bg-header-band;/);
   });
 
-  it("背景の描画されない要素でWebKitに固定ヘッダーの実在を認識させる（#482）", () => {
-    expect(source).toContain(
-      "pointer-events-none fixed inset-x-0 top-0 z-40 h-[11px] bg-header-band [background-clip:text]",
+  it("背景の描画されない最前面の要素でWebKitに固定ヘッダーの実在を認識させる（#517）", () => {
+    expect(source).toContain('className="ios-status-bar-blur-fix"');
+    expect(css).toMatch(/\.ios-status-bar-blur-fix\s*\{[^}]*z-index:\s*2147483647;/);
+    expect(css).toMatch(
+      /\.ios-status-bar-blur-fix\s*\{[^}]*\n\s*-webkit-background-clip:\s*text;/,
     );
+    expect(css).toMatch(/\.ios-status-bar-blur-fix\s*\{[^}]*\n\s*background-clip:\s*text;/);
   });
 
   it("ダッシュボードのヘッダーは上端から始まる固定要素で、安全領域も自分で塗る（#513）", () => {
