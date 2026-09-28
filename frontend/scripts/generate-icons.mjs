@@ -18,6 +18,8 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const ASSETS_DIR = join(ROOT, "assets");
 const PUBLIC_DIR = join(ROOT, "public");
 const APP_DIR = join(ROOT, "app");
+// iOSアプリ（#526）のアイコン。Xcodeは1024pxの1枚から各サイズを作る
+const IOS_ICON_DIR = join(dirname(ROOT), "ios", "Kurashio", "Assets.xcassets", "AppIcon.appiconset");
 
 const ICON_SOURCE = join(ASSETS_DIR, "kurashio-app-icon.png");
 const BRAND_SOURCE = join(ASSETS_DIR, "kurashio-brand-source.png");
@@ -37,6 +39,8 @@ const ICON_OUTPUTS = [
   { path: join(PUBLIC_DIR, "kurashio-favicon.png"), size: 32, flatten: false },
   { path: join(APP_DIR, "apple-icon.png"), size: 180, flatten: true },
   { path: join(APP_DIR, "icon.png"), size: 32, flatten: false },
+  // iOSアプリのアイコンは透明を持てない（角丸は端末が切り抜く）ので塗りつぶし版
+  { path: join(IOS_ICON_DIR, "kurashio-app-icon-1024.png"), size: 1024, flatten: true },
 ];
 
 // ブランド画像のうちヘッダーに使う範囲（元画像の画素座標）。キャッチコピーは
@@ -51,6 +55,7 @@ const BRAND_DARK_TEXT = [229, 238, 236];
 
 await mkdir(PUBLIC_DIR, { recursive: true });
 await mkdir(APP_DIR, { recursive: true });
+await mkdir(IOS_ICON_DIR, { recursive: true });
 
 for (const { path, size, flatten } of ICON_OUTPUTS) {
   let image = sharp(ICON_SOURCE).resize(size, size, { kernel: "lanczos3" });

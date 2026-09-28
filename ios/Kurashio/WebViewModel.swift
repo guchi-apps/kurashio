@@ -1,0 +1,275 @@
+import Network
+import SwiftUI
+import UIKit
+import WebKit
+
+/// Web版を開く WKWebView と、その読み込み状態を持つ。
+final class WebViewModel: NSObject, ObservableObject {
+    @Published private(set) var failure: LoadFailure?
+    @Published private(set) var isRetrying = false
+
+    let webView: WKWebView
+
+    private let auth = NativeAuth()
+    private let pathMonitor = NWPathMonitor()
+    private var isNetworkAvailable = true
+    private var hasStarted = false
+    /// 最後に開こうとしたメインフレームのURL。読み込みに失敗すると `webView.url` は
+    /// 直前に表示できていた画面のままなので、再試行はこちらを開き直す
+    private var lastRequestedURL: URL?
+
+    override init() {
+        let configuration = WKWebViewConfiguration()
+        // Cookie・localStorage（Supabaseのセッション）を端末に残し、再起動後もログインを保つ
+        configuration.websiteDataStore = .default()
+        configuration.applicationNameForUserAgent = AppConfig.userAgentApplicationName
+
+        webView = WKWebView(frame: .zero, configuration: configuration)
+        super.init()
+
+        // WKUserContentController は登録した相手を強参照するので、弱参照の中継を挟む
+        configuration.userContentController.add(
+            WeakScriptMessageHandler(target: self),
+            name: AppConfig.bridgeName
+        )
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
+        webView.allowsBackForwardNavigationGestures = true
+        // 読み込み前の一瞬に白い面が出ないよう、ヘッダーと同じ色を下地にする
+        webView.isOpaque = false
+        webView.backgroundColor = UIColor(named: "HeaderBand")
+        webView.scrollView.backgroundColor = UIColor(named: "HeaderBand")
+    }
+
+    deinit {
+        pathMonitor.cancel()
+    }
+
+    func startIfNeeded() {
+        guard !hasStarted else { return }
+        hasStarted = true
+
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let available = path.status == .satisfied
+            DispatchQueue.main.async { self?.networkChanged(available: available) }
+        }
+        pathMonitor.start(queue: .main)
+        load(AppConfig.baseURL)
+    }
+
+    func retry() {
+        isRetrying = true
+        load(lastRequestedURL ?? AppConfig.baseURL)
+    }
+
+    private func load(_ url: URL) {
+        lastRequestedURL = url
+        webView.load(URLRequest(url: url))
+    }
+
+    private func networkChanged(available: Bool) {
+        let recovered = available && !isNetworkAvailable
+        isNetworkAvailable = available
+        if recovered, failure == .offline { retry() }
+    }
+
+    private func fail(with error: Error) {
+        let nsError = error as NSError
+        // 別の読み込みに置き換わった・レスポンスを見て自分で止めた（5xx）場合は失敗扱いにしない
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled { return }
+        if nsError.domain == "WebKitErrorDomain", nsError.code == 102 { return }
+
+        isRetrying = false
+        let offlineCodes: Set<Int> = [
+            NSURLErrorNotConnectedToInternet,
+            NSURLErrorNetworkConnectionLost,
+            NSURLErrorDataNotAllowed,
+            NSURLErrorInternationalRoamingOff,
+        ]
+        if !isNetworkAvailable || (nsError.domain == NSURLErrorDomain && offlineCodes.contains(nsError.code)) {
+            failure = .offline
+        } else {
+            failure = .server(status: nil)
+        }
+    }
+
+    private func openExternally(_ url: URL) {
+        UIApplication.shared.open(url)
+    }
+
+    private func finishSignIn(_ result: NativeAuthResult) {
+        switch result {
+        case .code(let code):
+            var components = URLComponents(
+                url: AppConfig.baseURL.appending(path: "auth/callback"),
+                resolvingAgainstBaseURL: false
+            )
+            components?.queryItems = [URLQueryItem(name: "code", value: code)]
+            if let url = components?.url { load(url) }
+        case .failed:
+            var components = URLComponents(url: AppConfig.baseURL, resolvingAgainstBaseURL: false)
+            components?.queryItems = [URLQueryItem(name: "authError", value: "failed")]
+            if let url = components?.url { load(url) }
+        case .cancelled:
+            // ボタンを「Googleへ移動しています」から元に戻す（login-screen.tsx が受ける）
+            webView.evaluateJavaScript("window.dispatchEvent(new Event('myroom-native-auth-cancelled'))")
+        }
+    }
+}
+
+// MARK: - 読み込み
+
+extension WebViewModel: WKNavigationDelegate {
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction
+    ) async -> WKNavigationActionPolicy {
+        guard let url = navigationAction.request.url else { return .cancel }
+
+        if ["about", "blob", "data"].contains(url.scheme ?? "") { return .allow }
+
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+        if AppConfig.isAppURL(url) {
+            if isMainFrame { lastRequestedURL = url }
+            return .allow
+        }
+        // 埋め込み（iframe）はそのまま。画面ごと他のサイトへ移るものはSafari等で開く
+        if !isMainFrame { return .allow }
+        openExternally(url)
+        return .cancel
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse
+    ) async -> WKNavigationResponsePolicy {
+        // Apache の 502/503（バックエンドの再起動中など）を、素のエラーページのまま見せない
+        if navigationResponse.isForMainFrame,
+           let response = navigationResponse.response as? HTTPURLResponse,
+           response.statusCode >= 500 {
+            isRetrying = false
+            failure = .server(status: response.statusCode)
+            return .cancel
+        }
+        return .allow
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        isRetrying = false
+        failure = nil
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        fail(with: error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        fail(with: error)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        // メモリ不足などでWebの描画プロセスが落ちると、白い画面のまま戻らない
+        load(lastRequestedURL ?? AppConfig.baseURL)
+    }
+}
+
+// MARK: - 新しいウインドウ・ダイアログ
+
+extension WebViewModel: WKUIDelegate {
+    func webView(
+        _ webView: WKWebView,
+        createWebViewWith configuration: WKWebViewConfiguration,
+        for navigationAction: WKNavigationAction,
+        windowFeatures: WKWindowFeatures
+    ) -> WKWebView? {
+        // target="_blank" のリンク。アプリの画面なら同じWebViewで、外部ならSafari等で開く
+        if let url = navigationAction.request.url {
+            if AppConfig.isAppURL(url) { load(url) } else { openExternally(url) }
+        }
+        return nil
+    }
+
+    /// `window.confirm()`（記録の削除など）。UIDelegateで実装しないと常に false が返り、削除できない
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo
+    ) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "キャンセル", style: .cancel) { _ in continuation.resume(returning: false) })
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in continuation.resume(returning: true) })
+            guard present(alert) else { return continuation.resume(returning: false) }
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo
+    ) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in continuation.resume() })
+            guard present(alert) else { return continuation.resume() }
+        }
+    }
+
+    private func present(_ controller: UIViewController) -> Bool {
+        guard var top = webView.window?.rootViewController else { return false }
+        while let presented = top.presentedViewController { top = presented }
+        top.present(controller, animated: true)
+        return true
+    }
+}
+
+// MARK: - Webからの呼び出し（ブリッジ）
+
+extension WebViewModel: WKScriptMessageHandler {
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        // Web版の画面（メインフレーム）からの呼び出しだけを受ける
+        let origin = message.frameInfo.securityOrigin
+        guard
+            message.frameInfo.isMainFrame,
+            origin.`protocol` == AppConfig.baseURL.scheme,
+            origin.host == AppConfig.baseURL.host,
+            let body = message.body as? [String: Any],
+            body["type"] as? String == "signIn",
+            let urlString = body["url"] as? String,
+            let url = URL(string: urlString),
+            url.scheme == "https"
+        else { return }
+
+        auth.start(url: url) { [weak self] result in
+            self?.finishSignIn(result)
+        }
+    }
+}
+
+/// `WKUserContentController.add(_:name:)` の強参照で WebViewModel が解放されなくなるのを防ぐ
+private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
+    weak var target: WKScriptMessageHandler?
+
+    init(target: WKScriptMessageHandler) {
+        self.target = target
+    }
+
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        target?.userContentController(userContentController, didReceive: message)
+    }
+}
+
+/// SwiftUI に WKWebView を置くための入れ物。WebView 本体は WebViewModel が持ち続ける
+struct WebViewContainer: UIViewRepresentable {
+    let webView: WKWebView
+
+    func makeUIView(context: Context) -> WKWebView { webView }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {}
+}

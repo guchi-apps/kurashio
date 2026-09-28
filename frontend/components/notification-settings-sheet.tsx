@@ -12,6 +12,7 @@ import {
   updateUiSettings,
 } from "@/lib/api";
 import type { GarbageCategoryNext } from "@/lib/garbage";
+import { isNativeApp } from "@/lib/native-app";
 import {
   getExistingPushSubscription,
   getNotificationPermission,
@@ -431,7 +432,12 @@ export function NotificationSettingsSheet({ open, onClose }: NotificationSetting
                   プッシュ通知
                 </p>
 
-                {!supported ? (
+                {isNativeApp() ? (
+                  // iOSアプリ（WKWebView）ではWeb Pushを受け取れない。ネイティブの通知は別Issue（#526）
+                  <p className="text-[13px] text-muted-foreground">
+                    iOSアプリではプッシュ通知を受け取れません。通知はホーム画面に追加したWeb版（PWA）で設定してください。
+                  </p>
+                ) : !supported ? (
                   <p className="text-[13px] text-muted-foreground">
                     このブラウザまたは環境ではプッシュ通知に対応していません。
                     {isIosNotInstalledPwa()
