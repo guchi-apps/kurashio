@@ -1160,11 +1160,18 @@ export function MyRoomDashboard() {
         `z-[45]`は安全領域の帯と #482 の要素（どちらも z-40）より上、ボトムシート系モーダルの
         暗幕（z-50）より下。ダッシュボードでは上端の最前面をこのヘッダーにして、iOS が上端で
         拾う要素を確実にこれにする（帯の下に置くと、#478/#482 と同じ判定のままになり得る）。
+
+        iOS 27ではこの固定ヘッダー自体があってもステータスバー下のぼかしが消えないため（#521）、
+        `--pwa-header-safe-gap`（globals.css・PWA standalone限定）ぶんだけ中身の開始位置を
+        安全領域よりさらに下げ、ロゴ・アイコンがぼかしの範囲に重ならないようにする。ヘッダーの
+        `padding-top`にではなく、`useElementHeight`が実測しているこの内側の div の
+        `padding-top` に足すことで、直後の余白（`headerBarHeight`）が自動で追従する
+        （ヘッダー側に足すと、実測されない差分だけ本文の先頭が隠れる）。
       */}
       <header className="fixed inset-x-0 top-0 z-[45] border-b border-header-band-border bg-header-band pt-[env(safe-area-inset-top)]">
         <div
           ref={headerBarRef}
-          className="mx-auto w-full max-w-[480px] px-5 py-2.5 lg:max-w-[1040px] lg:px-8"
+          className="mx-auto w-full max-w-[480px] px-5 pt-[calc(0.625rem+var(--pwa-header-safe-gap))] pb-2.5 lg:max-w-[1040px] lg:px-8"
         >
           <div className="flex items-center justify-between gap-3 px-0.5">
             <h1 className="shrink-0">
