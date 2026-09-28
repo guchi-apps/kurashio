@@ -14,7 +14,14 @@ vi.mock("@/lib/supabase-client", () => ({
   supabaseConfig: { url: "https://example.supabase.co", publishableKey: "key" },
 }));
 
-import { NATIVE_AUTH_REDIRECT, isNativeApp, startNativeGoogleSignIn } from "@/lib/native-app";
+import {
+  NATIVE_AUTH_REDIRECT,
+  isNativeApp,
+  openNativeNotificationSettings,
+  queryNativeNotificationState,
+  requestNativeNotificationPermission,
+  startNativeGoogleSignIn,
+} from "@/lib/native-app";
 
 function installBridge() {
   const postMessage = vi.fn();
@@ -84,5 +91,28 @@ describe("startNativeGoogleSignIn", () => {
 
     expect(await startNativeGoogleSignIn()).toBe(false);
     expect(postMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("ネイティブ通知（#527）のブリッジ呼び出し", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    ["requestNativeNotificationPermission", requestNativeNotificationPermission, "requestNotificationPermission"],
+    ["queryNativeNotificationState", queryNativeNotificationState, "queryNotificationPermission"],
+    ["openNativeNotificationSettings", openNativeNotificationSettings, "openSystemSettings"],
+  ] as const)("%s はアプリの外では何もせず false を返す", (_name, fn, _type) => {
+    vi.stubGlobal("window", {});
+    expect(fn()).toBe(false);
+  });
+
+  it.each([
+    ["requestNativeNotificationPermission", requestNativeNotificationPermission, "requestNotificationPermission"],
+    ["queryNativeNotificationState", queryNativeNotificationState, "queryNotificationPermission"],
+    ["openNativeNotificationSettings", openNativeNotificationSettings, "openSystemSettings"],
+  ] as const)("%s はアプリの中で type=%s のメッセージを渡す", (_name, fn, type) => {
+    const postMessage = installBridge();
+    expect(fn()).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({ type });
   });
 });

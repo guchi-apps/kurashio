@@ -145,6 +145,7 @@ import {
   isPredecessorDevice,
 } from "@/lib/device-inheritance";
 import { AuthError, signOutThisApp } from "@/lib/auth";
+import { initializeNativeNotifications } from "@/lib/native-notifications";
 import { resolveAuthGate, useAuthState } from "@/lib/use-auth";
 import { APP_VERSION } from "@/lib/app-version";
 import { formatUpdatedAt } from "@/lib/format-updated-at";
@@ -958,6 +959,13 @@ export function MyRoomDashboard() {
     const interval = setInterval(() => fetchData(), 30000);
     return () => clearInterval(interval);
   }, [isAuthenticated, layoutReady, fetchData]);
+
+  useEffect(() => {
+    // iOSアプリ（#526）でのAPNs通知（#527）。ログイン後、この画面が開いているあいだ
+    // 端末のトークンをバックエンドの登録と同期し続ける（通知設定シートを開いていなくてもよい）
+    if (!isAuthenticated) return;
+    return initializeNativeNotifications();
+  }, [isAuthenticated]);
 
   const handleLogout = () => {
     setIsAuthenticated(false);

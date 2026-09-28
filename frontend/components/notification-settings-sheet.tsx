@@ -3,16 +3,29 @@
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import {
+  fetchApnsStatus,
   fetchGarbageSchedule,
   fetchPushVapidPublicKey,
   fetchUiSettings,
+  sendTestApnsNotification,
   sendTestPushNotification,
   subscribePushNotifications,
   unsubscribePushNotifications,
   updateUiSettings,
 } from "@/lib/api";
 import type { GarbageCategoryNext } from "@/lib/garbage";
-import { isNativeApp } from "@/lib/native-app";
+import {
+  isNativeApp,
+  openNativeNotificationSettings,
+  queryNativeNotificationState,
+  type NativeNotificationState,
+} from "@/lib/native-app";
+import {
+  disableNativeNotifications,
+  enableNativeNotifications,
+  isNativeNotificationsEnabled,
+  subscribeNativeNotificationState,
+} from "@/lib/native-notifications";
 import {
   getExistingPushSubscription,
   getNotificationPermission,
@@ -223,6 +236,11 @@ export function NotificationSettingsSheet({ open, onClose }: NotificationSetting
   );
   const [subscribed, setSubscribed] = useState(false);
   const [vapidConfigured, setVapidConfigured] = useState(false);
+  const [nativePermission, setNativePermission] = useState<NativeNotificationState["permission"]>(
+    "default"
+  );
+  const [nativeEnabled, setNativeEnabled] = useState(false);
+  const [apnsConfigured, setApnsConfigured] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [garbageCategories, setGarbageCategories] = useState<GarbageCategoryNext[]>([]);
@@ -245,11 +263,22 @@ export function NotificationSettingsSheet({ open, onClose }: NotificationSetting
       setSupported(isPushNotificationsSupported());
       setPermission(getNotificationPermission());
 
-      try {
-        const { configured } = await fetchPushVapidPublicKey();
-        setVapidConfigured(configured);
-      } catch {
-        setVapidConfigured(false);
+      if (isNativeApp()) {
+        setNativeEnabled(isNativeNotificationsEnabled());
+        queryNativeNotificationState();
+        try {
+          const { configured } = await fetchApnsStatus();
+          setApnsConfigured(configured);
+        } catch {
+          setApnsConfigured(false);
+        }
+      } else {
+        try {
+          const { configured } = await fetchPushVapidPublicKey();
+          setVapidConfigured(configured);
+        } catch {
+          setVapidConfigured(false);
+        }
       }
 
       try {
@@ -268,6 +297,16 @@ export function NotificationSettingsSheet({ open, onClose }: NotificationSetting
   useEffect(() => {
     if (open) void refresh();
   }, [open, refresh]);
+
+  //: 開いているあいだ、アプリからの状態イベント（許可要求の結果・起動時の確認）を反映する。
+  //: バックエンドへの登録自体はダッシュボード側（initializeNativeNotifications）が持つため、
+  //: ここでは画面の表示だけを更新する
+  useEffect(() => {
+    if (!open || !isNativeApp()) return;
+    return subscribeNativeNotificationState((state) => {
+      setNativePermission(state.permission);
+    });
+  }, [open]);
 
   const saveSettings = async (patch: Partial<UiSettings>) => {
     if (!settings) return;
@@ -393,6 +432,43 @@ export function NotificationSettingsSheet({ open, onClose }: NotificationSetting
     }
   };
 
+  const handleEnableNative = () => {
+    setError("");
+    setInfo("");
+    setNativeEnabled(true);
+    // 許可要求〜バックエンド登録は非同期（結果は state イベント経由で反映される）
+    enableNativeNotifications();
+  };
+
+  const handleDisableNative = async () => {
+    setSaving(true);
+    setError("");
+    setInfo("");
+    try {
+      await disableNativeNotifications();
+      setNativeEnabled(false);
+      setInfo("この端末への配信を停止しました。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "無効化に失敗しました");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTestNative = async () => {
+    setSaving(true);
+    setError("");
+    setInfo("");
+    try {
+      const result = await sendTestApnsNotification();
+      setInfo(`テスト通知を送信しました（${result.sent}/${result.total} 件）`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "テスト送信に失敗しました");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -433,10 +509,56 @@ export function NotificationSettingsSheet({ open, onClose }: NotificationSetting
                 </p>
 
                 {isNativeApp() ? (
-                  // iOSアプリ（WKWebView）ではWeb Pushを受け取れない。ネイティブの通知は別Issue（#526）
-                  <p className="text-[13px] text-muted-foreground">
-                    iOSアプリではプッシュ通知を受け取れません。通知はホーム画面に追加したWeb版（PWA）で設定してください。
-                  </p>
+                  // iOSアプリ（WKWebView）ではWeb Pushの代わりにAPNsを使う（#527）。
+                  // Web版（PWA）とは別経路の登録のため、有効/無効・許可状態もここだけで完結する
+                  !apnsConfigured ? (
+                    <p className="text-[13px] text-muted-foreground">
+                      サーバー側でアプリの通知が未設定のため、いまは有効にできません。
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[15px] font-bold">アプリの通知を受け取る</p>
+                          <p className="mt-0.5 text-[11.5px] leading-relaxed text-muted-foreground">
+                            {nativePermission === "denied"
+                              ? "OSの通知が拒否されています。設定アプリから許可してください"
+                              : nativeEnabled
+                                ? "この端末は有効です"
+                                : "オフのままだとこの端末には配信されません"}
+                          </p>
+                        </div>
+                        <ToggleSwitch
+                          checked={nativeEnabled}
+                          disabled={saving || nativePermission === "denied"}
+                          label="アプリの通知を受け取る"
+                          onChange={(next) =>
+                            next ? handleEnableNative() : void handleDisableNative()
+                          }
+                        />
+                      </div>
+                      {nativePermission === "denied" && (
+                        <button
+                          type="button"
+                          onClick={() => openNativeNotificationSettings()}
+                          className="w-full rounded-xl border bg-muted/40 px-4 py-2.5 text-[13.5px] font-bold transition-colors hover:bg-accent"
+                        >
+                          設定アプリを開く
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={saving || !nativeEnabled || nativePermission !== "granted"}
+                        onClick={() => void handleTestNative()}
+                        className="w-full rounded-xl border bg-muted/40 px-4 py-2.5 text-[13.5px] font-bold transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        テスト通知を送信
+                      </button>
+                      <p className="text-[11px] leading-relaxed text-muted-foreground">
+                        ホーム画面に追加したWeb版（PWA）のプッシュ通知とは別経路です。両方を有効にすると、同じ通知がこの端末に2回届くことがあります。
+                      </p>
+                    </>
+                  )
                 ) : !supported ? (
                   <p className="text-[13px] text-muted-foreground">
                     このブラウザまたは環境ではプッシュ通知に対応していません。

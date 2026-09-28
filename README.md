@@ -988,6 +988,11 @@ ALTER 権限がない場合は、スクリプトが表示する SQL を管理者
 | `vapid-private-key` | PWAプッシュ通知（Web Push）用のVAPID秘密鍵（`VAPID_PRIVATE_KEY` として同期）。**PEM ではなく URL-safe base64 の 1 行（43 文字）** |
 | `vapid-public-key` | PWAプッシュ通知用のVAPID公開鍵（`VAPID_PUBLIC_KEY` として同期。URL-safe base64 の 1 行・87 文字） |
 | `vapid-subject` | PWAプッシュ通知用のVAPID subject（`VAPID_SUBJECT` として同期。例: `mailto:you@example.com`） |
+| `apns-auth-key` | iOSアプリ（`ios/`）向けAPNs通知（#527）用のAuth Key（`.p8`）。**PEMをそのまま入れず、ファイルの中身を1行のbase64にしてから**入れる（`base64 -i AuthKey_XXXX.p8 \| tr -d '\n'`）。`APNS_AUTH_KEY` として同期 |
+| `apns-key-id` | 上記Auth KeyのKey ID（Apple Developer Portal → Certificates, Identifiers & Profiles → Keys）。`APNS_KEY_ID` として同期 |
+| `apns-team-id` | Apple DeveloperのTeam ID。`ios/README.md` の個人チーム（`6AA3WFTR94`）と同じ値。`APNS_TEAM_ID` として同期 |
+| `apns-bundle-id` | iOSアプリのBundle ID（`com.gucchii.kurashio`）。`APNS_BUNDLE_ID` として同期 |
+| `apns-environment` | `sandbox` または `production`。`APNS_ENVIRONMENT` として同期。**無料の個人チーム署名では`aps-environment`エンタイトルメントが常に`development`になるため、TestFlight/App Store配布（対象外）をしない限りは`sandbox`のまま** |
 
 **VAPID 鍵の初回登録**（PWA プッシュ通知用・1 回だけ。#293・#337）:
 
@@ -1014,6 +1019,12 @@ cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/myroom --k
 **秘密鍵は PEM 形式では動きません。** `backend/push_notify.py` は環境変数の値をそのまま `pywebpush.webpush(vapid_private_key=...)` へ渡し、pywebpush は `py_vapid.Vapid01.from_string()` で読みます。`from_string()` は改行を落として base64 デコードするだけなので、`-----BEGIN PRIVATE KEY-----` を含む PEM は `Could not deserialize key data` で落ちます。加えて `deploy.yml` の `sync_env_var` は値を `KEY=値` の 1 行として `.env` へ書くため、複数行の PEM は `.env` の書式自体を壊します（python-dotenv が 2 行目以降を別のキーとして読む）。**1Password には必ず 1 行の URL-safe base64 を入れてください。**
 
 未設定でもデプロイは失敗せず、プッシュ通知機能だけが無効のままになります。
+
+**APNs Auth Key の初回登録**（iOSアプリ向け通知用・1 回だけ。#527）:
+
+1. Apple Developer Portal → Certificates, Identifiers & Profiles → Keys で、Apple Push Notifications service (APNs) にチェックを入れたKeyを作成し、`.p8` ファイルをダウンロードする（**ダウンロードは1回きり**）。合わせてKey IDを控える
+2. `base64 -i AuthKey_XXXXXXXXXX.p8 | tr -d '\n' > ~/.cache/myroom-apns/apns-auth-key && chmod 600 ~/.cache/myroom-apns/apns-auth-key`
+3. `provision-secret.sh`（上記VAPIDと同じ手順・`--from-stdin`＋ファイルからのリダイレクト）で `APNS_AUTH_KEY` / `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` / `APNS_ENVIRONMENT`（既定 `sandbox`）を登録する
 
 **アイテム `Notify`**（セキュアノート等・organization 共通。このリポジトリからは同期しない）
 

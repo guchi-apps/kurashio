@@ -2,14 +2,18 @@ import SwiftUI
 
 @main
 struct KurashioApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(appDelegate: appDelegate)
         }
     }
 }
 
 struct ContentView: View {
+    let appDelegate: AppDelegate
+
     @StateObject private var model = WebViewModel()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -28,10 +32,17 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: model.failure)
-        .onAppear { model.startIfNeeded() }
+        .onAppear {
+            appDelegate.webViewModel = model
+            model.startIfNeeded()
+            model.refreshNotificationAuthorizationStatus()
+        }
         .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
             // 別アプリへ行っているあいだに回線が戻っていることがある
-            if phase == .active, model.failure != nil { model.retry() }
+            if model.failure != nil { model.retry() }
+            // 別アプリ（設定アプリ）で通知の許可状態を変えて戻ってきたことがある（#527）
+            model.refreshNotificationAuthorizationStatus()
         }
     }
 }

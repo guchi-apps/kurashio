@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import datetime
 import random
 from dotenv import load_dotenv
-from . import database, weather, outdoor_config, device_config, aircon_config, aircon_control, bambu, bills, cleaning, cleaning_notion, energy, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, ui_settings
+from . import database, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, ui_settings
 from .auth import get_current_user
 from .internal_auth import require_internal_control_token, require_internal_token
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -343,6 +343,16 @@ class PushSubscriptionBody(BaseModel):
 
 class PushUnsubscribeRequest(BaseModel):
     endpoint: str
+
+
+class ApnsRegisterBody(BaseModel):
+    """iOSアプリ（#526）が取得したAPNsデバイストークン。"""
+
+    token: str
+
+
+class ApnsUnregisterRequest(BaseModel):
+    token: str
 
 
 class CleaningTaskUpdate(BaseModel):
@@ -1021,6 +1031,51 @@ def send_test_push(_: dict = Depends(get_current_user)):
     if not push_notify.is_configured():
         raise HTTPException(status_code=503, detail="Web Push is not configured")
     result = push_notify.send_test_push()
+    return {"status": "ok", **result}
+
+
+@app.get("/api/apns/status")
+def get_apns_status(_: dict = Depends(get_current_user)):
+    """iOSアプリ（#526）のAPNs通知がサーバー側で設定済みか。"""
+    return {"configured": apns_notify.is_configured()}
+
+
+@app.post("/api/apns/register")
+def register_apns_token(
+    body: ApnsRegisterBody,
+    request: Request,
+    _: dict = Depends(get_current_user),
+):
+    """この端末のAPNsデバイストークンを保存する。ログイン済みの操作でのみ受け付ける。"""
+    if not apns_notify.is_configured():
+        raise HTTPException(status_code=503, detail="APNs is not configured")
+    try:
+        apns_subscriptions.upsert_token(
+            body.token, user_agent=request.headers.get("user-agent", "")
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "ok"}
+
+
+@app.delete("/api/apns/register")
+def unregister_apns_token(
+    body: ApnsUnregisterRequest,
+    _: dict = Depends(get_current_user),
+):
+    """この端末のAPNsトークンを削除する。以後この端末へは配信しない。"""
+    removed = apns_subscriptions.remove_token(body.token)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Token not found")
+    return {"status": "ok"}
+
+
+@app.post("/api/apns/test")
+def send_test_apns(_: dict = Depends(get_current_user)):
+    """いま保存されているAPNsトークンすべてへテスト通知を送る。"""
+    if not apns_notify.is_configured():
+        raise HTTPException(status_code=503, detail="APNs is not configured")
+    result = apns_notify.send_test_push()
     return {"status": "ok", **result}
 
 
