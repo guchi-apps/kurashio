@@ -1,16 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppEntryScreen } from "@/components/app-entry-screen";
 import { Button } from "@/components/ui/button";
+import {
+  NATIVE_AUTH_CANCELLED_EVENT,
+  isNativeApp,
+  startNativeGoogleSignIn,
+} from "@/lib/native-app";
 import { supabase } from "@/lib/supabase-client";
+
+const SIGN_IN_FAILED = "Googleログインに失敗しました";
 
 function getInitialError(): string {
   if (typeof window === "undefined") return "";
-  const params = new URLSearchParams(window.location.search);
-  return params.get("authError") === "forbidden"
-    ? "このGoogleアカウントではログインできません"
-    : "";
+  const authError = new URLSearchParams(window.location.search).get("authError");
+  if (authError === "forbidden") return "このGoogleアカウントではログインできません";
+  // iOSアプリの認証シートから戻れなかったとき（ios/Kurashio/WebViewModel.swift）
+  if (authError === "failed") return SIGN_IN_FAILED;
+  return "";
 }
 
 /** Googleの公式ロゴ。色は指定どおりに固定するため、テーマで変えない */
@@ -41,15 +49,33 @@ export function LoginScreen() {
   const [error, setError] = useState(getInitialError);
   const [signingIn, setSigningIn] = useState(false);
 
+  // iOSアプリで認証シートを閉じられたら、ボタンを押せる状態へ戻す
+  useEffect(() => {
+    const handleCancelled = () => setSigningIn(false);
+    window.addEventListener(NATIVE_AUTH_CANCELLED_EVENT, handleCancelled);
+    return () => window.removeEventListener(NATIVE_AUTH_CANCELLED_EVENT, handleCancelled);
+  }, []);
+
   const handleClick = async () => {
     setError("");
     setSigningIn(true);
+
+    // iOSアプリの中では、Googleが埋め込みブラウザでのログインを拒むため、
+    // 認証シート（アプリ側）へ認可URLを渡して往復する（#526）
+    if (isNativeApp()) {
+      if (!(await startNativeGoogleSignIn())) {
+        setError(SIGN_IN_FAILED);
+        setSigningIn(false);
+      }
+      return;
+    }
+
     const { error: signInError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo: `${window.location.origin}/auth/callback` },
     });
     if (signInError) {
-      setError("Googleログインに失敗しました");
+      setError(SIGN_IN_FAILED);
       setSigningIn(false);
     }
   };

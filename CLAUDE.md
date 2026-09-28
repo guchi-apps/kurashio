@@ -149,6 +149,26 @@ Supabase は共有プロジェクトで、`signOut()` を引数なしで呼ぶ�
 `AppEntryScreen` にアイコン・アプリ名・説明文の配置を固定し、下段のブロックだけを差し替える。
 片方だけ余白を変えると、切り替わった瞬間に要素が飛び跳ねる。
 
+## iOSアプリ（`ios/`）とのつなぎ目
+
+**`ios/` は Web版を WKWebView で開くだけの殻**（#526）。ビルド手順・Web版との更新対象の違いは
+`ios/README.md`。subpc には Xcode が無いので、Swift の変更はビルドを確かめられないまま渡る
+（Mac mini と実機で確認する）。Web側の分岐は `frontend/lib/native-app.ts` の `isNativeApp()`
+（ブリッジ `window.webkit.messageHandlers.kurashioAuth` の有無）に集め、**Web・PWA の挙動は変えない。**
+
+- **Googleログインはアプリ内だけ PKCE。共有クライアント（`lib/supabase-client.ts`）の flowType を
+  変えないこと。** implicit のまま `/auth/callback` の通知（#240）が動いている。アプリ内の PKCE
+  クライアントは `code_verifier` だけを共有クライアントと同じキーで localStorage に置き、
+  **セッションは持たない**（2つのクライアントが同じ refresh token を更新し合うとログアウトされる）
+- **戻った `code` の交換は既存の `/auth/callback` に任せる。** アプリは WebView で
+  `/auth/callback?code=…` を開くだけで、許可チェック（`/api/auth/me`）と通知を1か所に保つ。
+  共有（implicit）クライアントは `?code` を自動処理しようとして失敗するが、`code_verifier` を
+  消さないので、そのあとのページ側の `exchangeCodeForSession` は通る（auth-js 2.110 で確認）
+- 戻り先 `kurashio://auth-callback` は Supabase の許可リダイレクトURLへの登録が要る。
+  Swift の `AppConfig.authCallbackScheme` と `NATIVE_AUTH_REDIRECT` を揃えること
+- WKWebView では Service Worker・Web Push が使えない。`window.confirm()` はアプリ側で実装している
+  （無いと常に false になり、記録の削除が効かない）
+
 ## 設定への入口
 
 **設定を開くボタンは `components/ui/settings-icon-button.tsx` に統一する**（#277）。
