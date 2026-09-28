@@ -1,4 +1,4 @@
-# MyRoom
+# kurashio
 
 部屋の環境データ（温度、湿度、気圧、CO2、照度など）を可視化するアプリケーションです。ログイン後にダッシュボードで履歴グラフ・センサー一覧・記録を確認でき、Raspberry Pi からセンサー／エアコンデータを POST できます。
 
@@ -304,13 +304,13 @@ curl -X POST "https://myroom.gucchii.com/api/sensor?device=2" \
 
 ### エアコン（白くまくんアプリ / AirCloud Home + Raspberry Pi）
 
-日立ルームエアコン（白くまくんアプリ対応機）の状態を **AirCloud Home クラウド API** 経由で取得し、MyRoom に送信できます。
+日立ルームエアコン（白くまくんアプリ対応機）の状態を **AirCloud Home クラウド API** 経由で取得し、kurashio に送信できます。
 
 **前提**
 
 - 白くまくんアプリでアカウント登録・エアコン登録済み
 - エアコンが Wi-Fi に接続済み
-- Raspberry Pi（または cron 実行可能な Linux マシン）から HTTPS で MyRoom API に到達できること
+- Raspberry Pi（または cron 実行可能な Linux マシン）から HTTPS で kurashio API に到達できること
 
 **本番 URL**
 
@@ -339,7 +339,7 @@ Raspberry Pi 上のスクリプトは [guchi-apps/pi0w_260719](https://github.co
 > **設定温度は自動運転のときだけ意味が変わる。**
 > AirCloud Home は自動運転（eco を含む）のとき、設定温度として**温度そのものではなく室温からのシフト量**
 > （おおむね -3.0〜+3.0、0 はシフトなし）を返す。つまり `target_temperature: 1.0` は「1℃」ではなく
-> 「室温 +1.0℃」を意味する。固定の設定温度は 16〜32℃ の範囲にしかならないため、MyRoom は絶対値が
+> 「室温 +1.0℃」を意味する。固定の設定温度は 16〜32℃ の範囲にしかならないため、kurashio は絶対値が
 > 5.0 以下かどうかで両者を切り分けている（`frontend/lib/types.ts` の `AIRCON_AUTO_TARGET_OFFSET_LIMIT`、
 > `backend/main.py` の `_is_aircon_auto_target()`）。グラフでは自動運転の区間だけ
 > 「室温 + シフト量」の位置に点線で描く。年グラフは日ごとの平均を出すため、シフト量と絶対温度は
@@ -393,7 +393,7 @@ AIRCON_PASSWORD=your_password
 
 > **自動運転のときだけ温度の入れ先が違う。** `iduTemperature` は設定温度そのもので、
 > 室温からのシフト量は `relativeTemperature` に入れます。**読むときは逆で、自動運転でも
-> シフト量は `iduTemperature` に現れます**（実機で確認済み）。MyRoom は画面もDBも
+> シフト量は `iduTemperature` に現れます**（実機で確認済み）。kurashio は画面もDBも
 > `target_temperature` 1つで扱うため、この振り分けは `build_command_body()` が持ちます。
 
 > **操作の結果がDBに入るのはラズパイの取り込み（5分ごと）待ち。** 操作パネルとカードは、

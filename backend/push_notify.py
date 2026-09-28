@@ -105,7 +105,7 @@ def broadcast(payload: Dict[str, Any]) -> Dict[str, int]:
 def send_test_push() -> Dict[str, int]:
     return broadcast(
         {
-            "title": "🔔 マイルーム テスト通知",
+            "title": "🔔 kurashio テスト通知",
             "body": "プッシュ通知は正常に届いています。",
             "tag": "myroom-push-test",
             "url": "/",
