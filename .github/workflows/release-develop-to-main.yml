@@ -57,7 +57,13 @@ jobs:
       # 環境変数から読む（npm lifecycle 経由で実行される前提の作り）ため、直接実行する
       # ときは明示的に渡す必要がある。** フックが行う git add は、共有ワークフローが
       # bumpコミット前に git add -A するため不要。
-      bump-command: npm version "$NEW_VERSION" --no-git-tag-version --prefix frontend --ignore-scripts && npm_package_version="$NEW_VERSION" node frontend/scripts/version-changelog.mjs
+      #
+      # iOSアプリ（ios/）のXcodeプロジェクトが持つ MARKETING_VERSION も、ここで同時に
+      # frontend/package.json の値へ同期する（#535）。ios/scripts/sync-version.mjs は
+      # npm_package_version ではなく frontend/package.json を直接読むため、上の npm version
+      # で書き換わった後であれば環境変数を渡す必要はない。手作業でMac miniビルド前に揃える
+      # 運用だと、次のリリースで再びずれて未コミットの差分が残るため、bump時点で揃える形にした。
+      bump-command: npm version "$NEW_VERSION" --no-git-tag-version --prefix frontend --ignore-scripts && npm_package_version="$NEW_VERSION" node frontend/scripts/version-changelog.mjs && node ios/scripts/sync-version.mjs
     secrets: inherit
     # **呼ばれる側の権限はcallerの付与範囲を超えられない。** issues が write なのは、
     # 呼ばれる側の notify-failure ジョブがリリース対象issueへ失敗を通知するため。
