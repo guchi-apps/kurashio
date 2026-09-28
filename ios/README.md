@@ -19,7 +19,7 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 | 画面・機能（`frontend/`・`backend/`） | main へマージ → 自動デプロイ | **何もしなくてよい。** 次に開いたとき（または10分ごとの更新チェック #277）にWeb版の新しいビルドが出る |
 | アプリの殻（`ios/`） | 影響なし（`out/` 以外は配信されない） | Mac mini でビルドし直して iPhone へ入れ直す |
 | アイコン（`frontend/assets/kurashio-app-icon.png`） | `node scripts/generate-icons.mjs`（`frontend/`で実行） | 同じスクリプトで `ios/.../AppIcon.appiconset` も書き出される。**そのあとビルドし直す** |
-| バージョン | `frontend/package.json`（changelog と揃える） | Xcode の `MARKETING_VERSION`（`ios/` を変えたときだけ上げる） |
+| バージョン | `frontend/package.json`（changelog と揃える） | Xcode の `MARKETING_VERSION`。ビルド前に `node ios/scripts/sync-version.mjs` で `frontend/package.json` の値へ同期する（#535） |
 
 **Web版とiOS版のリリースは独立しています。** Web版を main へ出すたびにアプリを入れ直す必要はありません。
 
@@ -43,6 +43,7 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 ```bash
 cd ~/apps/myroom        # Mac mini 上のチェックアウト
 git pull
+node ios/scripts/sync-version.mjs   # MARKETING_VERSION を frontend/package.json に合わせる
 open ios/Kurashio.xcodeproj
 ```
 
