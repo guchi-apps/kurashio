@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase-client";
 import { unregisterNativeNotificationsBestEffort } from "@/lib/native-notifications";
+import { syncWidgetSnapshot } from "@/lib/native-app";
 
 export class AuthError extends Error {
   constructor(message = "Authentication required") {
@@ -23,6 +24,8 @@ export async function getAccessToken(): Promise<string | null> {
 export async function signOutThisApp(): Promise<void> {
   // セッションが切れる前に解除する（解除自体は認証済みAPIのため。#527）
   await unregisterNativeNotificationsBestEffort();
+  // ホーム画面ウィジェット（#537）に前の利用者の値を残さない
+  syncWidgetSnapshot(null);
   await supabase.auth.signOut({ scope: "local" });
 }
 

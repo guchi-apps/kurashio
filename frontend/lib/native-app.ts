@@ -138,3 +138,39 @@ export async function startNativeGoogleSignIn(): Promise<boolean> {
   bridge.postMessage({ type: "signIn", url: data.url });
   return true;
 }
+
+/** iPhoneのホーム画面ウィジェット（`ios/KurashioWidget/`）が表示する値 */
+export interface WidgetSnapshot {
+  roomTemperature: number | null;
+  roomHumidity: number | null;
+  /** 次に収集される品目名（複数なら「・」区切り）。予定が無ければ null */
+  garbageLabel: string | null;
+  /** 上記の収集日までの日数（0=今日、1=明日）。`garbageLabel` が null なら意味を持たない */
+  garbageDaysUntil: number | null;
+  todayKwh: number | null;
+  todayCostYen: number | null;
+}
+
+/**
+ * ダッシュボードが表示している値を、ホーム画面ウィジェット用にアプリ（Swift）へ渡す（#537）。
+ *
+ * ウィジェットはWKWebViewの外（別プロセス）で動くため、このページが持つ値を直接読めない。
+ * **Supabaseのセッション（JWT）は渡さない。** ウィジェットが独自にrefresh tokenを更新すると、
+ * WKWebView側のクライアントと同じrefresh tokenを奪い合ってログアウトを引き起こすため
+ * （`ios/README.md`「表示用データだけをApp Group経由で共有する」参照）。渡すのは表示用の
+ * 値だけで、ウィジェットはこれをそのまま出すだけになる。**アプリの外（Web・PWA）では何もしない。**
+ *
+ * @param snapshot 表示中の値。ログアウト直後など出す値が無いときは `null`
+ * @returns アプリへ渡せたか（アプリの外なら false）
+ */
+export function syncWidgetSnapshot(snapshot: WidgetSnapshot | null): boolean {
+  const bridge = getBridge();
+  if (!bridge) return false;
+
+  if (snapshot) {
+    bridge.postMessage({ type: "widgetSnapshot", snapshot });
+  } else {
+    bridge.postMessage({ type: "widgetSnapshotCleared" });
+  }
+  return true;
+}

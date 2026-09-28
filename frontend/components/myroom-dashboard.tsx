@@ -24,6 +24,7 @@ import {
 } from "@/components/cleaning-detail-panel";
 import { ComingSoonCard } from "@/components/coming-soon-card";
 import { GarbageCard } from "@/components/garbage-card";
+import { NativeWidgetSnapshotSync } from "@/components/native-widget-snapshot-sync";
 import { PowerCard } from "@/components/power-card";
 import { RemoteCard, type RemoteAirconEntry } from "@/components/remote-card";
 import { BillDetailPanel } from "@/components/bill-detail-panel";
@@ -119,7 +120,8 @@ import type {
   CleaningTask,
   CleaningTaskInput,
 } from "@/lib/cleaning";
-import type { GarbageSchedule } from "@/lib/garbage";
+import { buildGarbageHighlight, type GarbageSchedule } from "@/lib/garbage";
+import type { WidgetSnapshot } from "@/lib/native-app";
 import {
   countRemoteButtons,
   countVisibleRemoteButtons,
@@ -1135,8 +1137,22 @@ export function MyRoomDashboard() {
       })
     : null;
 
+  // iOSアプリのホーム画面ウィジェット（#537）へ渡す値。JWTは含めず、表示中の値だけを渡す
+  const garbageHighlight = garbageSchedule ? buildGarbageHighlight(garbageSchedule) : null;
+  const widgetSnapshot: WidgetSnapshot = {
+    roomTemperature: latestData?.temperature ?? null,
+    roomHumidity: latestData?.humidity ?? null,
+    garbageLabel: garbageHighlight
+      ? garbageHighlight.day.categories.map((category) => category.name).join("・")
+      : null,
+    garbageDaysUntil: garbageHighlight?.day.days_until ?? null,
+    todayKwh: energyBreakdown?.today.kwh ?? null,
+    todayCostYen: energyBreakdown?.today.cost_yen ?? null,
+  };
+
   return (
     <div className="w-full pb-10">
+      <NativeWidgetSnapshotSync snapshot={widgetSnapshot} />
       {/*
         ヘッダーは「いつのデータか」と「アプリの操作」がまとまる場所（#277）。右の3つは
         左から データを取り直す・部屋のようす・アプリ全体の設定。フッターは設定シートへ畳んだ。

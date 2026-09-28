@@ -21,6 +21,8 @@ import {
   queryNativeNotificationState,
   requestNativeNotificationPermission,
   startNativeGoogleSignIn,
+  syncWidgetSnapshot,
+  type WidgetSnapshot,
 } from "@/lib/native-app";
 
 function installBridge() {
@@ -114,5 +116,35 @@ describe("ネイティブ通知（#527）のブリッジ呼び出し", () => {
     const postMessage = installBridge();
     expect(fn()).toBe(true);
     expect(postMessage).toHaveBeenCalledWith({ type });
+  });
+});
+
+describe("syncWidgetSnapshot", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const snapshot: WidgetSnapshot = {
+    roomTemperature: 24.6,
+    roomHumidity: 58,
+    garbageLabel: "燃えるゴミ",
+    garbageDaysUntil: 1,
+    todayKwh: 9.4,
+    todayCostYen: 312,
+  };
+
+  it("アプリの外では何もせず false を返す", () => {
+    vi.stubGlobal("window", {});
+    expect(syncWidgetSnapshot(snapshot)).toBe(false);
+  });
+
+  it("アプリの中では、渡された値をそのままウィジェット用として送る（JWTは含めない）", () => {
+    const postMessage = installBridge();
+    expect(syncWidgetSnapshot(snapshot)).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({ type: "widgetSnapshot", snapshot });
+  });
+
+  it("null を渡すとクリアの合図を送る（ログアウト時）", () => {
+    const postMessage = installBridge();
+    expect(syncWidgetSnapshot(null)).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({ type: "widgetSnapshotCleared" });
   });
 });
