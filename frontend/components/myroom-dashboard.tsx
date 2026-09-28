@@ -1139,16 +1139,27 @@ export function MyRoomDashboard() {
 
   // iOSアプリのホーム画面ウィジェット（#537）へ渡す値。JWTは含めず、表示中の値だけを渡す
   const garbageHighlight = garbageSchedule ? buildGarbageHighlight(garbageSchedule) : null;
-  const widgetSnapshot: WidgetSnapshot = {
-    roomTemperature: latestData?.temperature ?? null,
-    roomHumidity: latestData?.humidity ?? null,
-    garbageLabel: garbageHighlight
-      ? garbageHighlight.day.categories.map((category) => category.name).join("・")
-      : null,
-    garbageDaysUntil: garbageHighlight?.day.days_until ?? null,
-    todayKwh: energyBreakdown?.today.kwh ?? null,
-    todayCostYen: energyBreakdown?.today.cost_yen ?? null,
-  };
+  const roomTemperature = latestData?.temperature ?? null;
+  const roomHumidity = latestData?.humidity ?? null;
+  const garbageLabel = garbageHighlight
+    ? garbageHighlight.day.categories.map((category) => category.name).join("・")
+    : null;
+  const garbageDaysUntil = garbageHighlight?.day.days_until ?? null;
+  const todayKwh = energyBreakdown?.today.kwh ?? null;
+  const todayCostYen = energyBreakdown?.today.cost_yen ?? null;
+  // 無関係な再描画のたびにWidgetの再読み込み（WidgetKitの1日あたりの上限あり）が
+  // 走らないよう、値の中身が変わったときだけ新しいオブジェクトを作る
+  const widgetSnapshot: WidgetSnapshot = useMemo(
+    () => ({
+      roomTemperature,
+      roomHumidity,
+      garbageLabel,
+      garbageDaysUntil,
+      todayKwh,
+      todayCostYen,
+    }),
+    [roomTemperature, roomHumidity, garbageLabel, garbageDaysUntil, todayKwh, todayCostYen]
+  );
 
   return (
     <div className="w-full pb-10">
