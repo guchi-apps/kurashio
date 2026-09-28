@@ -109,6 +109,26 @@
   --chart-line: rgba(255, 255, 255, 0.2);
 }
 
+/*
+ * iOS 27のPWAは、安全領域の下端から一定距離（他プロジェクトの実機実測で約40〜45pt）に
+ * 固定でステータスバーのぼかしを重ねる。#517までの対策（WebKitに固定ヘッダーの実在を
+ * 誤認させるCSSトリック）はiOS 26までは効いたが、iOS 27には効かないことを実機で確認した
+ * （#521）。ぼかし自体は消せないため、その範囲にヘッダーのロゴ・アイコンを置かないよう、
+ * PWA standalone時だけダッシュボードのヘッダーへ追加の余白を持たせる。通常のブラウザ表示・
+ * Androidでは0のまま（`-webkit-touch-callout`はWebKit系だけが持つプロパティ）
+ */
+:root {
+  --pwa-header-safe-gap: 0px;
+}
+
+@supports (-webkit-touch-callout: none) {
+  @media (display-mode: standalone), (display-mode: fullscreen) {
+    :root {
+      --pwa-header-safe-gap: 44px;
+    }
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
