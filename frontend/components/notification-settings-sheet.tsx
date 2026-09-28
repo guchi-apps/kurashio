@@ -441,7 +441,7 @@ export function NotificationSettingsSheet({ open, onClose }: NotificationSetting
                   <p className="text-[13px] text-muted-foreground">
                     このブラウザまたは環境ではプッシュ通知に対応していません。
                     {isIosNotInstalledPwa()
-                      ? " iPhoneでは、ホーム画面に追加したマイルームを開いてから有効にしてください。"
+                      ? " iPhoneでは、ホーム画面に追加したkurashioを開いてから有効にしてください。"
                       : ""}
                   </p>
                 ) : !vapidConfigured ? (

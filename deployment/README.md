@@ -1,4 +1,4 @@
-# MyRoom Deployment Guide
+# kurashio Deployment Guide
 
 Production URL: **https://myroom.gucchii.com/**
 

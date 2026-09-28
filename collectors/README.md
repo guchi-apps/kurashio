@@ -1,6 +1,6 @@
 # collectors — サブPCで動かす収集スクリプト
 
-MyRoom へデータを送る収集処理のうち、**外部のクラウドAPIを叩くだけで完結するもの**を置く。
+kurashio へデータを送る収集処理のうち、**外部のクラウドAPIを叩くだけで完結するもの**を置く。
 
 ```
 AirCloud Home (白くまくんアプリ)        はぴeみる電のお知らせメール (Gmail)
@@ -37,9 +37,9 @@ AirCloud Home から日別の電力使用量（kWh）と電気代（円）を取
 - **エネルギー取得APIは期間の合計しか返さない**（`POST /rac/energy-consumptions/summary/v3?familyId=...`
   に `{"from": ..., "to": ...}` を渡す）。日別が要るので、**日付ごとに `from` と `to` に同じ日を入れて**引いている
 - **応答には `energyConsumed`（kWh）だけでなく `cost`（円）も入っている。** これを `cost_yen` として
-  送るので、エアコンの金額は MyRoom 側で単価を掛けた目安ではなく**白くまくんアプリと同じ実額**になる
+  送るので、エアコンの金額は kurashio 側で単価を掛けた目安ではなく**白くまくんアプリと同じ実額**になる
   （`allRacsData.currency` が `JPY` 以外なら送らない）
-- **同じ `(date, source)` は MyRoom 側で上書きされる。** 当日ぶんは1日のあいだ増えていくため、
+- **同じ `(date, source)` は kurashio 側で上書きされる。** 当日ぶんは1日のあいだ増えていくため、
   何度送っても二重計上にならない。既定では当日と前日の2日ぶんを送り直す（`ENERGY_DAYS`）
 - 複数台ある場合は**全台の合計**を送る。1台だけにしたいときは `--unit`（`racName` か `vendorThingId`）
 - レート制限（429）に当たったら、理由を出して終了コード1で終わる。次回の実行で取り直せばよい
@@ -224,7 +224,7 @@ python3 collectors/kepco_bill_to_myroom.py
 ## bambu_to_myroom.py
 
 Bambu Lab A1 mini の状態を**LAN内のローカルMQTT**（TLS・8883）から読み、`POST /api/bambu/state`
-へ送る（#428）。MyRoom は正規化して `app_settings` の `bambu_printer_state` に**最新の1件だけ**を
+へ送る（#428）。kurashio は正規化して `app_settings` の `bambu_printer_state` に**最新の1件だけ**を
 持ち、`GET /api/internal/bambu/printer`（`INTERNAL_API_KEY` の Bearer）で返す。
 
 **読み取りのみ。印刷を操作するコマンドは送らない。** 例外は状態の再要求（`pushing.pushall`）だけ。
@@ -246,7 +246,7 @@ A1 mini ──MQTT/TLS 8883──▶ サブPC（常駐 service）──HTTPS─�
   1回要求して全状態（約65項目）を受け取り、以降の差分を重ねる。**P1/A1 系は更新値のみを送る
   作りなので `pushall` は5分以上あける**（再接続が続いても割らない）
 - **古い値を現在値として返さない。** 収集は変化のたびと、変化が無くても60秒ごとに送る。
-  MyRoom は最後の受信から180秒（`BAMBU_STALE_SECONDS`）を超えると `connection: "collector_stale"`、
+  kurashio は最後の受信から180秒（`BAMBU_STALE_SECONDS`）を超えると `connection: "collector_stale"`、
   プリンターに繋がっていないと `"printer_offline"` にし、どちらも現在値（`printer`）を `null`
   にして最後の値を `lastKnown` へ分ける
 - 証明書は BBL CA による自己署名。プリンター自身の証明書を信頼の起点にして、ホスト名の検証だけを省く
@@ -263,13 +263,13 @@ A1 mini ──MQTT/TLS 8883──▶ サブPC（常駐 service）──HTTPS─�
 
 - **追加の依存は無い。** `ftplib`・`zipfile`（標準ライブラリ）だけ。接続情報も MQTT と同じ3項目
 - **造形の開始ごとに `job_key`（`<ファイル名>@<開始時刻>`）を作る。** 同じファイルの再印刷は別の造形。
-  MyRoom はこれで使用量を二重に引かない。**収集を再起動すると、造形の途中でも新しい `job_key` になる**
+  kurashio はこれで使用量を二重に引かない。**収集を再起動すると、造形の途中でも新しい `job_key` になる**
   （引くのは終わった瞬間の1回だけなので、二重にはならない）
 - 3mf は FTPS を別スレッドで読む（数秒かかる）。**読めなければ 5・30・120 秒あけて再試行し、それでも
   だめならその造形は諦める**（`3mf から使用量を読めませんでした` の WARNING。手入力で直せる）。
   クラウド経由の印刷・SDカードなし・複数プレートの 3mf は読めない（INFO のログだけ）
-- 造形が終わっても `job_filament` は次の造形が始まるまで送り続ける（完了の瞬間に MyRoom が受け取るため）
-- MyRoom は**完了（FINISH）で予定値そのまま、停止（FAILED）で進捗率で按分した概算**を、
+- 造形が終わっても `job_filament` は次の造形が始まるまで送り続ける（完了の瞬間に kurashio が受け取るため）
+- kurashio は**完了（FINISH）で予定値そのまま、停止（FAILED）で進捗率で按分した概算**を、
   **使用中のスプール**へ自動で記録する。使うフィラメントが1色のときだけ（複数色は引かない）。
   使用中のスプールを外しておけば自動では引かれない
 - 確認は `--dry-run` で足りる（`job_filament=` の行が出る）
@@ -324,7 +324,7 @@ curl -s -H "Authorization: Bearer $INTERNAL_API_KEY" http://localhost:8000/api/i
 |---|---|
 | `既知のリストに無い項目が届きました` | `print` に新しい項目が増えた。`KNOWN_PRINT_KEYS`（`bambu_to_myroom.py`）へ足すか、必要なら正規化（`backend/bambu.py`）へ取り込む |
 | `全状態に想定している項目がありません` | 項目名が変わった。正規化がその項目を `null` で返し続けるので、`EXPECTED_KEYS`（両方）と `build_snapshot()` を直す |
-| `未知の gcode_state を受け取りました` | 状態が増えた（MyRoom 側のログ）。`STATE_MAP`（`backend/bambu.py`）へ足す。それまで `state` は `"unknown"` |
+| `未知の gcode_state を受け取りました` | 状態が増えた（kurashio 側のログ）。`STATE_MAP`（`backend/bambu.py`）へ足す。それまで `state` は `"unknown"` |
 | `print 以外の種別のメッセージ` | `report` に `print` 以外（`info`・`system` など）が流れ始めた |
 | `pushall に…応答がありません` | 要求の間隔が短すぎる、または `pushall` の仕様が変わった |
 | `TLS の証明書検証に失敗しました` | 繋ぎ先がプリンターではない、または証明書が変わった |
