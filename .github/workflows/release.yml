@@ -60,7 +60,7 @@ jobs:
         env:
           SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
           NOTIFY_STATUS: ${{ needs.release.result }}
-          NOTIFY_APP: MyRoom
+          NOTIFY_APP: kurashio
           SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}
           NOTIFY_KIND: リリース
           NOTIFY_VERSION: ${{ github.ref_name }}
