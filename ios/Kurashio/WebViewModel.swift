@@ -4,6 +4,7 @@ import SwiftUI
 import UIKit
 import UserNotifications
 import WebKit
+import WidgetKit
 
 /// Web版を開く WKWebView と、その読み込み状態を持つ。
 final class WebViewModel: NSObject, ObservableObject {
@@ -97,6 +98,13 @@ final class WebViewModel: NSObject, ObservableObject {
 
     private func openExternally(_ url: URL) {
         UIApplication.shared.open(url)
+    }
+
+    /// ウィジェットの表示データ（`SharedWidgetSnapshot`）が変わった直後に呼ぶ。
+    /// Widgetは自発的に再読み込みしない設計（`KurashioTimelineProvider`の`.never`ポリシー）のため、
+    /// 変化のたびにこちらから明示的に再評価を促す
+    private func reloadWidgetTimelines() {
+        WidgetCenter.shared.reloadTimelines(ofKind: "KurashioWidget")
     }
 
     private func finishSignIn(_ result: NativeAuthResult) {
@@ -258,6 +266,18 @@ extension WebViewModel: WKScriptMessageHandler {
             refreshNotificationAuthorizationStatus()
         case "openSystemSettings":
             openSystemSettings()
+        case "widgetSnapshot":
+            // ホーム画面ウィジェット（#537）が表示する値を、ダッシュボードが開かれているあいだ
+            // App Group共有のUserDefaultsへ書き写す（`frontend/lib/native-app.ts` の
+            // `syncWidgetSnapshot()` が送ってくる）。**JWTは一切渡さない**——Widget（別プロセス）が
+            // 独自にrefresh tokenを更新すると、WKWebView側のクライアントと同じrefresh tokenを
+            // 奪い合ってログアウトを引き起こすため（`CLAUDE.md`「iOSアプリとのつなぎ目」参照）
+            guard let snapshot = body["snapshot"] as? [String: Any] else { return }
+            SharedWidgetSnapshot.save(snapshot)
+            reloadWidgetTimelines()
+        case "widgetSnapshotCleared":
+            SharedWidgetSnapshot.clear()
+            reloadWidgetTimelines()
         default:
             break
         }

@@ -167,3 +167,55 @@ Web版のプッシュ通知の設定とは独立**で、同じiPhoneでPWA（Saf
 
 - 外部サイトへのリンク・`target="_blank"` は Safari 等で開く（Web版の画面だけをアプリの中で開く）
 - `window.confirm()`（記録の削除など）はアプリ側でダイアログを出す。実装しないと常に「キャンセル」になる
+
+## ホーム画面ウィジェット（`KurashioWidget`・#537）
+
+室温・ゴミの日・今日の電気量を表示する、iOS標準のホーム画面ウィジェット（Small/Large）。
+**電気の操作（ボタン押下）は含まない**（インタラクティブWidget用のAppIntent実装が別途必要なため、
+フォローアップIssueへ切り出した）。
+
+### 表示用データだけをApp Group経由で共有する（JWTは渡さない）
+
+WKWebView が持つ Supabase セッションは、Swift 側から本来アクセスできない（前述のGoogleログインの節）。
+Widget はメインアプリの外（別プロセス）で動くため、当初はセッション（JWT）そのものをApp Group共有の
+Keychainへ書き写し、Widget側でバックエンドAPIを直接叩く設計を検討したが、**計画レビューの指摘で撤回した**。
+アプリ内のPKCEクライアントの節にあるとおり、**2つのクライアントが同じrefresh tokenを更新し合うと
+ログアウトされる**（Supabaseの既定挙動）。Widgetが独自にrefresh tokenを使ってトークン更新すると、
+WKWebView側のセッションを巻き込んでこの問題を再現してしまう。
+
+代わりに、**ダッシュボードが表示している値そのもの**（室温・湿度・次のゴミ収集・今日の電気量）を
+App Group共有のUserDefaultsへ書き写す方式にした。
+
+1. `frontend/lib/native-app.ts` の `syncWidgetSnapshot()` が、ダッシュボード（`/`）が開かれている
+   あいだ、表示中の値をブリッジ（`kurashioAuth`）へ `{type: "widgetSnapshot", snapshot: {...}}` として
+   送る（`components/native-widget-snapshot-sync.tsx` がダッシュボードでだけ呼ぶ）。ログアウト時は
+   `{type: "widgetSnapshotCleared"}` を送る
+2. `WebViewModel.swift` がこれを受け、`SharedWidgetSnapshot.swift`（App Group共有のUserDefaults）へ
+   書き写す
+3. Widget の `KurashioTimelineProvider` はこれを読むだけで、**ネットワーク通信・トークンの
+   リフレッシュは一切行わない**
+
+トレードオフとして、**Widgetのデータはダッシュボードを開いたときにしか更新されない**
+（バックグラウンドでの自動更新は行わない）。認証の仕組みを増やさずに済むことを優先した。
+
+**`SharedWidgetSnapshot.swift` はメインApp・Widget Extensionの両方のフォルダに同じ内容を置いている。**
+Xcode16のファイルシステム同期グループ（`PBXFileSystemSynchronizedRootGroup`）は1ファイルが
+1つのtargetにしか属せないため、共有コードを物理的に複製する形にした。変更するときは
+`ios/Kurashio/SharedWidgetSnapshot.swift` と `ios/KurashioWidget/SharedWidgetSnapshot.swift` の
+両方を揃えること。
+
+### App Group の登録が必要（初回だけ）
+
+**Widgetが動くには、Apple Developer PortalでのApp Group（`group.com.gucchii.kurashio`）登録と、
+Xcodeでの両target（`Kurashio`・`KurashioWidgetExtension`）へのApp Groups Capability追加が要る。**
+`entitlements` ファイル自体はリポジトリに含めたが、Developer Portal側の登録はコードだけでは
+完結しない。手順は起票済みの手作業Issueを参照。
+
+### project.pbxproj はXcodeでの確認が前提
+
+**`KurashioWidgetExtension` ターゲットは、Xcodeを使わずテキスト編集で `project.pbxproj` へ
+直接追加した。** 新規target・依存関係・Embed Foundation Extensionsのビルドフェーズを、
+相互参照するID（24桁hex）を手作業で生成して組んでいる。括弧の対応・ID参照の整合性は
+スクリプトで機械的に確認したが、**Xcodeでの実際のビルドは未確認。** Mac miniで開いて
+初回ビルドがうまくいかない場合、Xcodeが提案する自動修正（署名・Capabilities周り）を
+受け入れて直してよい。
