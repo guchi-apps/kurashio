@@ -118,6 +118,18 @@ def mock_weather(monkeypatch):
     monkeypatch.setattr("backend.weather.search_locations", search_locations)
 
 
+@pytest.fixture(autouse=True)
+def isolate_shared_token(monkeypatch):
+    """開発機の .env に共有トークンAPIの設定があっても、テストが外へ出ないようにする（#525）。"""
+    from backend import shared_token
+
+    monkeypatch.delenv("SHARED_TOKEN_API_SECRET", raising=False)
+    monkeypatch.delenv("SHARED_TOKEN_API_URL", raising=False)
+    shared_token.clear_cache()
+    yield
+    shared_token.clear_cache()
+
+
 @pytest.fixture
 def internal_api_key(monkeypatch):
     """サーバー間参照用トークンを設定する。未設定（503）の確認をする側は使わない。"""

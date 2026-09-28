@@ -819,7 +819,7 @@ DaySpan・AIDE が読むタスク一覧に「次の掃除」を並べること�
 
 `GET /api/internal/room-state` は、同じ VPS 上で動く [AIDE](https://github.com/guchi-apps/aide) の
 MCP ツール `aide_room_status` 向けの**読み取り専用**の口です。ログインセッションでは通らず、
-環境変数 `INTERNAL_API_KEY` と一致する `Authorization: Bearer <トークン>` だけを受け付けます。
+issue-deck の共有トークン `MYROOM_INTERNAL_API_KEY`（取得できなければ環境変数 `INTERNAL_API_KEY`）と一致する `Authorization: Bearer <トークン>` だけを受け付けます。操作用は `MYROOM_INTERNAL_CONTROL_API_KEY`（フォールバックは `INTERNAL_CONTROL_API_KEY`）。取得は `backend/shared_token.py`（10分キャッシュ・5秒タイムアウト・失敗時は直前の値）で、`SHARED_TOKEN_API_SECRET` と `SHARED_TOKEN_API_URL` が `.env` に無ければ使いません。
 
 | 状況 | ステータス |
 |------|-----------|
@@ -980,8 +980,9 @@ ALTER 権限がない場合は、スクリプトが表示する SQL を管理者
 | `garbage-notion-data-source-id` | 書き出し先の Notion データソースID（`GARBAGE_NOTION_DATA_SOURCE_ID` として同期。`database_id` ではない） |
 | `cleaning-notion-token` | 次の掃除を書き出す Notion インテグレーションのトークン（`CLEANING_NOTION_TOKEN` として同期）。`garbage-notion-token` と同じ値でよいが、Task データベース側にもそのインテグレーションを接続しておくこと |
 | `cleaning-notion-data-source-id` | 書き出し先（Notion の `☑️ Task`）のデータソースID（`CLEANING_NOTION_DATA_SOURCE_ID` として同期。`database_id` ではない） |
-| `internal-api-key` | サーバー間参照用APIのトークン（`INTERNAL_API_KEY` として同期）。AIDE 側の `op://apps/aide/myroom-token` と**同じ値**にする |
-| `internal-control-api-key` | 照明などの操作専用のサーバー間トークン（`INTERNAL_CONTROL_API_KEY` として同期）。AIDE 側の `AIDE_MYROOM_CONTROL_TOKEN` と**同じ値**にし、`internal-api-key` とは**別の値**にする（#419） |
+| `internal-api-key` | サーバー間参照用APIのトークン（`INTERNAL_API_KEY` として同期）。issue-deck の共有トークン `MYROOM_INTERNAL_API_KEY` が優先で、これはフォールバック（#525） |
+| `internal-control-api-key` | 照明などの操作専用のサーバー間トークン（`INTERNAL_CONTROL_API_KEY` として同期）。共有トークン `MYROOM_INTERNAL_CONTROL_API_KEY` が優先で、これはフォールバック。`internal-api-key` とは**別の値**にする（#419・#525） |
+| `shared-token-api-secret`（item は `apps/issue-deck`） | issue-deck の共有トークンAPIのBearer（`SHARED_TOKEN_API_SECRET` として同期）。取得先URLは organization variable `APP_BASE_URL`。未登録でも環境変数へフォールバックするだけなので、issue-deck の設定画面で `MYROOM_INTERNAL_API_KEY`・`MYROOM_INTERNAL_CONTROL_API_KEY` の利用元に `myroom` が出ているかで確認する（#525） |
 | `nature-remo-token` | 「電気の操作」カードが赤外線を送るための Nature Remo アクセストークン（`NATURE_REMO_TOKEN` として同期）。https://home.nature.global/ で発行 |
 | `db-name` | 接続先データベース名（`DB_NAME` として同期） |
 | `target-dir` | デプロイ先ディレクトリ（例: `/home/guchi/myroom`） |
@@ -1117,6 +1118,8 @@ rsync では `.env` を転送しません。サーバー上の `.env` には、�
 | `CLEANING_NOTION_DATA_SOURCE_ID` | secret `CLEANING_NOTION_DATA_SOURCE_ID` | このリポジトリ |
 | `INTERNAL_API_KEY` | secret `INTERNAL_API_KEY` | このリポジトリ |
 | `INTERNAL_CONTROL_API_KEY` | secret `INTERNAL_CONTROL_API_KEY` | このリポジトリ |
+| `SHARED_TOKEN_API_SECRET` | secret `SHARED_TOKEN_API_SECRET` | このリポジトリ |
+| `SHARED_TOKEN_API_URL` | variable `APP_BASE_URL` | organization 共通 |
 | `NATURE_REMO_TOKEN` | secret `NATURE_REMO_TOKEN` | このリポジトリ |
 | `DB_NAME` | secret `DB_NAME` | このリポジトリ |
 | `DB_USER` | secret `SHARED_DB_USER` | organization 共通 |

@@ -70,6 +70,7 @@ jobs:
       DB_PORT: ${{ secrets.SHARED_DB_PORT }}
       DB_USER: ${{ secrets.SHARED_DB_USER }}
       HOST: ${{ secrets.SERVER_HOST }}
+      SHARED_TOKEN_API_URL: ${{ vars.APP_BASE_URL }}
       SSH_PORT: ${{ secrets.SERVER_SSH_PORT }}
       SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}
       SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
@@ -88,6 +89,7 @@ jobs:
       LOGIN_WEBHOOK_URL: ${{ secrets.SIGNALY_LOGIN_WEBHOOK_URL }}
       NATURE_REMO_TOKEN: ${{ secrets.NATURE_REMO_TOKEN }}
       SENSOR_WEBHOOK_URL: ${{ secrets.SENSOR_WEBHOOK_URL }}
+      SHARED_TOKEN_API_SECRET: ${{ secrets.SHARED_TOKEN_API_SECRET }}
       SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
       TARGET_DIR: ${{ secrets.TARGET_DIR }}
       VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
@@ -179,6 +181,10 @@ jobs:
           # 照明などの操作専用のサーバー間トークン（#419）。空でもデプロイは通り、
           # 操作用の内部APIが常に503を返すだけ（backend/internal_auth.py）。
           INTERNAL_CONTROL_API_KEY: ${{ env.INTERNAL_CONTROL_API_KEY }}
+          # issue-deck の共有トークンAPI（#525）。INTERNAL_API_KEY 等をここから取得する。
+          # 空でもデプロイは通り、上の環境変数へフォールバックするだけ。
+          SHARED_TOKEN_API_URL: ${{ env.SHARED_TOKEN_API_URL }}
+          SHARED_TOKEN_API_SECRET: ${{ env.SHARED_TOKEN_API_SECRET }}
           NATURE_REMO_TOKEN: ${{ env.NATURE_REMO_TOKEN }}
           # PWAプッシュ通知（Web Push）用のVAPID鍵（#293）。空でもデプロイは通り、
           # push_notify.is_configured() が false のまま機能全体が無効になるだけ。
@@ -215,6 +221,8 @@ jobs:
           CLEANING_NOTION_DATA_SOURCE_ID_B64=$(b64 "$CLEANING_NOTION_DATA_SOURCE_ID")
           INTERNAL_API_KEY_B64=$(b64 "$INTERNAL_API_KEY")
           INTERNAL_CONTROL_API_KEY_B64=$(b64 "$INTERNAL_CONTROL_API_KEY")
+          SHARED_TOKEN_API_URL_B64=$(b64 "$SHARED_TOKEN_API_URL")
+          SHARED_TOKEN_API_SECRET_B64=$(b64 "$SHARED_TOKEN_API_SECRET")
           NATURE_REMO_TOKEN_B64=$(b64 "$NATURE_REMO_TOKEN")
           VAPID_PRIVATE_KEY_B64=$(b64 "$VAPID_PRIVATE_KEY")
           VAPID_PUBLIC_KEY_B64=$(b64 "$VAPID_PUBLIC_KEY")
@@ -260,6 +268,8 @@ jobs:
             sync_env_var CLEANING_NOTION_DATA_SOURCE_ID '${CLEANING_NOTION_DATA_SOURCE_ID_B64}'
             sync_env_var INTERNAL_API_KEY '${INTERNAL_API_KEY_B64}'
             sync_env_var INTERNAL_CONTROL_API_KEY '${INTERNAL_CONTROL_API_KEY_B64}'
+            sync_env_var SHARED_TOKEN_API_URL '${SHARED_TOKEN_API_URL_B64}'
+            sync_env_var SHARED_TOKEN_API_SECRET '${SHARED_TOKEN_API_SECRET_B64}'
             sync_env_var NATURE_REMO_TOKEN '${NATURE_REMO_TOKEN_B64}'
             sync_env_var VAPID_PRIVATE_KEY '${VAPID_PRIVATE_KEY_B64}'
             sync_env_var VAPID_PUBLIC_KEY '${VAPID_PUBLIC_KEY_B64}'

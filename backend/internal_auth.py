@@ -10,6 +10,9 @@ ops-dashboard の `OPS_API_TOKEN`（`requireSessionOrApiToken`）と同じ形。
 
 トークンは用途ごとに分けている（DaySpan の `INTERNAL_EVENTS_API_KEY` と同じ分け方）。
 
+取得元は issue-deck の共有トークン（`MYROOM_INTERNAL_API_KEY`・`MYROOM_INTERNAL_CONTROL_API_KEY`。
+`backend/shared_token.py`）を優先し、取れなければ下の環境変数へフォールバックする（#525）。
+
 - `INTERNAL_API_KEY` … 読み取り専用（`GET /api/internal/room-state`）
 - `INTERNAL_CONTROL_API_KEY` … 操作専用（`/api/internal/remote/…`・#419、`/api/internal/aircon/…`・#439）
 
@@ -31,31 +34,40 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import Header, HTTPException, status
 
+from backend.shared_token import get_shared_token
+
 load_dotenv()
 
 ENV_VAR_NAME = "INTERNAL_API_KEY"
 CONTROL_ENV_VAR_NAME = "INTERNAL_CONTROL_API_KEY"
 
+# issue-deck の共有トークン名（#525）。取れなければ上の環境変数へフォールバックする
+SHARED_TOKEN_NAME = "MYROOM_INTERNAL_API_KEY"
+CONTROL_SHARED_TOKEN_NAME = "MYROOM_INTERNAL_CONTROL_API_KEY"
 
-def _read_token(env_var_name: str) -> Optional[str]:
-    """環境変数のトークン。空文字は「未設定」として扱う。
+
+def _read_token(env_var_name: str, shared_token_name: str) -> Optional[str]:
+    """共有トークン（issue-deck）、無ければ環境変数のトークン。空文字は「未設定」として扱う。
 
     モジュール読み込み時ではなく都度読むのは、テストが `monkeypatch.setenv` で
     差し替えられるようにするため。デプロイは未登録の secret を空文字で `.env` へ書くので、
     空を「未設定」に倒しておかないと、空のトークンで通る口ができてしまう。
     """
+    shared = get_shared_token(shared_token_name)
+    if shared:
+        return shared
     value = os.getenv(env_var_name)
     return value if value else None
 
 
 def get_internal_api_key() -> Optional[str]:
     """読み取り用トークン（`INTERNAL_API_KEY`）。"""
-    return _read_token(ENV_VAR_NAME)
+    return _read_token(ENV_VAR_NAME, SHARED_TOKEN_NAME)
 
 
 def get_internal_control_api_key() -> Optional[str]:
     """操作用トークン（`INTERNAL_CONTROL_API_KEY`）。"""
-    return _read_token(CONTROL_ENV_VAR_NAME)
+    return _read_token(CONTROL_ENV_VAR_NAME, CONTROL_SHARED_TOKEN_NAME)
 
 
 def _token_matches(provided: str, expected: str) -> bool:
@@ -84,14 +96,14 @@ def _check_bearer(
         )
 
 
-async def require_internal_token(
+def require_internal_token(
     authorization: Optional[str] = Header(default=None),
 ) -> None:
     """読み取り用の内部API向けの依存（`INTERNAL_API_KEY`）。"""
     _check_bearer(authorization, ENV_VAR_NAME, get_internal_api_key())
 
 
-async def require_internal_control_token(
+def require_internal_control_token(
     authorization: Optional[str] = Header(default=None),
 ) -> None:
     """操作用の内部API向けの依存（`INTERNAL_CONTROL_API_KEY`）。
