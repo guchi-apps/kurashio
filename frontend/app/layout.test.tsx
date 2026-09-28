@@ -52,6 +52,16 @@ describe("iOS PWAの安全領域", () => {
     expect(dashboard).not.toContain("sticky top-[env(safe-area-inset-top)]");
   });
 
+  it("iOS 27のぼかし範囲を避けるため、PWA standalone時だけヘッダー内側へ追加の余白を持たせる（#521）", () => {
+    expect(css).toMatch(/:root\s*\{\s*--pwa-header-safe-gap:\s*0px;\s*\}/);
+    expect(css).toMatch(
+      /@supports \(-webkit-touch-callout: none\)\s*\{\s*@media \(display-mode: standalone\), \(display-mode: fullscreen\)\s*\{\s*:root\s*\{\s*--pwa-header-safe-gap:\s*\d+px;/,
+    );
+    // useElementHeight が実測している内側の div（ref="headerBarRef"）に足すこと。
+    // ヘッダー自体の pt に足すと、直後の余白（headerBarHeight）が追従せず本文が隠れる
+    expect(dashboard).toContain("pt-[calc(0.625rem+var(--pwa-header-safe-gap))]");
+  });
+
   it("theme-colorとマニフェストをヘッダーの帯の色に揃える（#478）", () => {
     const light = css.match(/:root\s*\{[^}]*--header-band:\s*(#[0-9a-f]{6})/)?.[1];
     const dark = css.match(/\.dark\s*\{[^}]*--header-band:\s*(#[0-9a-f]{6})/)?.[1];
