@@ -19,7 +19,7 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 | 画面・機能（`frontend/`・`backend/`） | main へマージ → 自動デプロイ | **何もしなくてよい。** 次に開いたとき（または10分ごとの更新チェック #277）にWeb版の新しいビルドが出る |
 | アプリの殻（`ios/`） | 影響なし（`out/` 以外は配信されない） | Mac mini でビルドし直して iPhone へ入れ直す |
 | アイコン（`frontend/assets/kurashio-app-icon.png`） | `node scripts/generate-icons.mjs`（`frontend/`で実行） | 同じスクリプトで `ios/.../AppIcon.appiconset` も書き出される。**そのあとビルドし直す** |
-| バージョン | `frontend/package.json`（changelog と揃える） | Xcode の `MARKETING_VERSION`。ビルド前に `node ios/scripts/sync-version.mjs` で `frontend/package.json` の値へ同期する（#535） |
+| バージョン | `frontend/package.json`（changelog と揃える） | Xcode の `MARKETING_VERSION`。`frontend/package.json` と自動で同期される（下記「バージョンの同期」参照。#535） |
 
 **Web版とiOS版のリリースは独立しています。** Web版を main へ出すたびにアプリを入れ直す必要はありません。
 
@@ -43,7 +43,6 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 ```bash
 cd ~/apps/myroom        # Mac mini 上のチェックアウト
 git pull
-node ios/scripts/sync-version.mjs   # MARKETING_VERSION を frontend/package.json に合わせる
 open ios/Kurashio.xcodeproj
 ```
 
@@ -53,6 +52,18 @@ open ios/Kurashio.xcodeproj
 
 **無料の個人チームで署名したアプリは7日で起動できなくなります**（有料の Apple Developer Program なら1年）。
 起動しなくなったら、同じ手順でもう一度 ⌘R すれば直ります（ログイン状態は残ります）。
+
+### バージョンの同期（`MARKETING_VERSION`）
+
+**`ios/Kurashio.xcodeproj/project.pbxproj` の `MARKETING_VERSION` は `frontend/package.json` の
+`version` と常に一致させる**（#535）。手作業では揃え続けられないため、`release-develop-to-main.yml`
+のバンプPR作成時に `node ios/scripts/sync-version.mjs` を自動実行しており、`develop` にマージされた
+時点で両者は一致している。**Mac miniでのビルド前に手で同期する必要はない**（`git pull` すれば
+最新の値が入っている）。
+
+ローカルで値がずれていないかを確かめたい・手元だけで直したいときは、リポジトリルートから
+`node ios/scripts/sync-version.mjs` を実行すれば `frontend/package.json` の値へ書き換えられる
+（冪等なので、既に一致していれば何もしない）。
 
 ### 開発サーバーへ向けるとき
 

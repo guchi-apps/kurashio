@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // XcodeプロジェクトのMARKETING_VERSIONを frontend/package.json の version に合わせる（#535）。
-// Web版とiOS版のリリースは独立している（README.md参照）ため自動では呼ばれず、
-// Mac miniでビルドする直前に手動で実行する。
+// release-develop-to-main.yml のバンプPR作成時（bump-command）から自動で呼ばれ、developへ
+// マージされた時点で常に一致させる。カレントディレクトリに依存せず動くため、リポジトリ
+// ルート・ios/ のどちらから実行しても同じ結果になる。
 //
 //   node ios/scripts/sync-version.mjs
 
