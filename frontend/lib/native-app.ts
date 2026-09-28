@@ -31,6 +31,52 @@ export function isNativeApp(): boolean {
 }
 
 /**
+ * アプリのネイティブ通知（APNs・#527）の状態が変わるたびに、アプリ側
+ * （`AppDelegate.swift`・`WebViewModel.swift`）が飛ばしてくるイベント。
+ * `detail` は {@link NativeNotificationState}。
+ */
+export const NATIVE_NOTIFICATION_STATE_EVENT = "myroom-native-notification-state";
+
+export interface NativeNotificationState {
+  //: Web版の`Notification.permission`と揃えた3値（`UNAuthorizationStatus`の`.authorized`/`.provisional`は
+  //: "granted"、`.denied`は"denied"、`.notDetermined`は"default"に読み替える）
+  permission: "granted" | "denied" | "default";
+  /** 許可済み（"granted"）のときの、この端末のAPNsデバイストークン（16進文字列）。それ以外は null */
+  token: string | null;
+}
+
+/**
+ * アプリへ、通知許可の要求（未許可なら要求・許可済みならトークンを取り直す）を依頼する。
+ * OSのダイアログは初回（未確定のとき）だけ出るため、呼ぶのは「有効にする」操作のときだけにする。
+ */
+export function requestNativeNotificationPermission(): boolean {
+  const bridge = getBridge();
+  if (!bridge) return false;
+  bridge.postMessage({ type: "requestNotificationPermission" });
+  return true;
+}
+
+/**
+ * いまの通知許可状態を問い合わせる（OSのダイアログは出ない・読み取り専用）。
+ * アプリは起動・復帰のたびに自動でも状態を飛ばしてくるが、Reactの購読が間に合わない
+ * 起動直後のタイミングを埋めるため、画面側からも明示的に呼べるようにしてある。
+ */
+export function queryNativeNotificationState(): boolean {
+  const bridge = getBridge();
+  if (!bridge) return false;
+  bridge.postMessage({ type: "queryNotificationPermission" });
+  return true;
+}
+
+/** iOSの設定アプリ（このアプリの通知設定）を開く。拒否後に変更方法を示すため。 */
+export function openNativeNotificationSettings(): boolean {
+  const bridge = getBridge();
+  if (!bridge) return false;
+  bridge.postMessage({ type: "openSystemSettings" });
+  return true;
+}
+
+/**
  * PKCE の `code_verifier` だけを localStorage に置き、それ以外は手元に持たないストレージ。
  *
  * 共有クライアント（`supabase-client.ts`）は implicit フローのまま変えない（Web・PWA のログインと

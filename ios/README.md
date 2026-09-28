@@ -108,8 +108,62 @@ WebView はステータスバーの**下から**始め、ステータスバー�
 PWA で出ている上端のぼかし（#478・#521）とは別の作りです。Web側の `--pwa-header-safe-gap` は
 `display-mode: standalone` のときだけ効くので、アプリの中では 0 のままです。
 
+### プッシュ通知（APNs・#527）
+
+**Web PushとiOSアプリの通知は別経路。** WKWebViewはService Workerを使えないため、iOSアプリはPWAのWeb Push
+（`backend/push_notify.py`）を受け取れない。代わりにApple Push Notification service（APNs）を使う別経路
+（`backend/apns_notify.py`・`backend/apns_subscriptions.py`）を持ち、ゴミの日・部屋の異常/復旧の通知イベント
+（`backend/notify_events.py`）から両方へ同時に配信する。**アプリ内の通知設定（`/devices`の通知設定シート）は
+Web版のプッシュ通知の設定とは独立**で、同じiPhoneでPWA（Safariに追加）とネイティブアプリの両方を有効にすると、
+同じ通知が2回届くことがある（設定画面にその旨を表示している）。
+
+1. **アプリ全体の許可要求**: 通知設定シートの「アプリの通知を受け取る」をONにしたときだけ、
+   OSの許可ダイアログを出す（`WebViewModel.requestNotificationPermission()`）。起動・復帰のたびに
+   `refreshNotificationAuthorizationStatus()`が状態を問い合わせ直すが、これは**読み取り専用**
+   （`getNotificationSettings`）でダイアログは出さない
+2. **デバイストークン**は`AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken`が受け取り、
+   `WebViewModel`経由でWeb側（`myroom-native-notification-state`イベント）へ渡す。Web側
+   （`frontend/lib/native-notifications.ts`）が「有効にする」フラグを見て`POST /api/apns/register`する
+3. **通知タップ**は`AppDelegate`のUNUserNotificationCenterDelegateに集約し、ペイロードの`url`
+   （現状すべて`"/"`）へ`WebViewModel.open(path:)`で遷移する。ログイン状態はWKWebViewのセッションが
+   そのまま効くため、期限切れなら通常のログイン画面に倒れる
+4. **ログアウト・無効化時の解除**は`frontend/lib/auth.ts`の`signOutThisApp()`と
+   `disableNativeNotifications()`が`DELETE /api/apns/register`を呼ぶ
+
+**Apple Developer Portal側の準備**（初回だけ）:
+
+1. Certificates, Identifiers & Profiles → Identifiers → 対象App ID（`com.gucchii.kurashio`）で
+   Push Notifications capability を有効化する
+2. Certificates, Identifiers & Profiles → Keys で APNs用のKeyを作成し `.p8` をダウンロードする
+   （1回きり）。Key IDを控える
+3. Xcode → Signing & Capabilities → `+ Capability` → Push Notifications を追加する
+   （`Kurashio.entitlements`の`aps-environment`はリポジトリに含めてあるので、Xcode上で
+   capabilityを足すだけでよい）
+4. サーバー側の値（`APNS_AUTH_KEY`・`APNS_KEY_ID`・`APNS_TEAM_ID`・`APNS_BUNDLE_ID`・
+   `APNS_ENVIRONMENT`）の登録手順はリポジトリルートの`README.md`「本番環境へのデプロイ」を参照
+
+**無料の個人チーム署名では`aps-environment`が常に`development`になる**（TestFlight/App Store配布
+（対象外）をしない限り）。そのため`APNS_ENVIRONMENT`は`sandbox`のままでよく、APNsの
+`api.sandbox.push.apple.com`だけに疎通する。
+
+### Mac mini・iPhoneでの初回設定・テスト手順（#527）
+
+1. 上記「準備（初回だけ）」でアプリをインストール済みであること
+2. 通知設定シート（`/devices`右上のベル等、`components/notification-settings-sheet.tsx`）を開き、
+   「アプリの通知を受け取る」をON。iOSの許可ダイアログが出たら「許可」を選ぶ
+3. 同じ画面の「テスト通知を送信」を押し、iPhoneに通知（🔔 kurashio テスト通知）が届くことを確認する
+4. ゴミの日・部屋の異常通知は、それぞれの設定を有効にした状態で実際の通知条件（収集前日/当日の
+   設定時刻・室温や湿度が閾値を外れる）を待つか、サーバー側で`backend.garbage_notify` /
+   `backend.sensor_monitor`をモックモード以外で手動実行して確認する
+5. 通知をタップし、アプリが起動してダッシュボードが開くことを確認する（ロック画面からのタップは
+   端末のパスコード/Face ID解除を経る。ログアウト状態ならログイン画面が開く）
+6. 設定シートでOFFにしたあと「テスト通知を送信」が押せなくなり、以後届かないことを確認する
+7. iOSの設定 → 通知 → kurashio で許可をオフにし、アプリに戻って設定シートを開くと
+   「OSの通知が拒否されています」と出て「設定アプリを開く」から戻せることを確認する
+8. ログアウトし、ログアウト前に有効だった端末へテスト通知（サーバー側から`POST /api/apns/test`相当）を
+   送っても届かないことを確認する（登録解除の確認）
+
 ### その他
 
 - 外部サイトへのリンク・`target="_blank"` は Safari 等で開く（Web版の画面だけをアプリの中で開く）
 - `window.confirm()`（記録の削除など）はアプリ側でダイアログを出す。実装しないと常に「キャンセル」になる
-- Web Push は受け取れない（通知設定にその旨を出す）。ネイティブの通知は別Issue

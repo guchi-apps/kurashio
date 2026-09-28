@@ -224,6 +224,10 @@ export interface PushTestResult {
   total: number;
 }
 
+export interface ApnsStatusResponse {
+  configured: boolean;
+}
+
 export interface EnergyTotal {
   kwh: number;
   cost_yen: number;

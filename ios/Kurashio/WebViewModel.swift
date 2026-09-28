@@ -2,6 +2,7 @@ import Combine
 import Network
 import SwiftUI
 import UIKit
+import UserNotifications
 import WebKit
 
 /// Web版を開く WKWebView と、その読み込み状態を持つ。
@@ -238,15 +239,102 @@ extension WebViewModel: WKScriptMessageHandler {
             origin.`protocol` == AppConfig.baseURL.scheme,
             origin.host == AppConfig.baseURL.host,
             let body = message.body as? [String: Any],
-            body["type"] as? String == "signIn",
-            let urlString = body["url"] as? String,
-            let url = URL(string: urlString),
-            url.scheme == "https"
+            let type = body["type"] as? String
         else { return }
 
-        auth.start(url: url) { [weak self] result in
-            self?.finishSignIn(result)
+        switch type {
+        case "signIn":
+            guard
+                let urlString = body["url"] as? String,
+                let url = URL(string: urlString),
+                url.scheme == "https"
+            else { return }
+            auth.start(url: url) { [weak self] result in
+                self?.finishSignIn(result)
+            }
+        case "requestNotificationPermission":
+            requestNotificationPermission()
+        case "queryNotificationPermission":
+            refreshNotificationAuthorizationStatus()
+        case "openSystemSettings":
+            openSystemSettings()
+        default:
+            break
         }
+    }
+}
+
+// MARK: - 通知（APNs・#527）
+
+extension WebViewModel {
+    /// アプリ起動・復帰のたびに呼ぶ。OSへ問い合わせるだけで、ダイアログは出さない。
+    /// 許可済みなら `registerForRemoteNotifications()` でトークンを取り直す（端末変更・再インストール後の更新のため）
+    func refreshNotificationAuthorizationStatus() {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                switch settings.authorizationStatus {
+                case .authorized, .provisional, .ephemeral:
+                    UIApplication.shared.registerForRemoteNotifications()
+                case .denied:
+                    self.dispatchNotificationState(permission: "denied", token: nil)
+                default:
+                    self.dispatchNotificationState(permission: "default", token: nil)
+                }
+            }
+        }
+    }
+
+    /// 「有効にする」操作。許可が未確定のときだけOSのダイアログが出る（確定済みならそのまま返る）
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+            DispatchQueue.main.async {
+                if granted {
+                    UIApplication.shared.registerForRemoteNotifications()
+                } else {
+                    self.dispatchNotificationState(permission: "denied", token: nil)
+                }
+            }
+        }
+    }
+
+    /// `AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken` から呼ぶ
+    func handleDeviceToken(_ token: String) {
+        dispatchNotificationState(permission: "granted", token: token)
+    }
+
+    /// `AppDelegate.didFailToRegisterForRemoteNotificationsWithError` から呼ぶ。
+    /// 許可自体は取れているため、許可状態は変えずトークンだけ無しにする
+    func handleRemoteRegistrationFailure() {
+        dispatchNotificationState(permission: "granted", token: nil)
+    }
+
+    /// 通知タップ（`AppDelegate`のUNUserNotificationCenterDelegate）から呼ぶ。
+    /// 現状の通知はすべて `url: "/"` のためダッシュボードを開く
+    func handleNotificationTap(path: String) {
+        open(path: path)
+    }
+
+    private func open(path: String) {
+        guard let url = URL(string: path, relativeTo: AppConfig.baseURL), AppConfig.isAppURL(url) else {
+            load(AppConfig.baseURL)
+            return
+        }
+        load(url)
+    }
+
+    private func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+
+    /// Web側（`lib/native-app.ts`の`NATIVE_NOTIFICATION_STATE_EVENT`）へ状態を届ける
+    private func dispatchNotificationState(permission: String, token: String?) {
+        let tokenLiteral = token.map { "\"\($0)\"" } ?? "null"
+        let script = """
+        window.dispatchEvent(new CustomEvent('myroom-native-notification-state', \
+        { detail: { permission: '\(permission)', token: \(tokenLiteral) } }))
+        """
+        webView.evaluateJavaScript(script)
     }
 }
 

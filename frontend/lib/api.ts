@@ -29,6 +29,7 @@ import {
   type PushVapidPublicKeyResponse,
   type PushSubscribeBody,
   type PushTestResult,
+  type ApnsStatusResponse,
   type TimeRange,
   type ChartViewRange,
   type UiSettings,
@@ -141,6 +142,23 @@ export async function unsubscribePushNotifications(endpoint: string): Promise<vo
 
 export async function sendTestPushNotification(): Promise<PushTestResult> {
   const res = await fetchWithAuth("/api/push/test", { method: "POST" });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(body?.detail || `Request failed: ${res.status}`);
+  }
+  return res.json() as Promise<PushTestResult>;
+}
+
+export async function fetchApnsStatus(): Promise<ApnsStatusResponse> {
+  return fetchJson<ApnsStatusResponse>("/api/apns/status");
+}
+
+// 端末のAPNsトークンの登録・解除は lib/native-notifications.ts が持つ（#527）。
+// `lib/auth.ts`（signOutThisApp）から使う都合上、ここ（api.ts）とは循環参照になるため
+// 独立した最小限のfetchを直接持たせている。
+
+export async function sendTestApnsNotification(): Promise<PushTestResult> {
+  const res = await fetchWithAuth("/api/apns/test", { method: "POST" });
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { detail?: string } | null;
     throw new Error(body?.detail || `Request failed: ${res.status}`);

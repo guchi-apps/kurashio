@@ -9,3 +9,4 @@ python-dotenv
 python-jose[cryptography]
 python-multipart
 pywebpush
+httpx[http2]
