@@ -42,8 +42,10 @@ import json, os, sys
 want = os.environ.get("IOS_DEVICE", "")
 devices = json.load(open(sys.argv[1]))["result"]["devices"]
 def ok(d):
+    # シャットダウン中のシミュレータ（reality: simulated）は install できないので実機だけを選ぶ
     return d.get("hardwareProperties", {}).get("deviceType") == "iPhone" and \
-        d.get("connectionProperties", {}).get("tunnelState") != "unavailable"
+        d.get("hardwareProperties", {}).get("reality") == "physical" and \
+        d.get("connectionProperties", {}).get("tunnelState") == "connected"
 for d in devices:
     if not ok(d):
         continue
