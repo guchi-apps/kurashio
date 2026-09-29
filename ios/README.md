@@ -8,7 +8,7 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 |---|---|
 | 表示名 | kurashio |
 | Bundle ID | `com.gucchii.kurashio`（AIDE-ios の `com.gucchii.AIDEios` とは別） |
-| 署名 | Automatic（個人チーム `6AA3WFTR94`。プッシュ通知は使えない・#560） |
+| 署名 | Automatic（有料の Apple Developer Program のチーム `6AA3WFTR94`。無料の個人チームではプッシュ通知を使えない・#560） |
 | 対応 | iPhone・縦向き・iOS 18以上 |
 | ログインの戻り先 | `kurashio://auth-callback` |
 
@@ -47,10 +47,11 @@ open ios/Kurashio.xcodeproj
 ```
 
 1. 上部のスキームが `Kurashio`、実行先が自分の iPhone になっていることを確かめる
-2. ⌘R（Product → Run）。初回は Signing & Capabilities の Team が個人チームになっているかを確かめる
+2. ⌘R（Product → Run）。初回は Signing & Capabilities の Team が Apple Developer Program のチーム
+   （Personal Team ではない方）になっているかを確かめる
 3. 初回だけ、iPhone の 設定 → 一般 → VPNとデバイス管理 で自分の開発者証明書を「信頼」する
 
-**無料の個人チームで署名したアプリは7日で起動できなくなります**（有料の Apple Developer Program なら1年）。
+**Apple Developer Program で署名した開発ビルドは約1年で起動できなくなります**（無料の個人チームなら7日）。
 起動しなくなったら、同じ手順でもう一度 ⌘R すれば直ります（ログイン状態は残ります）。
 
 ### バージョンの同期（`MARKETING_VERSION`）
@@ -136,29 +137,19 @@ Web版のプッシュ通知の設定とは独立**で、同じiPhoneでPWA（Saf
    Push Notifications capability を有効化する
 2. Certificates, Identifiers & Profiles → Keys で APNs用のKeyを作成し `.p8` をダウンロードする
    （1回きり）。Key IDを控える
-3. `Kurashio` ターゲットの Build Settings → `Code Signing Entitlements`（`CODE_SIGN_ENTITLEMENTS`）を
-   Debug/Release とも `Kurashio/Kurashio-Push.entitlements` に変える（下記「個人チームでは
-   プッシュ通知を使えない」）。Signing & Capabilities に Push Notifications が現れることを確かめる
+3. Xcode → Signing & Capabilities で Push Notifications が表示されていることを確かめる
+   （`Kurashio.entitlements` に `aps-environment` を含めてあるので、capability を足し直す必要はない）
 4. サーバー側の値（`APNS_AUTH_KEY`・`APNS_KEY_ID`・`APNS_TEAM_ID`・`APNS_BUNDLE_ID`・
    `APNS_ENVIRONMENT`）の登録手順はリポジトリルートの`README.md`「本番環境へのデプロイ」を参照
 
-#### 個人チームではプッシュ通知を使えない（#560）
+#### 署名は Apple Developer Program が前提（#560）
 
 **無料の個人チーム（Personal Team）は Push Notifications capability に対応していない。**
-`aps-environment` を含む entitlements で署名しようとすると「Personal development teams ... do not
-support the Push Notifications capability」となり、プロビジョニングプロファイルを作れずビルドが止まる。
-そのため entitlements を2つに分けている。
-
-| ファイル | 中身 | 使う場面 |
-|---|---|---|
-| `Kurashio/Kurashio.entitlements`（**既定**） | App Groups だけ | 個人チーム。ウィジェットは動くがプッシュ通知は届かない |
-| `Kurashio/Kurashio-Push.entitlements` | App Groups ＋ `aps-environment` | 有料の Apple Developer Program。プッシュ通知が届く |
-
-**プロジェクトの既定は個人チームのままビルドできる前者。** 有料の Apple Developer Program へ切り替えた
-ときだけ、上の手順3で `CODE_SIGN_ENTITLEMENTS` を後者へ向ける（両方のファイルの App Groups は揃えておくこと）。
-個人チームのままでもアプリは動き、`registerForRemoteNotifications()` が失敗して
-`AppDelegate.didFailToRegisterForRemoteNotificationsWithError` に落ちるだけで、デバイストークンが
-登録されないので通知は届かない。
+`aps-environment` を含む entitlements を個人チームで署名しようとすると「Personal development teams ...
+do not support the Push Notifications capability」となり、プロビジョニングプロファイルを作れずビルドが止まる。
+このアプリはプッシュ通知（#527）を使うため、**署名は有料の Apple Developer Program のチームで行う**
+（`Kurashio.entitlements` から `aps-environment` を外して個人チームへ戻す形は採っていない）。
+`project.pbxproj` の `DEVELOPMENT_TEAM` と、サーバー側の `APNS_TEAM_ID` はこのチームの Team ID に揃える。
 
 Xcode で開発ビルドを入れる限り `aps-environment` は `development` になる（TestFlight/App Store配布は
 対象外）。そのため`APNS_ENVIRONMENT`は`sandbox`のままでよく、APNsの
