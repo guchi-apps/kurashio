@@ -1,0 +1,215 @@
+name: iOS TestFlight
+
+# iOSアプリ本体の更新が要るリリースだけ、TestFlightの内部テストグループへ自動配布する（#591）。
+# 起動は ios-testflight-trigger.yml（Deploy成功後）か、手動の workflow_dispatch。
+#
+# 段階（ジョブ／ステップ）ごとに成否が分かれて見える:
+#   判定 → [署名・アーカイブ → エクスポート → アップロード] → [ビルド処理待ち → 内部グループ配布 → 印を付ける]
+# **iOSの失敗はWebのデプロイの成否とは別のrunで赤くなる**（Webの本番反映は済んでいる）。
+#
+# 再実行: 失敗した run は「Re-run failed jobs」か、同じ sha で workflow_dispatch し直す。
+# 印（タグ ios-testflight/<ビルド番号>）は配布し終えたときだけ進むので、失敗した配布の変更は
+# 次の判定にも残る。詳細・初期設定・キー失効時の手順は ios/README.md。
+#
+# 署名はクラウド署名（App Store Connect APIキー＋ -allowProvisioningUpdates）。
+# 署名済みのIPAは公開リポジトリのartifactに載せないため、書き出しとアップロードは同じジョブで行う。
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "配布するコミット（main上のもの。空なら main の先端）"
+        required: false
+        default: ""
+      dry_run:
+        description: "判定だけ行い、ビルドしない"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BUNDLE_ID: com.gucchii.kurashio
+
+jobs:
+  detect:
+    name: 判定（iOS更新の要否）
+    runs-on: ubuntu-latest
+    outputs:
+      needed: ${{ steps.decide.outputs.needed }}
+      sha: ${{ steps.decide.outputs.sha }}
+      version: ${{ steps.decide.outputs.version }}
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.sha || github.sha }}
+
+      - name: Fetch tags
+        run: git fetch --tags --force origin
+
+      - name: Decide
+        id: decide
+        run: |
+          SHA=$(git rev-parse HEAD)
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::${SHA:0:7} は main に含まれていません。リリース済みのコミットだけ配布できます。"
+            exit 1
+          fi
+          VERSION=$(node -p "require('./frontend/package.json').version")
+          # ビルド番号は run_number*100+run_attempt。Re-run all jobs でも重複しない
+          BUILD=$(( GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT ))
+          RESULT=$(node ios/scripts/ios-changes.mjs --json)
+          NEEDED=$(printf '%s' "$RESULT" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).needed")
+          REASON=$(printf '%s' "$RESULT" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).reason")
+          FILES=$(printf '%s' "$RESULT" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).changedFiles.map(f => '- \`' + f + '\`').join('\n')")
+          {
+            echo "needed=$NEEDED"; echo "sha=$SHA"; echo "version=$VERSION"; echo "build=$BUILD"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## iOS TestFlight: 判定"
+            echo
+            echo "- 対象: \`${SHA:0:7}\`（v${VERSION}）"
+            if [ "$NEEDED" = "true" ]; then
+              echo "- 結果: **iOS更新が必要** — ${REASON}"
+              echo "- ビルド番号: ${BUILD}"
+              [ -n "$FILES" ] && printf '%s\n' "$FILES"
+              [ "${{ inputs.dry_run }}" = "true" ] && echo "- dry_run のためビルドしません"
+            else
+              echo "- 結果: **iOS配布をスキップ**（Webのみの更新） — ${REASON}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: 署名・ビルド・アップロード
+    needs: detect
+    if: needs.detect.outputs.needed == 'true' && inputs.dry_run != true
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      VERSION: ${{ needs.detect.outputs.version }}
+      BUILD: ${{ needs.detect.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect.outputs.sha }}
+
+      - name: 前提の確認（バージョンの整合・APIキー）
+        run: |
+          for k in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+            [ -n "${!k}" ] || { echo "::error::$k が未登録です。ios/README.md の「TestFlight自動配布の初期設定」を参照"; exit 1; }
+          done
+          PBX=$(grep -o 'MARKETING_VERSION = [^;]*' ios/Kurashio.xcodeproj/project.pbxproj | sort -u | sed 's/MARKETING_VERSION = //')
+          if [ "$PBX" != "$VERSION" ]; then
+            echo "::error::MARKETING_VERSION（${PBX}）が frontend/package.json（${VERSION}）とずれています。node ios/scripts/sync-version.mjs で揃えてください"
+            exit 1
+          fi
+          xcodebuild -version
+          KEY_DIR="$RUNNER_TEMP/asc"; mkdir -p "$KEY_DIR" ~/.appstoreconnect/private_keys
+          printf '%s' "$ASC_KEY_P8" | base64 --decode > "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
+          cp "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" ~/.appstoreconnect/private_keys/
+          chmod 600 "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
+
+      - name: 署名・アーカイブ（アプリ本体とWidgetに同じビルド番号）
+        run: |
+          xcodebuild archive \
+            -project ios/Kurashio.xcodeproj -scheme Kurashio -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Kurashio.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CURRENT_PROJECT_VERSION="$BUILD" \
+            | tail -n 60
+
+      - name: エクスポート（IPA）
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Kurashio.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist ios/scripts/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/asc/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          ls "$RUNNER_TEMP/export"
+
+      - name: アップロード（App Store Connect）
+        run: |
+          # 「Re-run failed jobs」でアップロード済みのビルドを二重に上げない
+          if node ios/scripts/asc-api.mjs build-exists --version "$VERSION" --build "$BUILD"; then
+            echo "build ${BUILD} は既にアップロード済みのためスキップします。"
+            exit 0
+          fi
+          xcrun altool --upload-app --type ios \
+            --file "$(ls "$RUNNER_TEMP"/export/*.ipa | head -n 1)" \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: APIキーを消す
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc" ~/.appstoreconnect/private_keys
+
+  testflight:
+    name: ビルド処理待ち・内部グループ配布
+    needs: [detect, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: write
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      TESTFLIGHT_GROUP: ${{ vars.TESTFLIGHT_GROUP }}
+      VERSION: ${{ needs.detect.outputs.version }}
+      BUILD: ${{ needs.detect.outputs.build }}
+      SHA: ${{ needs.detect.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect.outputs.sha }}
+
+      - name: App Store Connectでの処理待ち → 内部テストグループへ配布
+        run: node ios/scripts/asc-api.mjs wait-and-assign --version "$VERSION" --build "$BUILD"
+
+      # 印は最後に付ける。ここまで来なかった配布の変更は、次の判定にも残る
+      - name: 配布済みの印（タグ）を付ける
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "ios-testflight/${BUILD}" "$SHA"
+          git push origin "ios-testflight/${BUILD}"
+          {
+            echo "## iOS TestFlight: 配布完了"
+            echo
+            echo "- v${VERSION} (build ${BUILD}) を内部テストグループへ配布しました（\`${SHA:0:7}\`）"
+            echo "- iPhoneのTestFlightアプリで更新できます（自動では入りません）"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  notify:
+    name: 通知
+    needs: [detect, build, testflight]
+    if: always() && needs.detect.result != 'skipped' && (needs.detect.result == 'failure' || needs.build.result == 'failure' || needs.testflight.result == 'failure' || needs.testflight.result == 'success')
+    runs-on: ubuntu-latest
+    env:
+      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Signaly に通知
+        continue-on-error: true
+        env:
+          NOTIFY_APP: kurashio
+          NOTIFY_KIND: iOS配布（TestFlight）
+          NOTIFY_STATUS: ${{ needs.testflight.result == 'success' && 'success' || 'failure' }}
+          NOTIFY_JOB: ios-testflight
+        run: bash .github/scripts/signaly-notify.sh

@@ -1,0 +1,37 @@
+name: iOS TestFlight trigger
+
+# 本番デプロイ（Deploy to Production）が成功したら、iOSのTestFlight配布（ios-testflight.yml）を
+# 起動する薄い起動役（#591）。**本体をここへ置かない。**
+# workflow_run はデフォルトブランチ（develop）上のYAMLで動くため、ここに本体を書くと
+# 「YAMLは develop 版・スクリプトは main（head_sha）版」というずれが起きる。
+# 本体は workflow_dispatch で main 版として動かす（YAMLとスクリプトの版が揃う）。
+#
+# **Webの本番反映が先、iOSはその後。** 殻は本番URLを開くので、Web側と対になる変更が
+# 本番へ出てから配る。iOSの失敗はこのあとの別ワークフローで見え、Webの成否には影響しない。
+on:
+  workflow_run:
+    workflows: ["Deploy to Production"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch ios-testflight.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # 導入直後は main に本体がまだ無い。エラーコード（404/422）は状況で変わるため、
+          # 存在を先に確かめ、無ければ失敗にせず終える（誤った通知を出さない）
+          if ! gh api "repos/${{ github.repository }}/contents/.github/workflows/ios-testflight.yml?ref=main" --silent 2>/dev/null; then
+            echo "main に ios-testflight.yml が未導入のためスキップします。" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh workflow run ios-testflight.yml --repo "${{ github.repository }}" --ref main -f sha="$SHA"
+          echo "ios-testflight.yml を起動しました（対象 ${SHA:0:7}）。判定・配布の結果はそちらの run を見てください。" | tee -a "$GITHUB_STEP_SUMMARY"
