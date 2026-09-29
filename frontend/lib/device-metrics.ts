@@ -140,3 +140,39 @@ export function formatReading(reading: MetricReading): string {
   const separator = reading.unit === "°C" || reading.unit === "%" ? "" : " ";
   return `${reading.text}${separator}${reading.unit}`;
 }
+
+export type Co2Level = "good" | "elevated" | "high";
+
+export const CO2_ELEVATED_PPM = 1000;
+export const CO2_HIGH_PPM = 1500;
+
+const CO2_LEVEL_LABELS: Record<Co2Level, string> = {
+  good: "良好",
+  elevated: "やや高め",
+  high: "換気を",
+};
+
+/** CO2濃度の目安（1000ppm未満＝良好・1500ppm未満＝やや高め・それ以上＝換気を） */
+export function getCo2Level(ppm: number): { level: Co2Level; label: string } {
+  const level: Co2Level =
+    ppm >= CO2_HIGH_PPM ? "high" : ppm >= CO2_ELEVATED_PPM ? "elevated" : "good";
+  return { level, label: CO2_LEVEL_LABELS[level] };
+}
+
+/**
+ * カードの下段に足すCO2の行。CO2を測れないセンサーでは null。
+ * 上の2つにすでにCO2が入っているとき（温度・湿度を持たないセンサー）は重複するので null。
+ */
+export function buildCo2CardRow(
+  data: LatestData | null | undefined,
+  shown: readonly MetricReading[]
+): { text: string; unit: string; level: Co2Level; label: string } | null {
+  const value = data?.co2;
+  if (value == null || !Number.isFinite(value)) return null;
+  if (shown.some((reading) => reading.metric === "co2")) return null;
+  return {
+    text: formatMetricNumber("co2", value),
+    unit: METRIC_UNIT_SUFFIX.co2,
+    ...getCo2Level(value),
+  };
+}
