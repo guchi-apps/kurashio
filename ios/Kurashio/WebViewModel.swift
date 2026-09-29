@@ -42,6 +42,13 @@ final class WebViewModel: NSObject, ObservableObject {
         webView.isOpaque = false
         webView.backgroundColor = UIColor(named: "HeaderBand")
         webView.scrollView.backgroundColor = UIColor(named: "HeaderBand")
+
+        // ウィジェットのボタンが押された（アプリが起動済みのとき）。中身は渡さず合図だけ送る（#546）
+        NotificationCenter.default.addObserver(
+            forName: .widgetPressPending, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.nudgePendingWidgetPress()
+        }
     }
 
     deinit {
@@ -277,10 +284,49 @@ extension WebViewModel: WKScriptMessageHandler {
             reloadWidgetTimelines()
         case "widgetSnapshotCleared":
             SharedWidgetSnapshot.clear()
+            WidgetPressStore.clear()
+            reloadWidgetTimelines()
+        case "widgetReady":
+            deliverPendingWidgetPress()
+        case "widgetPressResult":
+            // Webが送った結果（ack）。ここで初めて保留を消し、ウィジェットへ結果を出す
+            guard
+                let key = body["key"] as? String,
+                let status = (body["status"] as? String).flatMap(WidgetPressStore.Status.init(rawValue:))
+            else { return }
+            WidgetPressStore.acknowledge(key: key, status: status)
             reloadWidgetTimelines()
         default:
             break
         }
+    }
+}
+
+// MARK: - ウィジェットのボタン押下（#546）
+
+extension WebViewModel {
+    /// 保留があれば、Webへ中身の無い合図（`myroom-native-widget-press-available`）だけを送る。
+    /// 起動直後でWebがまだ無いときは届かないが、Webが描画後に `widgetReady` で取りにくる。
+    /// **中身をここから渡さない**——復帰時の自動リロードと重なると取りこぼす・二重に送るため
+    func nudgePendingWidgetPress() {
+        guard WidgetPressStore.pending() != nil else { return }
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('myroom-native-widget-press-available'))"
+        )
+    }
+
+    /// Webの `widgetReady`（取りにきた）への返事。保留は結果（ack）が届くまで消さない
+    fileprivate func deliverPendingWidgetPress() {
+        guard let pending = WidgetPressStore.pending() else { return }
+        // キー（UUID）とボタンID（remote.json 由来）を、JSの文字列としてそのまま埋めない
+        let detail: [String: String] = ["key": pending.key, "buttonId": pending.buttonId]
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: detail),
+            let json = String(data: data, encoding: .utf8)
+        else { return }
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('myroom-native-widget-press', { detail: \(json) }))"
+        )
     }
 }
 

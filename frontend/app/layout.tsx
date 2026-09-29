@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Noto_Sans_JP } from "next/font/google";
 import "./globals.css";
 import { AppUpdateChecker } from "@/components/app-update-checker";
+import { NativeWidgetPressReceiver } from "@/components/native-widget-press-receiver";
 import { ServiceWorkerRegister } from "@/components/service-worker-register";
 import { ThemeProvider } from "@/components/theme-provider";
 
@@ -64,6 +65,8 @@ export default function RootLayout({
           <ServiceWorkerRegister />
           {/* 新しいビルドを自分で見つけて取り込む。全画面に効かせたいのでここに置く（#277） */}
           <AppUpdateChecker />
+          {/* iOSアプリのウィジェットで押された電気の操作を、どの画面でも受けて送る（#546） */}
+          <NativeWidgetPressReceiver />
           {/*
             iOS 26以降のPWAは、ステータスバーの下へ潜った内容を上端でぼかす（#478）。
             下の余白は本文と一緒にスクロールするので、スクロールするとカードや文字が
