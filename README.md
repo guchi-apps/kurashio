@@ -993,7 +993,7 @@ ALTER 権限がない場合は、スクリプトが表示する SQL を管理者
 | `apns-key-id` | 上記Auth KeyのKey ID（Apple Developer Portal → Certificates, Identifiers & Profiles → Keys）。`APNS_KEY_ID` として同期 |
 | `apns-team-id` | Apple DeveloperのTeam ID。`ios/README.md` の個人チーム（`6AA3WFTR94`）と同じ値。`APNS_TEAM_ID` として同期 |
 | `apns-bundle-id` | iOSアプリのBundle ID（`com.gucchii.kurashio`）。`APNS_BUNDLE_ID` として同期 |
-| `apns-environment` | `sandbox` または `production`。`APNS_ENVIRONMENT` として同期。**無料の個人チーム署名では`aps-environment`エンタイトルメントが常に`development`になるため、TestFlight/App Store配布（対象外）をしない限りは`sandbox`のまま** |
+| `apns-environment` | `sandbox` または `production`。`APNS_ENVIRONMENT` として同期。**Xcodeからの開発ビルドでは`aps-environment`エンタイトルメントが`development`になるため、TestFlight/App Store配布（対象外）をしない限りは`sandbox`のまま**（プッシュ通知は有料のApple Developer Programが必要。無料の個人チームでは使えない・`ios/README.md`参照） |
 
 **VAPID 鍵の初回登録**（PWA プッシュ通知用・1 回だけ。#293・#337）:
 
