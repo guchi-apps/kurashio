@@ -23,6 +23,45 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 
 **Web版とiOS版のリリースは独立しています。** Web版を main へ出すたびにアプリを入れ直す必要はありません。
 
+## iOS に関わる変更をしたときの手順（#568）
+
+**まず「何を触ったか」で分ける。入れ直しが要るのは `ios/` の実質的な変更だけ。**
+
+| 触ったもの | 入れ直し | 自動化されていること | 人がやること |
+|---|---|---|---|
+| `frontend/`・`backend/` のみ | 不要 | main へのマージで自動デプロイ。アプリは次に開いたとき（10分ごとの更新チェック #277）に反映 | なし |
+| `frontend/lib/native-app.ts`・`widget-sensors.ts` など Swift と形を共有するファイル | 不要（ただし Swift 側と揃っているか確認） | CI が `check-consistency.mjs` で戻り先スキーム・ブリッジ名などを照合。develop→main のPRに確認コメント | 形（メッセージ・スナップショットの項目）を変えたなら Swift 側も直す |
+| `ios/` の Swift・pbxproj・アイコン | **要る** | CI が共有 Swift の一致・pbxproj の整合を照合。develop→main のPRに「入れ直しが必要」のコメント（版番号だけの差分は除く） | 下の「入れ直し」を1コマンド実行 |
+| 版番号（`MARKETING_VERSION`） | 不要（次に入れ直すときに反映） | リリースのバンプPRが `sync-version.mjs` で同期（#535） | なし |
+
+**いつ入れ直すか: Web側が main へデプロイされた後に、`main` から。** 殻は本番URLを開くので、
+Web側と対になる変更（新しいブリッジのメッセージなど）は Web が先に本番へ出ていないと噛み合わない。
+`install-to-iphone.sh` は既定で `main` を取り込む（`IOS_BRANCH` で変えられる）。
+
+### 入れ直し（1コマンド）
+
+iPhone を Mac mini に USB で繋ぎ、ロックを解除しておく。**subpc から**:
+
+```bash
+ios/scripts/remote-install.sh        # Tailscale の guchimac-mini へSSHして下のスクリプトを実行
+```
+
+Mac mini の前にいるなら、Mac mini のチェックアウトで直接:
+
+```bash
+ios/scripts/install-to-iphone.sh     # main を取り込み → 整合チェック → ビルド → 入れ直し → 起動
+```
+
+- `MAC_HOST`（既定 `guchimac-mini`）・`MAC_REPO_DIR`（既定 `~/apps/myroom`）・`IOS_BRANCH`・`IOS_DEVICE`・
+  `IOS_SKIP_PULL=1` を環境変数で上書きできる
+- **`MAC_REPO_DIR` にチルダ（`~/x`）を付けて渡さない。** subpc 側のシェルが先に展開するため、Mac mini のパスにならない。
+  絶対パスか、subpc で展開させない `MAC_REPO_DIR='$HOME/x'` のようにシングルクォートで囲んで渡す（Mac mini 側で展開される）
+- **SSH 経由の署名はログインキーチェーンが開いていないと失敗する。** `codesign` のエラーが出たら Mac mini で
+  一度 `security unlock-keychain ~/Library/Keychains/login.keychain-db` を実行する
+- 作業ツリーに未コミットの変更があると中止する（誤って上書きしないため）
+- **subpc からは実行結果を確かめられない**（Xcode が無い）。スクリプトを直したときは Mac mini で1回実行して確かめる
+- 手作業のまま残るのは、初回の準備（Supabase・Xcode・デベロッパモード）と、約1年ごとの署名切れのときの入れ直しの起動だけ
+
 ## Mac mini でのビルド・iPhone へのインストール
 
 初回だけ「準備」を行い、2回目以降は「ビルドとインストール」だけで済みます。
@@ -38,7 +77,9 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 3. iPhone を Mac mini に USB で繋ぎ、iPhone の 設定 → プライバシーとセキュリティ → **デベロッパモード** を
    オンにする（再起動を求められる）
 
-### ビルドとインストール
+### ビルドとインストール（手で行う場合）
+
+**普段は上の「入れ直し（1コマンド）」でよい。** 以下は Xcode で直接確かめたいとき（デバッグなど）の手順。
 
 ```bash
 cd ~/apps/myroom        # Mac mini 上のチェックアウト
