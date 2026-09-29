@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.26.0",
+    date: "2026-09-29",
+    changes: [
+      "iPhoneのkurashioアプリで、ゴミの日や部屋の温湿度の異常をプッシュ通知で受け取れるようになりました。通知設定から端末ごとにオン・オフでき、テスト送信で届くか確かめられます。また、ホーム画面に置けるウィジェット（小・大）が追加され、アプリを開かなくても暮らしの状況を確認できます。",
+    ],
+  },
+  {
     version: "4.24.5",
     date: "2026-09-26",
     changes: [
