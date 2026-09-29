@@ -79,4 +79,35 @@ describe("CurrentReadings", () => {
     expect(html).not.toContain("ppm");
     expect(html).not.toContain("lx");
   });
+
+  it("選択機能を渡さなければタイルは押せない（屋外詳細などの従来の表示）", () => {
+    const html = render(<CurrentReadings readings={buildIndoorReadings(indoor)} />);
+    expect(html).not.toContain("<button");
+  });
+
+  it("選択中のタイルだけ aria-pressed が true で、押せない指標は disabled になる（#592）", () => {
+    const html = render(
+      <CurrentReadings
+        readings={buildIndoorReadings(indoor)}
+        selectedMetric="humidity"
+        onSelectMetric={() => {}}
+        selectableMetrics={["temperature", "humidity"]}
+      />
+    );
+    expect(html.match(/aria-pressed="true"/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="湿度のグラフを表示"');
+    // 温度・湿度は押せる。気圧・CO2・照度は履歴が無いので押せない
+    expect(html.match(/disabled=""/g)).toHaveLength(3);
+  });
+
+  it("押せる指標を省略したときは全部押せる（履歴の取得前）", () => {
+    const html = render(
+      <CurrentReadings
+        readings={buildIndoorReadings(indoor)}
+        selectedMetric="temperature"
+        onSelectMetric={() => {}}
+      />
+    );
+    expect(html).not.toContain('disabled=""');
+  });
 });

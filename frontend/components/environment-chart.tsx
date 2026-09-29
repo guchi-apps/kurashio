@@ -144,6 +144,8 @@ interface EnvironmentChartProps {
   onLineVisibilityChange: (key: string, visible: boolean) => void;
   /** スマホ表示時に指標タブを画面下部に固定する（モーダル内では false） */
   pinMetricTabsOnMobile?: boolean;
+  /** 指標の切り替えを別の場所（詳細パネルの「いまの値」）へ移したときに、上部のタブを描かない（#592） */
+  hideMetricTabs?: boolean;
   /**
    * 照明が点いていた時間帯（#368）。グラフの真下に、同じ時間軸で帯として敷く。
    * 空配列なら帯の枠だけを描き（＝記録が無い日）、省略すれば帯そのものを出さない。
@@ -376,6 +378,7 @@ export function EnvironmentChart({
   lineVisibility,
   onLineVisibilityChange,
   pinMetricTabsOnMobile = true,
+  hideMetricTabs = false,
   lightSegments,
   lightSourceLabel,
   lightThreshold = null,
@@ -1183,9 +1186,11 @@ export function EnvironmentChart({
 
   return (
     <div className="climate-card flex flex-col gap-0 overflow-hidden p-0">
-      <div className={cn("px-2 pt-4", pinMetricTabsOnMobile && "hidden sm:block")}>
-        {renderMetricTabs()}
-      </div>
+      {hideMetricTabs ? null : (
+        <div className={cn("px-2 pt-4", pinMetricTabsOnMobile && "hidden sm:block")}>
+          {renderMetricTabs()}
+        </div>
+      )}
 
       {chartSeriesRows.length > 0 && (
         <div className="px-3 pt-3">
@@ -1528,7 +1533,7 @@ export function EnvironmentChart({
         </p>
       </div>
 
-      {pinMetricTabsOnMobile && (
+      {pinMetricTabsOnMobile && !hideMetricTabs && (
         <div
           className="fixed inset-x-0 bottom-0 z-40 sm:hidden"
           aria-label="指標の選択"
