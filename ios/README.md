@@ -23,6 +23,45 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 
 **Web版とiOS版のリリースは独立しています。** Web版を main へ出すたびにアプリを入れ直す必要はありません。
 
+## iOS に関わる変更をしたときの手順（#568）
+
+**まず「何を触ったか」で分ける。入れ直しが要るのは `ios/` の実質的な変更だけ。**
+
+| 触ったもの | 入れ直し | 自動化されていること | 人がやること |
+|---|---|---|---|
+| `frontend/`・`backend/` のみ | 不要 | main へのマージで自動デプロイ。アプリは次に開いたとき（10分ごとの更新チェック #277）に反映 | なし |
+| `frontend/lib/native-app.ts`・`widget-sensors.ts` など Swift と形を共有するファイル | 不要（ただし Swift 側と揃っているか確認） | CI が `check-consistency.mjs` で戻り先スキーム・ブリッジ名などを照合。develop→main のPRに確認コメント | 形（メッセージ・スナップショットの項目）を変えたなら Swift 側も直す |
+| `ios/` の Swift・pbxproj・アイコン | **要る** | CI が共有 Swift の一致・pbxproj の整合を照合。develop→main のPRに「入れ直しが必要」のコメント（版番号だけの差分は除く） | 下の「入れ直し」を1コマンド実行 |
+| 版番号（`MARKETING_VERSION`） | 不要（次に入れ直すときに反映） | リリースのバンプPRが `sync-version.mjs` で同期（#535） | なし |
+
+**いつ入れ直すか: Web側が main へデプロイされた後に、`main` から。** 殻は本番URLを開くので、
+Web側と対になる変更（新しいブリッジのメッセージなど）は Web が先に本番へ出ていないと噛み合わない。
+`install-to-iphone.sh` は既定で `main` を取り込む（`IOS_BRANCH` で変えられる）。
+
+### 入れ直し（1コマンド）
+
+iPhone を Mac mini に USB で繋ぎ、ロックを解除しておく。**subpc から**:
+
+```bash
+ios/scripts/remote-install.sh        # Tailscale の guchimac-mini へSSHして下のスクリプトを実行
+```
+
+Mac mini の前にいるなら、Mac mini のチェックアウトで直接:
+
+```bash
+ios/scripts/install-to-iphone.sh     # main を取り込み → 整合チェック → ビルド → 入れ直し → 起動
+```
+
+- `MAC_HOST`（既定 `guchimac-mini`）・`MAC_REPO_DIR`（既定 `~/apps/myroom`）・`IOS_BRANCH`・`IOS_DEVICE`・
+  `IOS_SKIP_PULL=1` を環境変数で上書きできる
+- **`MAC_REPO_DIR` にチルダ（`~/x`）を付けて渡さない。** subpc 側のシェルが先に展開するため、Mac mini のパスにならない。
+  絶対パスか、subpc で展開させない `MAC_REPO_DIR='$HOME/x'` のようにシングルクォートで囲んで渡す（Mac mini 側で展開される）
+- **SSH 経由の署名はログインキーチェーンが開いていないと失敗する。** `codesign` のエラーが出たら Mac mini で
+  一度 `security unlock-keychain ~/Library/Keychains/login.keychain-db` を実行する
+- 作業ツリーに未コミットの変更があると中止する（誤って上書きしないため）
+- **subpc からは実行結果を確かめられない**（Xcode が無い）。スクリプトを直したときは Mac mini で1回実行して確かめる
+- 手作業のまま残るのは、初回の準備（Supabase・Xcode・デベロッパモード）と、約1年ごとの署名切れのときの入れ直しの起動だけ
+
 ## Mac mini でのビルド・iPhone へのインストール
 
 初回だけ「準備」を行い、2回目以降は「ビルドとインストール」だけで済みます。
@@ -38,7 +77,9 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 3. iPhone を Mac mini に USB で繋ぎ、iPhone の 設定 → プライバシーとセキュリティ → **デベロッパモード** を
    オンにする（再起動を求められる）
 
-### ビルドとインストール
+### ビルドとインストール（手で行う場合）
+
+**普段は上の「入れ直し（1コマンド）」でよい。** 以下は Xcode で直接確かめたいとき（デバッグなど）の手順。
 
 ```bash
 cd ~/apps/myroom        # Mac mini 上のチェックアウト
@@ -180,8 +221,7 @@ Xcode で開発ビルドを入れる限り `aps-environment` は `development` �
 ## ホーム画面ウィジェット（`KurashioWidget`・#537）
 
 室温・ゴミの日・今日の電気量を表示する、iOS標準のホーム画面ウィジェット（Small/Large）。
-**電気の操作（ボタン押下）は含まない**（インタラクティブWidget用のAppIntent実装が別途必要なため、
-フォローアップIssueへ切り出した）。
+**Largeには電気の操作ボタンも並ぶ**（#546。下の「電気の操作ボタン」の節）。
 
 ### 表示用データだけをApp Group経由で共有する（JWTは渡さない）
 
@@ -218,6 +258,11 @@ App Group共有のUserDefaultsへ書き写す方式にした。
   固定しており、ID 1 のセンサーを止めて非表示にすると、ダッシュボードがそのIDを取得しないため室温が「—」になった
 - 選んだセンサーをダッシュボードで非表示にすると一覧から消え、表示は自動へ倒れる（選んだ設定そのものは残る）
 - 受信が止まっているセンサーは値に「受信が止まっています」を添える
+- **Smallは CO2 も出し、「2つ目のセンサー」を選ぶと2台を上下2段で並べる**（#569）。2つ目が未選択・一覧から
+  消えた・1つ目と同じときは1台表示へ倒す（2つ目は `reading()` の既定フォールバックを使わず
+  `secondReading()` で探す。使うと消えたセンサーの段に既定の値が出て同じ値が2段並ぶ）
+- **CO2の段階（緑・黄・赤）の判定はWeb側の `getCo2Level()` だけが持つ。** `WidgetSensor.co2Level` で届いた
+  段階にSwiftが色を当てるだけで、ppmのしきい値はSwiftに書かない
 - **保存するときに項目ごとに型を整える**（`SharedWidgetSnapshot.save()`）。WKWebView から届いた辞書をそのまま
   JSONにして読む側で `JSONDecoder` に通すと、整数の項目が小数で書き出されただけで全体が読めず、
   「アプリでダッシュボードを開いてください」のままになる
@@ -229,6 +274,30 @@ Xcode16のファイルシステム同期グループ（`PBXFileSystemSynchronize
 1つのtargetにしか属せないため、共有コードを物理的に複製する形にした。変更するときは
 `ios/Kurashio/SharedWidgetSnapshot.swift` と `ios/KurashioWidget/SharedWidgetSnapshot.swift` の
 両方を揃えること。
+
+### 電気の操作ボタン（Large・#546）
+
+**ウィジェットは送信しない。認証を持たないので、アプリ（WKWebView）のログイン済みセッションで送る。**
+JWT・固定トークンをウィジェットへ渡す案は採っていない（別プロセスの refresh token 更新がログアウトを起こす・#537。
+専用トークンはバックエンドの「書き込みを2種類に絞る」方針とも衝突する）。代わりに、押すたびにアプリが前面に出る。
+
+1. Largeに、ダッシュボードで表示中のボタン（先頭4件）を「グループ名 ボタン名」で並べる（`remoteButtons`。
+   Web側 `lib/widget-remote-buttons.ts`）。`Button(intent: PressRemoteButtonIntent(...))`
+2. `PressRemoteButtonIntent`（`openAppWhenRun`）が押下（キー・ボタンID・時刻）を `WidgetPressStore` の
+   `pending` へ書き、アプリを前面に出す
+3. Web の `NativeWidgetPressReceiver`（ルートレイアウト）が、`widgetReady` でアプリから保留を取り、
+   `sendRemoteButton()` で送る。**どの画面でも受ける**（遷移させると未保存の入力が消えるため）
+4. 結果はアプリ内のトーストと、`widgetPressResult` の ack 経由でウィジェットのボタン（約30秒）に出す
+
+- **保留の中身をアプリから Web へ押し込まない。** 起動済みのときの合図（`myroom-native-widget-press-available`）は
+  中身が無く、Web が `widgetReady` で取りにいく（復帰時の自動リロードと競合して、取りこぼす・二重に送るため）
+- **最大1回だけ送る。** Web は送る前に押下キーを localStorage へ記録し（`lib/widget-press.ts`）、記録済みは
+  再送しない（結果は「不明」）。アプリは ack が届くまで保留を消さない。**60秒を過ぎた保留は捨てる**
+- `pending`・`last` は `Snapshot` と**別のキー**。`save()` が `Snapshot` を丸ごと書き直すので、同居させると
+  次の同期で消える
+- **`PressButtonIntent.swift` も両フォルダに同じ内容を置く**（`openAppWhenRun` の `perform()` はアプリの
+  プロセスで動くため、アプリ側でもコンパイルが要る）。変更は両方揃える
+- Swift は subpc でビルドできない。Mac mini と実機で、コールドスタート・起動済み・未ログイン・機内モードを確かめること
 
 ### App Group の登録が必要（初回だけ）
 

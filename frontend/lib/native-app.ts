@@ -7,6 +7,7 @@
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { supabaseConfig } from "@/lib/supabase-client";
+import type { WidgetRemoteButton } from "@/lib/widget-remote-buttons";
 import type { WidgetSensor } from "@/lib/widget-sensors";
 
 /** Googleログインの戻り先。Supabase の許可リダイレクトURLに登録が要る（ios/README.md） */
@@ -158,6 +159,8 @@ export interface WidgetSnapshot {
   garbageDaysUntil: number | null;
   todayKwh: number | null;
   todayCostYen: number | null;
+  /** Largeに並べる電気の操作ボタン（#546）。押した結果は `reportWidgetPressResult()` で返す */
+  remoteButtons: WidgetRemoteButton[];
 }
 
 /**
@@ -182,4 +185,31 @@ export function syncWidgetSnapshot(snapshot: WidgetSnapshot | null): boolean {
     bridge.postMessage({ type: "widgetSnapshotCleared" });
   }
   return true;
+}
+
+/** ウィジェットのボタンが押されたとき、アプリが保留の中身を届けるイベント（`detail` は {@link WidgetPress}） */
+export const NATIVE_WIDGET_PRESS_EVENT = "myroom-native-widget-press";
+
+/** 保留ができた合図（中身なし）。受け取ったら {@link requestWidgetPress} で取りにいく */
+export const NATIVE_WIDGET_PRESS_AVAILABLE_EVENT = "myroom-native-widget-press-available";
+
+/** ウィジェットで押されたボタン1回ぶん。`key` は押下ごとに変わる（二重送信の防止に使う） */
+export interface WidgetPress {
+  key: string;
+  buttonId: string;
+}
+
+export type WidgetPressStatus = "sent" | "failed" | "unknown";
+
+/** 保留中の押下があれば届けてもらう。アプリの外では何もしない */
+export function requestWidgetPress(): boolean {
+  const bridge = getBridge();
+  if (!bridge) return false;
+  bridge.postMessage({ type: "widgetReady" });
+  return true;
+}
+
+/** 押下の結果をアプリへ返す。アプリはこれを受けて初めて保留を消し、ウィジェットへ結果を出す */
+export function reportWidgetPressResult(key: string, status: WidgetPressStatus): void {
+  getBridge()?.postMessage({ type: "widgetPressResult", key, status });
 }

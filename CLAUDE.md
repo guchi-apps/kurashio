@@ -153,7 +153,15 @@ Supabase は共有プロジェクトで、`signOut()` を引数なしで呼ぶ�
 
 **`ios/` は Web版を WKWebView で開くだけの殻**（#526）。ビルド手順・Web版との更新対象の違いは
 `ios/README.md`。subpc には Xcode が無いので、Swift の変更はビルドを確かめられないまま渡る
-（Mac mini と実機で確認する）。Web側の分岐は `frontend/lib/native-app.ts` の `isNativeApp()`
+（Mac mini と実機で確認する）。
+**iOS に関わる変更をしたときの判別・入れ直しの手順は `ios/README.md` の「iOS に関わる変更をしたときの手順」が正**（#568）。
+要点だけ: 入れ直しが要るのは `ios/` の実質的な変更のみ（`frontend/`・`backend/` は何もしなくてよい）、入れ直しは
+**Web側が main へデプロイされた後に `main` から**、`ios/scripts/remote-install.sh`（subpc から）で1コマンド。
+CI の `frontend` ジョブが `ios/scripts/check-consistency.mjs` を毎回実行し、共有 Swift（`SharedWidgetSnapshot.swift` の2か所）・
+`MARKETING_VERSION`・ログイン戻り先スキーム・ブリッジ名・pbxproj のIDのずれを止める。**照合する値を増やすときはこのスクリプトへ足す**。
+develop→main のPRには `.github/workflows/ios-rebuild-notice.yml` が「入れ直しが必要」を自動でコメントする（`MARKETING_VERSION` の行だけの差分は除外）。
+
+Web側の分岐は `frontend/lib/native-app.ts` の `isNativeApp()`
 （ブリッジ `window.webkit.messageHandlers.kurashioAuth` の有無）に集め、**Web・PWA の挙動は変えない。**
 
 - **Googleログインはアプリ内だけ PKCE。共有クライアント（`lib/supabase-client.ts`）の flowType を
@@ -168,6 +176,12 @@ Supabase は共有プロジェクトで、`signOut()` を引数なしで呼ぶ�
   Swift の `AppConfig.authCallbackScheme` と `NATIVE_AUTH_REDIRECT` を揃えること
 - WKWebView では Service Worker・Web Push が使えない。`window.confirm()` はアプリ側で実装している
   （無いと常に false になり、記録の削除が効かない）
+- **ウィジェットの電気の操作ボタンは、ウィジェットから送らない**（#546）。JWT・固定トークンを渡さず、
+  `PressRemoteButtonIntent`（`openAppWhenRun`）がアプリを前面に出し、WebのセッションでWeb側
+  （`NativeWidgetPressReceiver`）が `POST /api/remote/buttons/{id}/send` を送る。**バックエンドに
+  ウィジェット専用の認証経路は足さない**（内部APIの書き込みは2種類まで）。受け渡しは Web の pull だけ
+  （アプリから中身を押し込むと自動リロードと競合する）で、押下キーの記録で最大1回に絞る。
+  詳細は `ios/README.md`「電気の操作ボタン」
 
 ## 設定への入口
 

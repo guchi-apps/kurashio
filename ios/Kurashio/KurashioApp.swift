@@ -43,6 +43,8 @@ struct ContentView: View {
             if model.failure != nil { model.retry() }
             // 別アプリ（設定アプリ）で通知の許可状態を変えて戻ってきたことがある（#527）
             model.refreshNotificationAuthorizationStatus()
+            // ウィジェットのボタンで起こされた・戻ってきたとき、保留があればWebへ知らせる（#546）
+            model.nudgePendingWidgetPress()
         }
     }
 }
