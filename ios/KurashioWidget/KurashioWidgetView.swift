@@ -10,7 +10,11 @@ struct KurashioWidgetView: View {
             if family == .systemLarge {
                 LargeContentView(snapshot: snapshot, reading: reading)
             } else {
-                SmallContentView(reading: reading)
+                if let second = entry.secondReading {
+                    SmallDualContentView(first: reading, second: second)
+                } else {
+                    SmallContentView(reading: reading)
+                }
             }
         } else {
             MessageView(text: "アプリでダッシュボードを開いてください")
@@ -53,6 +57,16 @@ private struct SmallContentView: View {
                     .foregroundStyle(.secondary)
             }
 
+            // CO2を測れないセンサーでは行ごと出さない（#569）
+            if let co2 = reading.co2 {
+                HStack(spacing: 4) {
+                    Co2Dot(level: reading.co2Level)
+                    Text("CO2 \(Int(co2.rounded())) ppm")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             StaleNote(stale: reading.stale)
 
             Spacer(minLength: 0)
@@ -60,6 +74,78 @@ private struct SmallContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .containerBackground(.fill.tertiary, for: .widget)
+    }
+}
+
+/// Small・2台表示（#569）: 上下2段に、名前と 温度・湿度・CO2 を1行ずつ並べる
+private struct SmallDualContentView: View {
+    let first: SharedWidgetSnapshot.RoomReading
+    let second: SharedWidgetSnapshot.RoomReading
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SensorBlock(reading: first)
+            Divider().padding(.vertical, 4)
+            SensorBlock(reading: second)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding()
+        .containerBackground(.fill.tertiary, for: .widget)
+    }
+}
+
+private struct SensorBlock: View {
+    let reading: SharedWidgetSnapshot.RoomReading
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(reading.name ?? "いまの室温")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(reading.temperature.map { String(format: "%.1f℃", $0) } ?? "—")
+                    .font(.system(size: 20, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(reading.humidity.map { "\(Int($0))%" } ?? "—")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if let co2 = reading.co2 {
+                    HStack(spacing: 2) {
+                        Co2Dot(level: reading.co2Level)
+                        Text("\(Int(co2.rounded()))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .lineLimit(1)
+            // 止まっている段にだけ添える
+            StaleNote(stale: reading.stale)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// CO2の目安の色点。段階の判定はWeb側（`getCo2Level()`）が済ませて `co2Level` で届く。
+/// ここでは色を当てるだけで、ppmのしきい値は持たない（#569）
+private struct Co2Dot: View {
+    let level: String?
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 7, height: 7)
+    }
+
+    private var color: Color {
+        switch level {
+        case "high": return .red
+        case "elevated": return .yellow
+        case "good": return .green
+        default: return .gray
+        }
     }
 }
 

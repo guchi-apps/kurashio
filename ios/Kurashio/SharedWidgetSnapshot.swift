@@ -24,6 +24,11 @@ enum SharedWidgetSnapshot {
         var name: String
         var temperature: Double?
         var humidity: Double?
+        /// CO2濃度（ppm）。測れないセンサー・#569より前のWeb版からは届かない
+        var co2: Double?
+        /// CO2の目安（`good` / `elevated` / `high`）。**判定はWeb側の `getCo2Level()` だけが持つ**ので、
+        /// Swiftはしきい値を持たず、届いた段階に色を当てるだけにする（#569）
+        var co2Level: String?
         /// 受信が止まっている（値は最後に受信した時点のもの）
         var stale: Bool
     }
@@ -50,6 +55,8 @@ enum SharedWidgetSnapshot {
         var name: String?
         var temperature: Double?
         var humidity: Double?
+        var co2: Double?
+        var co2Level: String?
         var stale: Bool
     }
 
@@ -65,6 +72,8 @@ enum SharedWidgetSnapshot {
                 name: sensor.name,
                 temperature: sensor.temperature,
                 humidity: sensor.humidity,
+                co2: sensor.co2,
+                co2Level: sensor.co2Level,
                 stale: sensor.stale
             )
         }
@@ -72,7 +81,25 @@ enum SharedWidgetSnapshot {
             name: nil,
             temperature: snapshot.roomTemperature,
             humidity: snapshot.roomHumidity,
+            co2: nil,
+            co2Level: nil,
             stale: false
+        )
+    }
+
+    /// 「2つ目のセンサー」の値（#569）。**`reading()` と違い、既定のセンサーへ倒さない。**
+    /// 一覧から消えた（ダッシュボードで非表示にした）センサーで既定へ倒すと、1つ目と同じ値が
+    /// 2段並ぶため、見つからなければ nil を返して呼ぶ側に2段目を出させない
+    static func secondReading(in snapshot: Snapshot, sensorId: Int?) -> RoomReading? {
+        guard let sensorId,
+              let sensor = snapshot.sensors?.first(where: { $0.id == sensorId }) else { return nil }
+        return RoomReading(
+            name: sensor.name,
+            temperature: sensor.temperature,
+            humidity: sensor.humidity,
+            co2: sensor.co2,
+            co2Level: sensor.co2Level,
+            stale: sensor.stale
         )
     }
 
@@ -134,6 +161,8 @@ enum SharedWidgetSnapshot {
             name: (raw["name"] as? String) ?? "デバイス \(id)",
             temperature: double(raw["temperature"]),
             humidity: double(raw["humidity"]),
+            co2: double(raw["co2"]),
+            co2Level: raw["co2Level"] as? String,
             stale: (raw["stale"] as? Bool) ?? false
         )
     }
