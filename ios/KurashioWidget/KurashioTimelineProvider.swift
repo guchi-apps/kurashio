@@ -8,6 +8,8 @@ struct KurashioEntry: TimelineEntry {
     let sensorId: Int?
     /// Smallで並べる2つ目のセンサーの `device_id`。nil は1台表示（#569）
     let secondSensorId: Int?
+    /// 直近の電気の操作の結果。`WidgetPressStore.resultLifetime` を過ぎると外れる（#546）
+    var pressResult: WidgetPressStore.Result?
 
     /// 室温・湿度の欄に出す値（選んだセンサー → 既定のセンサーの順に探す）
     var roomReading: SharedWidgetSnapshot.RoomReading? {
@@ -42,15 +44,28 @@ struct KurashioTimelineProvider: AppIntentTimelineProvider {
         // データの更新はネットワークではなくApp Group越しの書き込みで届く。Widget自身は
         // 積極的にリロードを要求せず、`WebViewModel.reloadWidgetTimelines()` が
         // ダッシュボードの表示のたびに明示的に再評価させる
-        Timeline(entries: [entry(for: configuration)], policy: .never)
+        let now = Date()
+        let current = entry(for: configuration, now: now)
+        guard let result = current.pressResult else {
+            return Timeline(entries: [current], policy: .never)
+        }
+        // 押した結果は一定時間だけ出して消す（状態は持たない・#106）。消すエントリを先に積んでおく
+        var cleared = current
+        cleared.pressResult = nil
+        let expiry = result.at.addingTimeInterval(WidgetPressStore.resultLifetime)
+        return Timeline(
+            entries: [current, KurashioEntry(date: expiry, snapshot: cleared.snapshot, sensorId: cleared.sensorId, secondSensorId: cleared.secondSensorId)],
+            policy: .never
+        )
     }
 
-    private func entry(for configuration: SelectSensorIntent) -> KurashioEntry {
+    private func entry(for configuration: SelectSensorIntent, now: Date = Date()) -> KurashioEntry {
         KurashioEntry(
-            date: Date(),
+            date: now,
             snapshot: SharedWidgetSnapshot.load(),
             sensorId: configuration.sensor?.id,
-            secondSensorId: configuration.secondSensor?.id
+            secondSensorId: configuration.secondSensor?.id,
+            pressResult: WidgetPressStore.lastResult(now: now)
         )
     }
 
@@ -63,7 +78,11 @@ struct KurashioTimelineProvider: AppIntentTimelineProvider {
             garbageLabel: "燃えるゴミ",
             garbageDaysUntil: 1,
             todayKwh: 9.4,
-            todayCostYen: 312
+            todayCostYen: 312,
+            remoteButtons: [
+                .init(id: "a", label: "照明オン", groupName: "リビング"),
+                .init(id: "b", label: "照明オフ", groupName: "リビング"),
+            ]
         )
     }
 }

@@ -180,8 +180,7 @@ Xcode で開発ビルドを入れる限り `aps-environment` は `development` �
 ## ホーム画面ウィジェット（`KurashioWidget`・#537）
 
 室温・ゴミの日・今日の電気量を表示する、iOS標準のホーム画面ウィジェット（Small/Large）。
-**電気の操作（ボタン押下）は含まない**（インタラクティブWidget用のAppIntent実装が別途必要なため、
-フォローアップIssueへ切り出した）。
+**Largeには電気の操作ボタンも並ぶ**（#546。下の「電気の操作ボタン」の節）。
 
 ### 表示用データだけをApp Group経由で共有する（JWTは渡さない）
 
@@ -234,6 +233,30 @@ Xcode16のファイルシステム同期グループ（`PBXFileSystemSynchronize
 1つのtargetにしか属せないため、共有コードを物理的に複製する形にした。変更するときは
 `ios/Kurashio/SharedWidgetSnapshot.swift` と `ios/KurashioWidget/SharedWidgetSnapshot.swift` の
 両方を揃えること。
+
+### 電気の操作ボタン（Large・#546）
+
+**ウィジェットは送信しない。認証を持たないので、アプリ（WKWebView）のログイン済みセッションで送る。**
+JWT・固定トークンをウィジェットへ渡す案は採っていない（別プロセスの refresh token 更新がログアウトを起こす・#537。
+専用トークンはバックエンドの「書き込みを2種類に絞る」方針とも衝突する）。代わりに、押すたびにアプリが前面に出る。
+
+1. Largeに、ダッシュボードで表示中のボタン（先頭4件）を「グループ名 ボタン名」で並べる（`remoteButtons`。
+   Web側 `lib/widget-remote-buttons.ts`）。`Button(intent: PressRemoteButtonIntent(...))`
+2. `PressRemoteButtonIntent`（`openAppWhenRun`）が押下（キー・ボタンID・時刻）を `WidgetPressStore` の
+   `pending` へ書き、アプリを前面に出す
+3. Web の `NativeWidgetPressReceiver`（ルートレイアウト）が、`widgetReady` でアプリから保留を取り、
+   `sendRemoteButton()` で送る。**どの画面でも受ける**（遷移させると未保存の入力が消えるため）
+4. 結果はアプリ内のトーストと、`widgetPressResult` の ack 経由でウィジェットのボタン（約30秒）に出す
+
+- **保留の中身をアプリから Web へ押し込まない。** 起動済みのときの合図（`myroom-native-widget-press-available`）は
+  中身が無く、Web が `widgetReady` で取りにいく（復帰時の自動リロードと競合して、取りこぼす・二重に送るため）
+- **最大1回だけ送る。** Web は送る前に押下キーを localStorage へ記録し（`lib/widget-press.ts`）、記録済みは
+  再送しない（結果は「不明」）。アプリは ack が届くまで保留を消さない。**60秒を過ぎた保留は捨てる**
+- `pending`・`last` は `Snapshot` と**別のキー**。`save()` が `Snapshot` を丸ごと書き直すので、同居させると
+  次の同期で消える
+- **`PressButtonIntent.swift` も両フォルダに同じ内容を置く**（`openAppWhenRun` の `perform()` はアプリの
+  プロセスで動くため、アプリ側でもコンパイルが要る）。変更は両方揃える
+- Swift は subpc でビルドできない。Mac mini と実機で、コールドスタート・起動済み・未ログイン・機内モードを確かめること
 
 ### App Group の登録が必要（初回だけ）
 

@@ -8,7 +8,7 @@ struct KurashioWidgetView: View {
     var body: some View {
         if let snapshot = entry.snapshot, let reading = entry.roomReading {
             if family == .systemLarge {
-                LargeContentView(snapshot: snapshot, reading: reading)
+                LargeContentView(snapshot: snapshot, reading: reading, pressResult: entry.pressResult)
             } else {
                 if let second = entry.secondReading {
                     SmallDualContentView(first: reading, second: second)
@@ -153,9 +153,10 @@ private struct Co2Dot: View {
 private struct LargeContentView: View {
     let snapshot: SharedWidgetSnapshot.Snapshot
     let reading: SharedWidgetSnapshot.RoomReading
+    let pressResult: WidgetPressStore.Result?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(reading.name.map { "kurashio・\($0)" } ?? "kurashio")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -173,6 +174,8 @@ private struct LargeContentView: View {
             GarbageRow(label: snapshot.garbageLabel, daysUntil: snapshot.garbageDaysUntil)
 
             EnergyRow(kwh: snapshot.todayKwh, costYen: snapshot.todayCostYen)
+
+            RemoteButtonsGrid(buttons: snapshot.remoteButtons ?? [], result: pressResult)
 
             Spacer(minLength: 0)
         }
@@ -242,6 +245,54 @@ private struct GarbageRow: View {
         case .some(1): return "明日が収集日"
         case .some(let n) where n > 1: return "\(n)日後が収集日"
         default: return "収集日"
+        }
+    }
+}
+
+/// 電気の操作ボタン（#546）。押すとアプリが前面に出て、ログイン済みのWebセッションが送る
+/// （ウィジェットは認証を持たない）。状態は持たず、押した結果だけを一定時間ボタンに出す
+private struct RemoteButtonsGrid: View {
+    let buttons: [SharedWidgetSnapshot.RemoteButton]
+    let result: WidgetPressStore.Result?
+
+    var body: some View {
+        if !buttons.isEmpty {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                ForEach(buttons.prefix(4), id: \.id) { button in
+                    Button(intent: PressRemoteButtonIntent(buttonId: button.id)) {
+                        HStack(spacing: 4) {
+                            Text(title(for: button))
+                                .font(.caption.bold())
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                            Spacer(minLength: 0)
+                            if let mark = mark(for: button) {
+                                Text(mark.text)
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(mark.color)
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .frame(maxWidth: .infinity, minHeight: 30)
+                        .background(Color.accentColor.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func title(for button: SharedWidgetSnapshot.RemoteButton) -> String {
+        button.groupName.isEmpty ? button.label : "\(button.groupName) \(button.label)"
+    }
+
+    private func mark(for button: SharedWidgetSnapshot.RemoteButton) -> (text: String, color: Color)? {
+        guard let result, result.buttonId == button.id else { return nil }
+        switch result.status {
+        case .sent: return ("送信", .green)
+        case .failed: return ("失敗", .red)
+        case .unknown: return ("不明", .orange)
         }
     }
 }

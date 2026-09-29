@@ -2,8 +2,7 @@ import SwiftUI
 import WidgetKit
 
 /// iPhoneホーム画面用ウィジェット（#537）。室温・ゴミの日・今日の電気量を表示する。
-/// 電気の操作（ボタン押下）はインタラクティブWidgetの実装が別途必要になるため、
-/// このウィジェットのスコープには含めていない（フォローアップIssueへ切り出し済み）。
+/// Largeには電気の操作ボタンも並ぶ（#546）。押すとアプリが前面に出て、Webのセッションで送る。
 struct KurashioWidget: Widget {
     let kind: String = "KurashioWidget"
 
@@ -13,7 +12,7 @@ struct KurashioWidget: Widget {
             KurashioWidgetView(entry: entry)
         }
         .configurationDisplayName("kurashio")
-        .description("室温・湿度・CO2・ゴミの日・今日の電気量を表示します。")
+        .description("室温・湿度・CO2・ゴミの日・今日の電気量を表示し、Largeでは電気の操作もできます。")
         .supportedFamilies([.systemSmall, .systemLarge])
     }
 }

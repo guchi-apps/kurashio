@@ -123,6 +123,7 @@ import type {
 } from "@/lib/cleaning";
 import { buildGarbageHighlight, type GarbageSchedule } from "@/lib/garbage";
 import type { WidgetSnapshot } from "@/lib/native-app";
+import { buildWidgetRemoteButtons } from "@/lib/widget-remote-buttons";
 import { buildWidgetSensors, pickDefaultWidgetSensor } from "@/lib/widget-sensors";
 import {
   countRemoteButtons,
@@ -1119,6 +1120,7 @@ export function MyRoomDashboard() {
   // 走らないよう、値の中身が変わったときだけ新しいオブジェクトを作る
   // （センサーの一覧は30秒ごとの取得で作り直されるため、同じ内容なら送らない判定は
   // `NativeWidgetSnapshotSync` が中身で行う）
+  const widgetRemoteButtons = useMemo(() => buildWidgetRemoteButtons(remoteButtons), [remoteButtons]);
   const widgetSnapshot: WidgetSnapshot = useMemo(
     () => ({
       roomTemperature: defaultWidgetSensor?.temperature ?? null,
@@ -1129,8 +1131,17 @@ export function MyRoomDashboard() {
       garbageDaysUntil,
       todayKwh,
       todayCostYen,
+      remoteButtons: widgetRemoteButtons,
     }),
-    [defaultWidgetSensor, widgetSensors, garbageLabel, garbageDaysUntil, todayKwh, todayCostYen]
+    [
+      defaultWidgetSensor,
+      widgetSensors,
+      garbageLabel,
+      garbageDaysUntil,
+      todayKwh,
+      todayCostYen,
+      widgetRemoteButtons,
+    ]
   );
 
   // ログイン状態が確定するまでと、確定後の初期読み込みが終わるまでは読み込み画面（#250）

@@ -33,6 +33,13 @@ enum SharedWidgetSnapshot {
         var stale: Bool
     }
 
+    /// Largeに並べる電気の操作ボタン1つぶん（#546。Web側の `WidgetRemoteButton`）
+    struct RemoteButton: Codable, Hashable {
+        var id: String
+        var label: String
+        var groupName: String
+    }
+
     struct Snapshot: Codable {
         /// センサーを選んでいないときに出す室温・湿度（Web側の `pickDefaultWidgetSensor()`）
         var roomTemperature: Double?
@@ -47,6 +54,8 @@ enum SharedWidgetSnapshot {
         var garbageDaysUntil: Int?
         var todayKwh: Double?
         var todayCostYen: Int?
+        /// 電気の操作ボタン（ダッシュボードで非表示にしたものを除く）。#546 より前のWeb版からは届かない
+        var remoteButtons: [RemoteButton]?
     }
 
     /// ウィジェットに出す室温・湿度。`name` は選んだ（または既定の）センサーの名前で、
@@ -130,7 +139,8 @@ enum SharedWidgetSnapshot {
             garbageLabel: raw["garbageLabel"] as? String,
             garbageDaysUntil: double(raw["garbageDaysUntil"]).map { Int($0.rounded()) },
             todayKwh: double(raw["todayKwh"]),
-            todayCostYen: double(raw["todayCostYen"]).map { Int($0.rounded()) }
+            todayCostYen: double(raw["todayCostYen"]).map { Int($0.rounded()) },
+            remoteButtons: (raw["remoteButtons"] as? [[String: Any]])?.compactMap(remoteButton)
         )
         guard let defaults else { return }
         do {
@@ -154,6 +164,15 @@ enum SharedWidgetSnapshot {
         defaults?.removeObject(forKey: key)
     }
 
+    private static func remoteButton(_ raw: [String: Any]) -> RemoteButton? {
+        guard let id = raw["id"] as? String, !id.isEmpty else { return nil }
+        return RemoteButton(
+            id: id,
+            label: (raw["label"] as? String) ?? id,
+            groupName: (raw["groupName"] as? String) ?? ""
+        )
+    }
+
     private static func sensor(_ raw: [String: Any]) -> Sensor? {
         guard let id = double(raw["id"]).map({ Int($0.rounded()) }) else { return nil }
         return Sensor(
@@ -171,5 +190,91 @@ enum SharedWidgetSnapshot {
         guard let number = value as? NSNumber else { return nil }
         let result = number.doubleValue
         return result.isFinite ? result : nil
+    }
+}
+
+// MARK: - ウィジェットのボタン押下（#546）
+
+/// ウィジェットのボタン押下を、アプリ（WKWebViewのログイン済みセッション）へ受け渡す保存領域。
+///
+/// **`Snapshot` とは別のキーに置く。** `SharedWidgetSnapshot.save()` はダッシュボードの同期のたびに
+/// `Snapshot` を丸ごと作り直して書くため、同居させると押下の結果や保留が次の同期で消える。
+/// ウィジェットは認証を持たない（JWTを渡すとrefresh tokenの奪い合いでログアウトする・#537）。
+/// 押されたら `pending` を書いてアプリを前面に出し、Webが送って結果（`last`）を書き戻す。
+enum WidgetPressStore {
+    private static let pendingKey = "widgetPendingPress"
+    private static let lastKey = "widgetLastPress"
+    /// これを過ぎた保留は捨てる。あとから古い操作が突然実行されるのを防ぐ
+    static let pendingLifetime: TimeInterval = 60
+    /// ウィジェットに結果を出しておく時間
+    static let resultLifetime: TimeInterval = 30
+
+    /// `key` は押下ごとに変わる（Webが二重送信を避けるのに使う）
+    struct Pending: Codable {
+        var key: String
+        var buttonId: String
+        var pressedAt: Date
+    }
+
+    enum Status: String, Codable {
+        case sent, failed, unknown
+    }
+
+    struct Result: Codable {
+        var buttonId: String
+        var status: Status
+        var at: Date
+    }
+
+    private static let logger = Logger(subsystem: "com.gucchii.kurashio", category: "WidgetPress")
+
+    private static var defaults: UserDefaults? {
+        UserDefaults(suiteName: "group.com.gucchii.kurashio")
+    }
+
+    static func setPending(buttonId: String, now: Date = Date()) {
+        let pending = Pending(key: UUID().uuidString, buttonId: buttonId, pressedAt: now)
+        guard let data = try? JSONEncoder().encode(pending) else { return }
+        defaults?.set(data, forKey: pendingKey)
+    }
+
+    /// 保留中の押下。期限切れは消して nil を返す
+    static func pending(now: Date = Date()) -> Pending? {
+        guard
+            let data = defaults?.data(forKey: pendingKey),
+            let pending = try? JSONDecoder().decode(Pending.self, from: data)
+        else { return nil }
+        if now.timeIntervalSince(pending.pressedAt) > pendingLifetime {
+            defaults?.removeObject(forKey: pendingKey)
+            return nil
+        }
+        return pending
+    }
+
+    /// Webから結果（ack）が届いたときだけ消す。届く前に消すと、リロードで途切れた押下を取りこぼす
+    static func acknowledge(key: String, status: Status, now: Date = Date()) {
+        guard let pending = pending(now: now), pending.key == key else { return }
+        defaults?.removeObject(forKey: pendingKey)
+        let result = Result(buttonId: pending.buttonId, status: status, at: now)
+        if let data = try? JSONEncoder().encode(result) {
+            defaults?.set(data, forKey: lastKey)
+        } else {
+            logger.error("押下の結果を保存できない")
+        }
+    }
+
+    /// ウィジェットに出す直近の結果。`resultLifetime` を過ぎたら nil
+    static func lastResult(now: Date = Date()) -> Result? {
+        guard
+            let data = defaults?.data(forKey: lastKey),
+            let result = try? JSONDecoder().decode(Result.self, from: data),
+            now.timeIntervalSince(result.at) < resultLifetime
+        else { return nil }
+        return result
+    }
+
+    static func clear() {
+        defaults?.removeObject(forKey: pendingKey)
+        defaults?.removeObject(forKey: lastKey)
     }
 }
