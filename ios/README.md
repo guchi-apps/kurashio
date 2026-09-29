@@ -8,7 +8,7 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 |---|---|
 | 表示名 | kurashio |
 | Bundle ID | `com.gucchii.kurashio`（AIDE-ios の `com.gucchii.AIDEios` とは別） |
-| 署名 | Automatic（個人チーム `6AA3WFTR94`） |
+| 署名 | Automatic（有料の Apple Developer Program のチーム `6AA3WFTR94`。無料の個人チームではプッシュ通知を使えない・#560） |
 | 対応 | iPhone・縦向き・iOS 18以上 |
 | ログインの戻り先 | `kurashio://auth-callback` |
 
@@ -47,10 +47,11 @@ open ios/Kurashio.xcodeproj
 ```
 
 1. 上部のスキームが `Kurashio`、実行先が自分の iPhone になっていることを確かめる
-2. ⌘R（Product → Run）。初回は Signing & Capabilities の Team が個人チームになっているかを確かめる
+2. ⌘R（Product → Run）。初回は Signing & Capabilities の Team が Apple Developer Program のチーム
+   （Personal Team ではない方）になっているかを確かめる
 3. 初回だけ、iPhone の 設定 → 一般 → VPNとデバイス管理 で自分の開発者証明書を「信頼」する
 
-**無料の個人チームで署名したアプリは7日で起動できなくなります**（有料の Apple Developer Program なら1年）。
+**Apple Developer Program で署名した開発ビルドは約1年で起動できなくなります**（無料の個人チームなら7日）。
 起動しなくなったら、同じ手順でもう一度 ⌘R すれば直ります（ログイン状態は残ります）。
 
 ### バージョンの同期（`MARKETING_VERSION`）
@@ -136,14 +137,22 @@ Web版のプッシュ通知の設定とは独立**で、同じiPhoneでPWA（Saf
    Push Notifications capability を有効化する
 2. Certificates, Identifiers & Profiles → Keys で APNs用のKeyを作成し `.p8` をダウンロードする
    （1回きり）。Key IDを控える
-3. Xcode → Signing & Capabilities → `+ Capability` → Push Notifications を追加する
-   （`Kurashio.entitlements`の`aps-environment`はリポジトリに含めてあるので、Xcode上で
-   capabilityを足すだけでよい）
+3. Xcode → Signing & Capabilities で Push Notifications が表示されていることを確かめる
+   （`Kurashio.entitlements` に `aps-environment` を含めてあるので、capability を足し直す必要はない）
 4. サーバー側の値（`APNS_AUTH_KEY`・`APNS_KEY_ID`・`APNS_TEAM_ID`・`APNS_BUNDLE_ID`・
    `APNS_ENVIRONMENT`）の登録手順はリポジトリルートの`README.md`「本番環境へのデプロイ」を参照
 
-**無料の個人チーム署名では`aps-environment`が常に`development`になる**（TestFlight/App Store配布
-（対象外）をしない限り）。そのため`APNS_ENVIRONMENT`は`sandbox`のままでよく、APNsの
+#### 署名は Apple Developer Program が前提（#560）
+
+**無料の個人チーム（Personal Team）は Push Notifications capability に対応していない。**
+`aps-environment` を含む entitlements を個人チームで署名しようとすると「Personal development teams ...
+do not support the Push Notifications capability」となり、プロビジョニングプロファイルを作れずビルドが止まる。
+このアプリはプッシュ通知（#527）を使うため、**署名は有料の Apple Developer Program のチームで行う**
+（`Kurashio.entitlements` から `aps-environment` を外して個人チームへ戻す形は採っていない）。
+`project.pbxproj` の `DEVELOPMENT_TEAM` と、サーバー側の `APNS_TEAM_ID` はこのチームの Team ID に揃える。
+
+Xcode で開発ビルドを入れる限り `aps-environment` は `development` になる（TestFlight/App Store配布は
+対象外）。そのため`APNS_ENVIRONMENT`は`sandbox`のままでよく、APNsの
 `api.sandbox.push.apple.com`だけに疎通する。
 
 ### Mac mini・iPhoneでの初回設定・テスト手順（#527）
@@ -210,6 +219,18 @@ Xcode16のファイルシステム同期グループ（`PBXFileSystemSynchronize
 Xcodeでの両target（`Kurashio`・`KurashioWidgetExtension`）へのApp Groups Capability追加が要る。**
 `entitlements` ファイル自体はリポジトリに含めたが、Developer Portal側の登録はコードだけでは
 完結しない。手順は起票済みの手作業Issueを参照。
+
+### ウィジェットの Info.plist（#560）
+
+**`NSExtension` 辞書は `KurashioWidget/Info.plist` に直接書いている。** ターゲットは
+`GENERATE_INFOPLIST_FILE = YES` のままで、生成分（表示名など）と `INFOPLIST_FILE` の中身が合成される。
+`INFOPLIST_KEY_NSExtensionPointIdentifier` は `INFOPLIST_KEY_` で生成できるキーではなく**黙って無視される**ため、
+それだけだとインストール時に `AppexBundleMissingNSExtensionDict` で失敗する。
+
+`KurashioWidget/` はファイルシステム同期グループなので、置いた `Info.plist` がそのままだと
+Copy Bundle Resources に入り `Multiple commands produce ... Info.plist` になる。`project.pbxproj` の
+`PBXFileSystemSynchronizedBuildFileExceptionSet` で `Info.plist` をターゲットのメンバーから外している
+（Xcode の File Inspector で Target Membership のチェックが外れて見えるのが正しい状態）。
 
 ### project.pbxproj はXcodeでの確認が前提
 

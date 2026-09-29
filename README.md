@@ -991,9 +991,9 @@ ALTER 権限がない場合は、スクリプトが表示する SQL を管理者
 | `vapid-subject` | PWAプッシュ通知用のVAPID subject（`VAPID_SUBJECT` として同期。例: `mailto:you@example.com`） |
 | `apns-auth-key` | iOSアプリ（`ios/`）向けAPNs通知（#527）用のAuth Key（`.p8`）。**PEMをそのまま入れず、ファイルの中身を1行のbase64にしてから**入れる（`base64 -i AuthKey_XXXX.p8 \| tr -d '\n'`）。`APNS_AUTH_KEY` として同期 |
 | `apns-key-id` | 上記Auth KeyのKey ID（Apple Developer Portal → Certificates, Identifiers & Profiles → Keys）。`APNS_KEY_ID` として同期 |
-| `apns-team-id` | Apple DeveloperのTeam ID。`ios/README.md` の個人チーム（`6AA3WFTR94`）と同じ値。`APNS_TEAM_ID` として同期 |
+| `apns-team-id` | Apple Developer ProgramのTeam ID。`ios/README.md` の署名チーム（`6AA3WFTR94`・`DEVELOPMENT_TEAM`）と同じ値。`APNS_TEAM_ID` として同期 |
 | `apns-bundle-id` | iOSアプリのBundle ID（`com.gucchii.kurashio`）。`APNS_BUNDLE_ID` として同期 |
-| `apns-environment` | `sandbox` または `production`。`APNS_ENVIRONMENT` として同期。**無料の個人チーム署名では`aps-environment`エンタイトルメントが常に`development`になるため、TestFlight/App Store配布（対象外）をしない限りは`sandbox`のまま** |
+| `apns-environment` | `sandbox` または `production`。`APNS_ENVIRONMENT` として同期。**Xcodeからの開発ビルドでは`aps-environment`エンタイトルメントが`development`になるため、TestFlight/App Store配布（対象外）をしない限りは`sandbox`のまま**（プッシュ通知には有料のApple Developer Programでの署名が必要。無料の個人チームでは署名できない・`ios/README.md`参照） |
 
 **VAPID 鍵の初回登録**（PWA プッシュ通知用・1 回だけ。#293・#337）:
 

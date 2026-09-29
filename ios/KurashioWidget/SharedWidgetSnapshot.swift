@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// メインアプリとWidget Extensionが共有する、ホーム画面ウィジェット表示用の値（#537）。
 ///
@@ -28,22 +29,60 @@ enum SharedWidgetSnapshot {
         var todayCostYen: Int?
     }
 
+    private static let logger = Logger(subsystem: "com.gucchii.kurashio", category: "WidgetSnapshot")
+
+    /// App Group が entitlements で有効になっていないと、`UserDefaults(suiteName:)` は nil を返さず
+    /// **そのプロセス専用の保存先**を黙って返す（アプリが書いた値をWidgetが読めない）。
+    /// 共有コンテナのURLが取れるかで、App Group が本当に効いているかを見分ける（#560）
     private static var defaults: UserDefaults? {
-        UserDefaults(suiteName: suiteName)
+        if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: suiteName) == nil {
+            logger.error("App Group \(suiteName, privacy: .public) のコンテナが取れない。entitlements・Developer Portal の登録を確認すること")
+            return nil
+        }
+        return UserDefaults(suiteName: suiteName)
     }
 
-    /// Web側（`frontend/lib/native-app.ts` の `syncWidgetSnapshot()`）から届いた辞書をそのまま保存する
+    /// Web側（`frontend/lib/native-app.ts` の `syncWidgetSnapshot()`）から届いた辞書を保存する。
+    ///
+    /// **届いた辞書をそのままJSONにして、読む側で `JSONDecoder` に通す形にしないこと**（#560）。
+    /// WKWebView から届く数値は `NSNumber`（JSの `null` は `NSNull`）で、整数の項目
+    /// （`todayCostYen` など）が `312.0` のように小数で書き出されると `Int` へ読めず、
+    /// **1項目の食い違いでスナップショット全体が nil になり**、Widgetは「ダッシュボードを開いて
+    /// ください」のままになる。ここで項目ごとに型を整えてから `Snapshot` として保存する
     static func save(_ raw: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: raw) else { return }
-        defaults?.set(data, forKey: key)
+        let snapshot = Snapshot(
+            roomTemperature: double(raw["roomTemperature"]),
+            roomHumidity: double(raw["roomHumidity"]),
+            garbageLabel: raw["garbageLabel"] as? String,
+            garbageDaysUntil: double(raw["garbageDaysUntil"]).map { Int($0.rounded()) },
+            todayKwh: double(raw["todayKwh"]),
+            todayCostYen: double(raw["todayCostYen"]).map { Int($0.rounded()) }
+        )
+        guard let defaults else { return }
+        do {
+            defaults.set(try JSONEncoder().encode(snapshot), forKey: key)
+        } catch {
+            logger.error("スナップショットを保存できない: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     static func load() -> Snapshot? {
         guard let data = defaults?.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(Snapshot.self, from: data)
+        do {
+            return try JSONDecoder().decode(Snapshot.self, from: data)
+        } catch {
+            logger.error("スナップショットを読めない: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     static func clear() {
         defaults?.removeObject(forKey: key)
+    }
+
+    private static func double(_ value: Any?) -> Double? {
+        guard let number = value as? NSNumber else { return nil }
+        let result = number.doubleValue
+        return result.isFinite ? result : nil
     }
 }
