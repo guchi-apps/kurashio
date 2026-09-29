@@ -23,6 +23,7 @@ import {
 import type { DisplayOrderItem } from "@/lib/display-order";
 import { getInheritanceChain } from "@/lib/device-inheritance";
 import { buildIndoorReadings } from "@/lib/device-metrics";
+import { getAvailableChartMetrics } from "@/lib/chart-utils";
 import { useChartHistory } from "@/lib/use-chart-history";
 import type {
   ChartMetric,
@@ -206,6 +207,20 @@ export function DeviceDetailPanel({
   //`useChartHistory` が読み込んだ範囲。照明の履歴も同じ窓で取らないと、グラフの端で
   // 帯だけが途切れる（#368）。ポーリングで末尾が伸びるたびに取り直すので、
   //「継続中」の長さもグラフと同じ間隔で更新される
+  // タイルを押して指標を切り替える（#592）。押せる指標はグラフ自身の自動フォールバックと
+  // 同じ関数で決める。履歴の取得前は空になるので、そのあいだはタイルを無効化しない
+  const indoorReadings = useMemo(() => buildIndoorReadings(latest), [latest]);
+  const availableMetrics = useMemo(
+    () => getAvailableChartMetrics(historyData, deviceIds),
+    [historyData, deviceIds]
+  );
+  // タブは既定で出さない（読み込み中に一瞬出て消えるとグラフが動く）。タイルが無い（＝読み値が空、
+  // またはグラフに出せるのにタイルが無い指標がある）ときだけ、切り替える手段として残す
+  const showMetricTabs =
+    indoorReadings.length === 0 ||
+    availableMetrics.some(
+      (metric) => !indoorReadings.some((reading) => reading.metric === metric)
+    );
   const historyStartMs = historyData.length ? historyData[0].datetimeObj : null;
   const historyEndMs = historyData.length
     ? historyData[historyData.length - 1].datetimeObj
@@ -386,8 +401,11 @@ export function DeviceDetailPanel({
           {view === "chart" ? (
             <>
             <CurrentReadings
-              readings={buildIndoorReadings(latest)}
+              readings={indoorReadings}
               measuredAt={latest?.datetime}
+              selectedMetric={chartMetric}
+              onSelectMetric={setChartMetric}
+              selectableMetrics={availableMetrics.length > 0 ? availableMetrics : undefined}
             />
             {lightStatus ? <LightStatusStrip result={lightStatus} /> : null}
             <div className="px-3 py-3">
@@ -410,6 +428,7 @@ export function DeviceDetailPanel({
                 lineVisibility={lineVisibility}
                 onLineVisibilityChange={onLineVisibilityChange ?? (() => {})}
                 pinMetricTabsOnMobile={false}
+                hideMetricTabs={!showMetricTabs}
                 lightSegments={lightSource ? lightHistory?.segments : undefined}
                 lightSourceLabel={lightSource ? formatLightSourceLabel(lightSource) : undefined}
                 lightThreshold={lightSource?.threshold ?? null}

@@ -251,6 +251,20 @@
   .reading-cell {
     @apply flex flex-col gap-1.5 rounded-[14px] bg-muted px-3 py-2.5;
   }
+  /* 押してグラフを切り替えるタイル（#592）。選択中は指標の色で枠取りする */
+  .reading-cell-button {
+    @apply cursor-pointer border-2 border-transparent text-left transition-colors;
+  }
+  .reading-cell-button[aria-pressed="true"] {
+    @apply bg-card;
+    border-color: var(--metric-color);
+  }
+  .reading-cell-button:disabled {
+    @apply cursor-not-allowed opacity-40;
+  }
+  .reading-cell-button:focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
   .reading-cell-label {
     @apply flex items-center gap-1.5 text-[11px] text-muted-foreground;
   }
