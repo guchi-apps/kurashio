@@ -54,6 +54,8 @@ ios/scripts/install-to-iphone.sh     # main を取り込み → 整合チェッ�
 
 - `MAC_HOST`（既定 `guchimac-mini`）・`MAC_REPO_DIR`（既定 `~/apps/myroom`）・`IOS_BRANCH`・`IOS_DEVICE`・
   `IOS_SKIP_PULL=1` を環境変数で上書きできる
+- **`MAC_REPO_DIR` にチルダ（`~/x`）を付けて渡さない。** subpc 側のシェルが先に展開するため、Mac mini のパスにならない。
+  絶対パスか、subpc で展開させない `MAC_REPO_DIR='$HOME/x'` のようにシングルクォートで囲んで渡す（Mac mini 側で展開される）
 - **SSH 経由の署名はログインキーチェーンが開いていないと失敗する。** `codesign` のエラーが出たら Mac mini で
   一度 `security unlock-keychain ~/Library/Keychains/login.keychain-db` を実行する
 - 作業ツリーに未コミットの変更があると中止する（誤って上書きしないため）

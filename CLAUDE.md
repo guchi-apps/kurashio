@@ -159,7 +159,9 @@ Supabase は共有プロジェクトで、`signOut()` を引数なしで呼ぶ�
 **Web側が main へデプロイされた後に `main` から**、`ios/scripts/remote-install.sh`（subpc から）で1コマンド。
 CI の `frontend` ジョブが `ios/scripts/check-consistency.mjs` を毎回実行し、共有 Swift（`SharedWidgetSnapshot.swift` の2か所）・
 `MARKETING_VERSION`・ログイン戻り先スキーム・ブリッジ名・pbxproj のIDのずれを止める。**照合する値を増やすときはこのスクリプトへ足す**。
-develop→main のPRには `.github/workflows/ios-rebuild-notice.yml` が「入れ直しが必要」を自動でコメントする（`MARKETING_VERSION` の行だけの差分は除外）。Web側の分岐は `frontend/lib/native-app.ts` の `isNativeApp()`
+develop→main のPRには `.github/workflows/ios-rebuild-notice.yml` が「入れ直しが必要」を自動でコメントする（`MARKETING_VERSION` の行だけの差分は除外）。
+
+Web側の分岐は `frontend/lib/native-app.ts` の `isNativeApp()`
 （ブリッジ `window.webkit.messageHandlers.kurashioAuth` の有無）に集め、**Web・PWA の挙動は変えない。**
 
 - **Googleログインはアプリ内だけ PKCE。共有クライアント（`lib/supabase-client.ts`）の flowType を
