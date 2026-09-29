@@ -18,9 +18,24 @@ enum SharedWidgetSnapshot {
     private static let suiteName = "group.com.gucchii.kurashio"
     private static let key = "widgetSnapshot"
 
+    /// 「ウィジェットを編集」で選べるセンサー1つぶんの値（#560。Web側の `WidgetSensor`）
+    struct Sensor: Codable, Hashable {
+        var id: Int
+        var name: String
+        var temperature: Double?
+        var humidity: Double?
+        /// 受信が止まっている（値は最後に受信した時点のもの）
+        var stale: Bool
+    }
+
     struct Snapshot: Codable {
+        /// センサーを選んでいないときに出す室温・湿度（Web側の `pickDefaultWidgetSensor()`）
         var roomTemperature: Double?
         var roomHumidity: Double?
+        /// 上の値を取ったセンサーのID
+        var defaultSensorId: Int?
+        /// 選べるセンサーの一覧（ダッシュボードの並び順）。#560 より前のWeb版からは届かない
+        var sensors: [Sensor]?
         /// 次に収集される品目名（複数なら「・」区切り）。予定が無ければ nil
         var garbageLabel: String?
         /// 上記の収集日までの日数（0=今日、1=明日）
@@ -29,7 +44,37 @@ enum SharedWidgetSnapshot {
         var todayCostYen: Int?
     }
 
+    /// ウィジェットに出す室温・湿度。`name` は選んだ（または既定の）センサーの名前で、
+    /// `sensors` を持たない古いスナップショットでは nil
+    struct RoomReading {
+        var name: String?
+        var temperature: Double?
+        var humidity: Double?
+        var stale: Bool
+    }
+
     private static let logger = Logger(subsystem: "com.gucchii.kurashio", category: "WidgetSnapshot")
+
+    /// 選んだセンサー（`sensorId`）の値。選んでいない・一覧から消えた（ダッシュボードで非表示にした）
+    /// ときは、Web側が決めた既定のセンサーへ倒す
+    static func reading(in snapshot: Snapshot, sensorId: Int?) -> RoomReading {
+        let sensors = snapshot.sensors ?? []
+        if let sensor = sensors.first(where: { $0.id == sensorId })
+            ?? sensors.first(where: { $0.id == snapshot.defaultSensorId }) {
+            return RoomReading(
+                name: sensor.name,
+                temperature: sensor.temperature,
+                humidity: sensor.humidity,
+                stale: sensor.stale
+            )
+        }
+        return RoomReading(
+            name: nil,
+            temperature: snapshot.roomTemperature,
+            humidity: snapshot.roomHumidity,
+            stale: false
+        )
+    }
 
     /// App Group が entitlements で有効になっていないと、`UserDefaults(suiteName:)` は nil を返さず
     /// **そのプロセス専用の保存先**を黙って返す（アプリが書いた値をWidgetが読めない）。
@@ -53,6 +98,8 @@ enum SharedWidgetSnapshot {
         let snapshot = Snapshot(
             roomTemperature: double(raw["roomTemperature"]),
             roomHumidity: double(raw["roomHumidity"]),
+            defaultSensorId: double(raw["defaultSensorId"]).map { Int($0.rounded()) },
+            sensors: (raw["sensors"] as? [[String: Any]])?.compactMap(sensor),
             garbageLabel: raw["garbageLabel"] as? String,
             garbageDaysUntil: double(raw["garbageDaysUntil"]).map { Int($0.rounded()) },
             todayKwh: double(raw["todayKwh"]),
@@ -78,6 +125,17 @@ enum SharedWidgetSnapshot {
 
     static func clear() {
         defaults?.removeObject(forKey: key)
+    }
+
+    private static func sensor(_ raw: [String: Any]) -> Sensor? {
+        guard let id = double(raw["id"]).map({ Int($0.rounded()) }) else { return nil }
+        return Sensor(
+            id: id,
+            name: (raw["name"] as? String) ?? "デバイス \(id)",
+            temperature: double(raw["temperature"]),
+            humidity: double(raw["humidity"]),
+            stale: (raw["stale"] as? Bool) ?? false
+        )
     }
 
     private static func double(_ value: Any?) -> Double? {

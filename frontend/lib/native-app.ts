@@ -7,6 +7,7 @@
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { supabaseConfig } from "@/lib/supabase-client";
+import type { WidgetSensor } from "@/lib/widget-sensors";
 
 /** Googleログインの戻り先。Supabase の許可リダイレクトURLに登録が要る（ios/README.md） */
 export const NATIVE_AUTH_REDIRECT = "kurashio://auth-callback";
@@ -141,8 +142,16 @@ export async function startNativeGoogleSignIn(): Promise<boolean> {
 
 /** iPhoneのホーム画面ウィジェット（`ios/KurashioWidget/`）が表示する値 */
 export interface WidgetSnapshot {
+  /**
+   * ウィジェットでセンサーを選んでいないときに出す室温・湿度（`pickDefaultWidgetSensor()`）。
+   * `sensors` を読めない古いアプリのためにも残している
+   */
   roomTemperature: number | null;
   roomHumidity: number | null;
+  /** 上の値を取ったセンサーのID。該当が無ければ null */
+  defaultSensorId: number | null;
+  /** 「ウィジェットを編集」で選べるセンサーの一覧（#560・`buildWidgetSensors()`） */
+  sensors: WidgetSensor[];
   /** 次に収集される品目名（複数なら「・」区切り）。予定が無ければ null */
   garbageLabel: string | null;
   /** 上記の収集日までの日数（0=今日、1=明日）。`garbageLabel` が null なら意味を持たない */

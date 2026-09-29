@@ -6,11 +6,11 @@ struct KurashioWidgetView: View {
     let entry: KurashioEntry
 
     var body: some View {
-        if let snapshot = entry.snapshot {
+        if let snapshot = entry.snapshot, let reading = entry.roomReading {
             if family == .systemLarge {
-                LargeContentView(snapshot: snapshot)
+                LargeContentView(snapshot: snapshot, reading: reading)
             } else {
-                SmallContentView(snapshot: snapshot)
+                SmallContentView(reading: reading)
             }
         } else {
             MessageView(text: "アプリでダッシュボードを開いてください")
@@ -34,23 +34,26 @@ private struct MessageView: View {
 
 /// Small（155×155pt相当）: 室温・湿度の2項目だけに絞る
 private struct SmallContentView: View {
-    let snapshot: SharedWidgetSnapshot.Snapshot
+    let reading: SharedWidgetSnapshot.RoomReading
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("いまの室温")
+            Text(reading.name.map { "\($0)の室温" } ?? "いまの室温")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
 
-            Text(snapshot.roomTemperature.map { String(format: "%.1f℃", $0) } ?? "—")
+            Text(reading.temperature.map { String(format: "%.1f℃", $0) } ?? "—")
                 .font(.system(size: 34, weight: .bold))
                 .minimumScaleFactor(0.6)
 
-            if let humidity = snapshot.roomHumidity {
+            if let humidity = reading.humidity {
                 Text("湿度 \(Int(humidity))%")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            StaleNote(stale: reading.stale)
 
             Spacer(minLength: 0)
         }
@@ -63,17 +66,21 @@ private struct SmallContentView: View {
 /// Large（329×345pt相当）: 室温・湿度・次のゴミ収集・今日の電気量の4項目
 private struct LargeContentView: View {
     let snapshot: SharedWidgetSnapshot.Snapshot
+    let reading: SharedWidgetSnapshot.RoomReading
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("kurashio")
+            Text(reading.name.map { "kurashio・\($0)" } ?? "kurashio")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
 
             HStack(spacing: 20) {
-                MetricColumn(label: "室温", value: snapshot.roomTemperature.map { String(format: "%.1f℃", $0) } ?? "—")
-                MetricColumn(label: "湿度", value: snapshot.roomHumidity.map { "\(Int($0))%" } ?? "—")
+                MetricColumn(label: "室温", value: reading.temperature.map { String(format: "%.1f℃", $0) } ?? "—")
+                MetricColumn(label: "湿度", value: reading.humidity.map { "\(Int($0))%" } ?? "—")
             }
+
+            StaleNote(stale: reading.stale)
 
             Divider()
 
@@ -85,6 +92,19 @@ private struct LargeContentView: View {
         }
         .padding()
         .containerBackground(.fill.tertiary, for: .widget)
+    }
+}
+
+/// 選んだセンサーの受信が止まっているとき、値が「いま」のものではないことを添える
+private struct StaleNote: View {
+    let stale: Bool
+
+    var body: some View {
+        if stale {
+            Text("受信が止まっています")
+                .font(.caption2)
+                .foregroundStyle(.orange)
+        }
     }
 }
 

@@ -125,6 +125,8 @@ describe("syncWidgetSnapshot", () => {
   const snapshot: WidgetSnapshot = {
     roomTemperature: 24.6,
     roomHumidity: 58,
+    defaultSensorId: 3,
+    sensors: [{ id: 3, name: "リビング", temperature: 24.6, humidity: 58, stale: false }],
     garbageLabel: "燃えるゴミ",
     garbageDaysUntil: 1,
     todayKwh: 9.4,
