@@ -123,6 +123,7 @@ import type {
 } from "@/lib/cleaning";
 import { buildGarbageHighlight, type GarbageSchedule } from "@/lib/garbage";
 import type { WidgetSnapshot } from "@/lib/native-app";
+import { buildWidgetSensors, pickDefaultWidgetSensor } from "@/lib/widget-sensors";
 import {
   countRemoteButtons,
   countVisibleRemoteButtons,
@@ -360,7 +361,6 @@ export function MyRoomDashboard() {
   const { isAuthenticated, setIsAuthenticated } = useAuthState();
   // ヘッダーを fixed にしたので、同じ高さの余白を本文の前に置く（#513）
   const [headerBarRef, headerBarHeight] = useElementHeight<HTMLDivElement>();
-  const [latestData, setLatestData] = useState<LatestData | null>(null);
   const [latestByDevice, setLatestByDevice] = useState<Record<number, LatestData | null>>(
     {}
   );
@@ -548,7 +548,6 @@ export function MyRoomDashboard() {
   const applyOfflineSnapshot = useCallback((snapshot: DashboardOfflineSnapshot) => {
     const sensorIds = getSensorDeviceIds(snapshot.devices);
     setLatestByDevice(snapshot.latestByDevice);
-    setLatestData(snapshot.latestByDevice[PRIMARY_SENSOR_DEVICE_ID] ?? null);
     setDailyStatsByDevice(snapshot.dailyStatsByDevice);
     setAirconLatest(snapshot.airconLatest);
     setDevices(snapshot.devices);
@@ -835,7 +834,6 @@ export function MyRoomDashboard() {
         setIsOfflineMode(false);
         setOfflineSnapshot(null);
         setLatestByDevice(data.latestByDevice);
-        setLatestData(data.latest);
         setDailyStatsByDevice(data.dailyStatsByDevice);
         setAirconLatest(data.airconLatest);
         setLatestLoadStatusByDevice(data.latestLoadStatusByDevice);
@@ -1093,8 +1091,22 @@ export function MyRoomDashboard() {
 
   // iOSアプリのホーム画面ウィジェット（#537）へ渡す値。JWTは含めず、表示中の値だけを渡す
   const garbageHighlight = garbageSchedule ? buildGarbageHighlight(garbageSchedule) : null;
-  const roomTemperature = latestData?.temperature ?? null;
-  const roomHumidity = latestData?.humidity ?? null;
+  // どのセンサーを出すかはウィジェットの「ウィジェットを編集」で選ぶ。選んでいないときは
+  // 並び順で最初の受信中のセンサー（ID 1 固定だと、止めて隠したときに「—」になる。#560）
+  const widgetSensors = useMemo(
+    () =>
+      buildWidgetSensors(
+        visibleDisplayOrder,
+        latestByDevice,
+        (deviceId) =>
+          devices.find((device) => device.id === deviceId)?.name ??
+          deviceNames[deviceId] ??
+          `デバイス ${deviceId}`,
+        (deviceId) => staleByDevice.get(deviceId)?.stale ?? false
+      ),
+    [visibleDisplayOrder, latestByDevice, devices, deviceNames, staleByDevice]
+  );
+  const defaultWidgetSensor = pickDefaultWidgetSensor(widgetSensors);
   const garbageLabel = garbageHighlight
     ? garbageHighlight.day.categories.map((category) => category.name).join("・")
     : null;
@@ -1105,16 +1117,20 @@ export function MyRoomDashboard() {
   // ログイン判定の前後でフックの数が変わり、React #310 で画面ごと落ちる。#559）。
   // 無関係な再描画のたびにWidgetの再読み込み（WidgetKitの1日あたりの上限あり）が
   // 走らないよう、値の中身が変わったときだけ新しいオブジェクトを作る
+  // （センサーの一覧は30秒ごとの取得で作り直されるため、同じ内容なら送らない判定は
+  // `NativeWidgetSnapshotSync` が中身で行う）
   const widgetSnapshot: WidgetSnapshot = useMemo(
     () => ({
-      roomTemperature,
-      roomHumidity,
+      roomTemperature: defaultWidgetSensor?.temperature ?? null,
+      roomHumidity: defaultWidgetSensor?.humidity ?? null,
+      defaultSensorId: defaultWidgetSensor?.id ?? null,
+      sensors: widgetSensors,
       garbageLabel,
       garbageDaysUntil,
       todayKwh,
       todayCostYen,
     }),
-    [roomTemperature, roomHumidity, garbageLabel, garbageDaysUntil, todayKwh, todayCostYen]
+    [defaultWidgetSensor, widgetSensors, garbageLabel, garbageDaysUntil, todayKwh, todayCostYen]
   );
 
   // ログイン状態が確定するまでと、確定後の初期読み込みが終わるまでは読み込み画面（#250）

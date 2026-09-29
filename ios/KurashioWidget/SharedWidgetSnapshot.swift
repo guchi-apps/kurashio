@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// メインアプリとWidget Extensionが共有する、ホーム画面ウィジェット表示用の値（#537）。
 ///
@@ -17,9 +18,24 @@ enum SharedWidgetSnapshot {
     private static let suiteName = "group.com.gucchii.kurashio"
     private static let key = "widgetSnapshot"
 
+    /// 「ウィジェットを編集」で選べるセンサー1つぶんの値（#560。Web側の `WidgetSensor`）
+    struct Sensor: Codable, Hashable {
+        var id: Int
+        var name: String
+        var temperature: Double?
+        var humidity: Double?
+        /// 受信が止まっている（値は最後に受信した時点のもの）
+        var stale: Bool
+    }
+
     struct Snapshot: Codable {
+        /// センサーを選んでいないときに出す室温・湿度（Web側の `pickDefaultWidgetSensor()`）
         var roomTemperature: Double?
         var roomHumidity: Double?
+        /// 上の値を取ったセンサーのID
+        var defaultSensorId: Int?
+        /// 選べるセンサーの一覧（ダッシュボードの並び順）。#560 より前のWeb版からは届かない
+        var sensors: [Sensor]?
         /// 次に収集される品目名（複数なら「・」区切り）。予定が無ければ nil
         var garbageLabel: String?
         /// 上記の収集日までの日数（0=今日、1=明日）
@@ -28,22 +44,103 @@ enum SharedWidgetSnapshot {
         var todayCostYen: Int?
     }
 
-    private static var defaults: UserDefaults? {
-        UserDefaults(suiteName: suiteName)
+    /// ウィジェットに出す室温・湿度。`name` は選んだ（または既定の）センサーの名前で、
+    /// `sensors` を持たない古いスナップショットでは nil
+    struct RoomReading {
+        var name: String?
+        var temperature: Double?
+        var humidity: Double?
+        var stale: Bool
     }
 
-    /// Web側（`frontend/lib/native-app.ts` の `syncWidgetSnapshot()`）から届いた辞書をそのまま保存する
+    private static let logger = Logger(subsystem: "com.gucchii.kurashio", category: "WidgetSnapshot")
+
+    /// 選んだセンサー（`sensorId`）の値。選んでいない・一覧から消えた（ダッシュボードで非表示にした）
+    /// ときは、Web側が決めた既定のセンサーへ倒す
+    static func reading(in snapshot: Snapshot, sensorId: Int?) -> RoomReading {
+        let sensors = snapshot.sensors ?? []
+        if let sensor = sensors.first(where: { $0.id == sensorId })
+            ?? sensors.first(where: { $0.id == snapshot.defaultSensorId }) {
+            return RoomReading(
+                name: sensor.name,
+                temperature: sensor.temperature,
+                humidity: sensor.humidity,
+                stale: sensor.stale
+            )
+        }
+        return RoomReading(
+            name: nil,
+            temperature: snapshot.roomTemperature,
+            humidity: snapshot.roomHumidity,
+            stale: false
+        )
+    }
+
+    /// App Group が entitlements で有効になっていないと、`UserDefaults(suiteName:)` は nil を返さず
+    /// **そのプロセス専用の保存先**を黙って返す（アプリが書いた値をWidgetが読めない）。
+    /// 共有コンテナのURLが取れるかで、App Group が本当に効いているかを見分ける（#560）
+    private static var defaults: UserDefaults? {
+        if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: suiteName) == nil {
+            logger.error("App Group \(suiteName, privacy: .public) のコンテナが取れない。entitlements・Developer Portal の登録を確認すること")
+            return nil
+        }
+        return UserDefaults(suiteName: suiteName)
+    }
+
+    /// Web側（`frontend/lib/native-app.ts` の `syncWidgetSnapshot()`）から届いた辞書を保存する。
+    ///
+    /// **届いた辞書をそのままJSONにして、読む側で `JSONDecoder` に通す形にしないこと**（#560）。
+    /// WKWebView から届く数値は `NSNumber`（JSの `null` は `NSNull`）で、整数の項目
+    /// （`todayCostYen` など）が `312.0` のように小数で書き出されると `Int` へ読めず、
+    /// **1項目の食い違いでスナップショット全体が nil になり**、Widgetは「ダッシュボードを開いて
+    /// ください」のままになる。ここで項目ごとに型を整えてから `Snapshot` として保存する
     static func save(_ raw: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: raw) else { return }
-        defaults?.set(data, forKey: key)
+        let snapshot = Snapshot(
+            roomTemperature: double(raw["roomTemperature"]),
+            roomHumidity: double(raw["roomHumidity"]),
+            defaultSensorId: double(raw["defaultSensorId"]).map { Int($0.rounded()) },
+            sensors: (raw["sensors"] as? [[String: Any]])?.compactMap(sensor),
+            garbageLabel: raw["garbageLabel"] as? String,
+            garbageDaysUntil: double(raw["garbageDaysUntil"]).map { Int($0.rounded()) },
+            todayKwh: double(raw["todayKwh"]),
+            todayCostYen: double(raw["todayCostYen"]).map { Int($0.rounded()) }
+        )
+        guard let defaults else { return }
+        do {
+            defaults.set(try JSONEncoder().encode(snapshot), forKey: key)
+        } catch {
+            logger.error("スナップショットを保存できない: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     static func load() -> Snapshot? {
         guard let data = defaults?.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(Snapshot.self, from: data)
+        do {
+            return try JSONDecoder().decode(Snapshot.self, from: data)
+        } catch {
+            logger.error("スナップショットを読めない: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     static func clear() {
         defaults?.removeObject(forKey: key)
+    }
+
+    private static func sensor(_ raw: [String: Any]) -> Sensor? {
+        guard let id = double(raw["id"]).map({ Int($0.rounded()) }) else { return nil }
+        return Sensor(
+            id: id,
+            name: (raw["name"] as? String) ?? "デバイス \(id)",
+            temperature: double(raw["temperature"]),
+            humidity: double(raw["humidity"]),
+            stale: (raw["stale"] as? Bool) ?? false
+        )
+    }
+
+    private static func double(_ value: Any?) -> Double? {
+        guard let number = value as? NSNumber else { return nil }
+        let result = number.doubleValue
+        return result.isFinite ? result : nil
     }
 }

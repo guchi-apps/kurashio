@@ -39,6 +39,16 @@
 		0786C9B99F5F10A963F3C85F /* KurashioWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KurashioWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3F1C8A2E7B94D05A6E21C7B3 /* Exceptions for "KurashioWidget" folder in "KurashioWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 4FFCADDFE12A84120132C906 /* KurashioWidgetExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		4B52A1F33061842200F8C8D5 /* Kurashio */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -47,6 +57,9 @@
 		};
 		EABB005DEF35F3465E8D8B37 /* KurashioWidget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				3F1C8A2E7B94D05A6E21C7B3 /* Exceptions for "KurashioWidget" folder in "KurashioWidgetExtension" target */,
+			);
 			path = KurashioWidget;
 			sourceTree = "<group>";
 		};
@@ -344,7 +357,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.27.1;
+				MARKETING_VERSION = 4.28.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -378,7 +391,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.27.1;
+				MARKETING_VERSION = 4.28.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -400,14 +413,14 @@
 				DEVELOPMENT_TEAM = 6AA3WFTR94;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = kurashio;
-				INFOPLIST_KEY_NSExtensionPointIdentifier = "com.apple.widgetkit-extension";
+				INFOPLIST_FILE = KurashioWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 4.27.1;
+				MARKETING_VERSION = 4.28.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio.KurashioWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -429,14 +442,14 @@
 				DEVELOPMENT_TEAM = 6AA3WFTR94;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = kurashio;
-				INFOPLIST_KEY_NSExtensionPointIdentifier = "com.apple.widgetkit-extension";
+				INFOPLIST_FILE = KurashioWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 4.27.1;
+				MARKETING_VERSION = 4.28.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio.KurashioWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
