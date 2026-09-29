@@ -9,11 +9,16 @@ import WidgetKit
 /// 選ばない（既定）ときは、Web側が決めたセンサー（並び順で最初の受信中のもの）を出す。
 struct SelectSensorIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource { "表示するセンサー" }
-    static var description: IntentDescription { "室温・湿度を表示するセンサーを選びます。" }
+    static var description: IntentDescription { "室温・湿度・CO2を表示するセンサーを選びます。Smallでは2つ目を選ぶと2台を並べて表示します。" }
 
     /// nil は「自動」（ダッシュボードの並び順で最初の受信中のセンサー）
     @Parameter(title: "センサー")
     var sensor: SensorEntity?
+
+    /// Smallで2台を並べるときの2つ目（#569）。nil は1台表示。
+    /// 1つ目と同じ・一覧から消えたセンサーのときも1台表示へ倒す（`SharedWidgetSnapshot.secondReading`）
+    @Parameter(title: "2つ目のセンサー")
+    var secondSensor: SensorEntity?
 }
 
 struct SensorEntity: AppEntity {
