@@ -167,13 +167,13 @@ Supabase は共有プロジェクトで、`signOut()` を引数なしで呼ぶ�
 - 戻り先 `kurashio://auth-callback` は Supabase の許可リダイレクトURLへの登録が要る。
   Swift の `AppConfig.authCallbackScheme` と `NATIVE_AUTH_REDIRECT` を揃えること
 - WKWebView では Service Worker・Web Push が使えない。`window.confirm()` はアプリ側で実装している
+  （無いと常に false になり、記録の削除が効かない）
 - **ウィジェットの電気の操作ボタンは、ウィジェットから送らない**（#546）。JWT・固定トークンを渡さず、
   `PressRemoteButtonIntent`（`openAppWhenRun`）がアプリを前面に出し、WebのセッションでWeb側
   （`NativeWidgetPressReceiver`）が `POST /api/remote/buttons/{id}/send` を送る。**バックエンドに
   ウィジェット専用の認証経路は足さない**（内部APIの書き込みは2種類まで）。受け渡しは Web の pull だけ
   （アプリから中身を押し込むと自動リロードと競合する）で、押下キーの記録で最大1回に絞る。
   詳細は `ios/README.md`「電気の操作ボタン」
-  （無いと常に false になり、記録の削除が効かない）
 
 ## 設定への入口
 
