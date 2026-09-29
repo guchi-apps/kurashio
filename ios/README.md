@@ -56,8 +56,14 @@ ios/scripts/install-to-iphone.sh     # main を取り込み → 整合チェッ�
   `IOS_SKIP_PULL=1` を環境変数で上書きできる
 - **`MAC_REPO_DIR` にチルダ（`~/x`）を付けて渡さない。** subpc 側のシェルが先に展開するため、Mac mini のパスにならない。
   絶対パスか、subpc で展開させない `MAC_REPO_DIR='$HOME/x'` のようにシングルクォートで囲んで渡す（Mac mini 側で展開される）
-- **SSH 経由の署名はログインキーチェーンが開いていないと失敗する。** `codesign` のエラーが出たら Mac mini で
-  一度 `security unlock-keychain ~/Library/Keychains/login.keychain-db` を実行する
+- **subpc から鍵で入れること（初回だけ）。** 端末の無い環境（手作業セッション・無人実行）はパスワードを打てない。
+  subpc で `ssh-keygen -t ed25519`（鍵が無ければ）→ `ssh-copy-id guchimac-mini` を実行しておく
+- **SSH 経由の署名はログインキーチェーンが開いていないと失敗する。** `remote-install.sh` は同じ `ssh -t` の中で
+  ビルドの前に `security unlock-keychain` を実行するので、**Mac mini のログインパスワードを聞かれたら入力する**。
+  別の接続で先に解除しても次の接続には引き継がれない（`errSecInternalComponent`）。Mac mini で直接
+  `install-to-iphone.sh` を実行するときだけ、事前に一度 `security unlock-keychain ~/Library/Keychains/login.keychain-db` を実行する
+- `remote-install.sh` は取り込み（`git fetch` / `merge --ff-only`）を先に SSH で済ませてからスクリプトを呼ぶ
+  （Mac mini のチェックアウトが古くても起動できる）。入れ先は実機（`reality == physical`）かつ接続中（`tunnelState == connected`）の iPhone だけを自動選択する
 - 作業ツリーに未コミットの変更があると中止する（誤って上書きしないため）
 - **subpc からは実行結果を確かめられない**（Xcode が無い）。スクリプトを直したときは Mac mini で1回実行して確かめる
 - 手作業のまま残るのは、初回の準備（Supabase・Xcode・デベロッパモード）と、約1年ごとの署名切れのときの入れ直しの起動だけ
