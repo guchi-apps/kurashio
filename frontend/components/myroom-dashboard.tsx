@@ -1091,6 +1091,32 @@ export function MyRoomDashboard() {
     return "データ未到達";
   };
 
+  // iOSアプリのホーム画面ウィジェット（#537）へ渡す値。JWTは含めず、表示中の値だけを渡す
+  const garbageHighlight = garbageSchedule ? buildGarbageHighlight(garbageSchedule) : null;
+  const roomTemperature = latestData?.temperature ?? null;
+  const roomHumidity = latestData?.humidity ?? null;
+  const garbageLabel = garbageHighlight
+    ? garbageHighlight.day.categories.map((category) => category.name).join("・")
+    : null;
+  const garbageDaysUntil = garbageHighlight?.day.days_until ?? null;
+  const todayKwh = energyBreakdown?.today.kwh ?? null;
+  const todayCostYen = energyBreakdown?.today.cost_yen ?? null;
+  // **フックなので、下の認証ゲートの早期 return より前に置くこと**（後ろに置くと
+  // ログイン判定の前後でフックの数が変わり、React #310 で画面ごと落ちる。#559）。
+  // 無関係な再描画のたびにWidgetの再読み込み（WidgetKitの1日あたりの上限あり）が
+  // 走らないよう、値の中身が変わったときだけ新しいオブジェクトを作る
+  const widgetSnapshot: WidgetSnapshot = useMemo(
+    () => ({
+      roomTemperature,
+      roomHumidity,
+      garbageLabel,
+      garbageDaysUntil,
+      todayKwh,
+      todayCostYen,
+    }),
+    [roomTemperature, roomHumidity, garbageLabel, garbageDaysUntil, todayKwh, todayCostYen]
+  );
+
   // ログイン状態が確定するまでと、確定後の初期読み込みが終わるまでは読み込み画面（#250）
   const authGate = resolveAuthGate(isAuthenticated, layoutReady);
   if (authGate === "loading") {
@@ -1150,30 +1176,6 @@ export function MyRoomDashboard() {
         minute: "2-digit",
       })
     : null;
-
-  // iOSアプリのホーム画面ウィジェット（#537）へ渡す値。JWTは含めず、表示中の値だけを渡す
-  const garbageHighlight = garbageSchedule ? buildGarbageHighlight(garbageSchedule) : null;
-  const roomTemperature = latestData?.temperature ?? null;
-  const roomHumidity = latestData?.humidity ?? null;
-  const garbageLabel = garbageHighlight
-    ? garbageHighlight.day.categories.map((category) => category.name).join("・")
-    : null;
-  const garbageDaysUntil = garbageHighlight?.day.days_until ?? null;
-  const todayKwh = energyBreakdown?.today.kwh ?? null;
-  const todayCostYen = energyBreakdown?.today.cost_yen ?? null;
-  // 無関係な再描画のたびにWidgetの再読み込み（WidgetKitの1日あたりの上限あり）が
-  // 走らないよう、値の中身が変わったときだけ新しいオブジェクトを作る
-  const widgetSnapshot: WidgetSnapshot = useMemo(
-    () => ({
-      roomTemperature,
-      roomHumidity,
-      garbageLabel,
-      garbageDaysUntil,
-      todayKwh,
-      todayCostYen,
-    }),
-    [roomTemperature, roomHumidity, garbageLabel, garbageDaysUntil, todayKwh, todayCostYen]
-  );
 
   return (
     <div className="w-full pb-10">
