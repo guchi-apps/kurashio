@@ -44,6 +44,12 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # iOSの殻（ios/）とWeb側で揃えておく値の照合（#568）。依存もビルドも要らないので
+      # npm ci の前に、条件を付けず毎回実行する（照合相手の一方は frontend/ 側にあり、
+      # ios/ を触らないPRでもずれる）。別ジョブにすると notify の判定から漏れるため、ここに置く。
+      - name: Check iOS consistency
+        run: node ios/scripts/check-consistency.mjs
+
       - name: Install dependencies
         working-directory: ./frontend
         run: npm ci

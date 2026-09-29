@@ -1,0 +1,81 @@
+name: iOS rebuild notice
+
+# develop→main のPRに、iOSアプリの入れ直しが要る変更（ios/ の実質的な差分）が含まれるとき、
+# PRへコメントで知らせる（#568）。Web版（frontend/・backend/）の変更はアプリの中へそのまま
+# 届くので、入れ直しの判定は ios/ のみ。**MARKETING_VERSION の行だけの差分は除く**
+# （リリースのバンプで毎回書き換わるため、含めると毎回誤通知になる。#535）。
+# ブリッジ・スナップショットの形を Swift と共有するファイルの変更は、入れ直しとは別の
+# 「Swift側と揃っているか確認」として出す。
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  notice:
+    # フォークからのPRはトークンが書き込めないため対象外
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build comment
+        id: build
+        run: |
+          base="origin/${{ github.base_ref }}"
+          # -U0 の差分から、ファイル見出しと MARKETING_VERSION の行を除いた変更行を数える
+          shell_changes=$(git diff -U0 "$base"...HEAD -- ios/ \
+            | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' \
+            | grep -vE '^[+-][[:space:]]*MARKETING_VERSION = [^;]+;[[:space:]]*$' | wc -l)
+          shared=$(git diff --name-only "$base"...HEAD -- \
+            frontend/lib/native-app.ts frontend/lib/widget-sensors.ts \
+            frontend/components/native-widget-snapshot-sync.tsx)
+          {
+            echo '<!-- ios-rebuild-notice -->'
+            if [ "$shell_changes" -gt 0 ]; then
+              echo '### 📱 iOSアプリの入れ直しが必要です'
+              echo
+              echo '`ios/` に殻の変更が含まれています。**Web版が main へデプロイされた後に**、'
+              echo 'subpc から `ios/scripts/remote-install.sh`（Mac mini なら `ios/scripts/install-to-iphone.sh`）を実行してください。'
+              echo '手順の詳細は `ios/README.md` を参照。'
+              echo
+            fi
+            if [ -n "$shared" ]; then
+              echo '### 🔗 Swift側と揃っているか確認してください'
+              echo
+              echo 'ブリッジ・スナップショットの形を Swift と共有するファイルが変わっています（入れ直しが必須という意味ではありません）。'
+              echo
+              echo "$shared" | sed 's/^/- `/; s/$/`/'
+            fi
+          } > comment.md
+          if [ "$shell_changes" -gt 0 ] || [ -n "$shared" ]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 同じPRへ何度もコメントを積まないよう、印付きのコメントを更新する。
+      # 対象が無くなった（差分が消えた）場合は、前回のコメントを消す。
+      - name: Post or update comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDED: ${{ steps.build.outputs.needed }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          id=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.body | contains("<!-- ios-rebuild-notice -->")) | .id] | first // empty')
+          if [ "$NEEDED" = "true" ]; then
+            if [ -n "$id" ]; then
+              gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$id" -F body=@comment.md
+            else
+              gh pr comment "$PR" --repo "${{ github.repository }}" --body-file comment.md
+            fi
+          elif [ -n "$id" ]; then
+            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/$id"
+          fi
