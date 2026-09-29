@@ -7,6 +7,8 @@ import {
   formatMetricNumber,
   formatReading,
   pickCardReadings,
+  buildCo2CardRow,
+  getCo2Level,
 } from "@/lib/device-metrics";
 import type { LatestData } from "@/lib/types";
 
@@ -98,5 +100,26 @@ describe("device-metrics", () => {
     expect(formatReading(temp)).toBe("24.6°C");
     expect(formatReading(humid)).toBe("58%");
     expect(formatReading(pressure)).toBe("1006 hPa");
+  });
+});
+
+describe("CO2の行", () => {
+  it("目安の境界（1000・1500ppm）で区切る", () => {
+    expect(getCo2Level(999).level).toBe("good");
+    expect(getCo2Level(1000).level).toBe("elevated");
+    expect(getCo2Level(1499).level).toBe("elevated");
+    expect(getCo2Level(1500).level).toBe("high");
+  });
+
+  it("CO2を測れるセンサーには行が付き、測れないセンサーには付かない", () => {
+    const readings = pickCardReadings(buildIndoorReadings(fullIndoor));
+    expect(buildCo2CardRow(fullIndoor, readings)?.text).toBe("612");
+    expect(buildCo2CardRow({ ...fullIndoor, co2: undefined }, readings)).toBeNull();
+    expect(buildCo2CardRow(null, [])).toBeNull();
+  });
+
+  it("上の2つにCO2が入っているときは重複させない", () => {
+    const data = { device_id: 5, datetime: "2026-08-22 20:14:00", pressure: 1006.3, co2: 612 };
+    expect(buildCo2CardRow(data, pickCardReadings(buildIndoorReadings(data)))).toBeNull();
   });
 });
