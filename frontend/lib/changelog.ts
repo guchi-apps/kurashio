@@ -34,6 +34,15 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.29.0",
+    date: "2026-09-29",
+    changes: [
+      "iOSアプリのホーム画面ウィジェットが便利になりました。",
+      "大きいサイズ(Large)のウィジェットから、登録済みの電気の操作ボタンを押せるようになりました。",
+      "小さいサイズ(Small)のウィジェットでCO2を表示できるようになり、2台目のセンサーも並べて表示できます。",
+    ],
+  },
+  {
     version: "4.28.0",
     date: "2026-09-29",
     changes: [
