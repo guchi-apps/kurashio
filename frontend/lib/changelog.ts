@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.28.0",
+    date: "2026-09-29",
+    changes: [
+      "iPhoneのホーム画面ウィジェットで、室温・湿度を表示するセンサーを選べるようになりました。選ばない場合は、ダッシュボードの並び順で最初の受信中のセンサーが表示されます。以前はデバイスID 1のセンサーを非表示にすると室温が「—」になっていましたが、これも直りました。受信が止まっているセンサーには「受信が止まっています」と表示されます。",
+    ],
+  },
+  {
     version: "4.27.1",
     date: "2026-09-29",
     changes: [
