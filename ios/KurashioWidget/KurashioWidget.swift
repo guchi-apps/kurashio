@@ -12,7 +12,7 @@ struct KurashioWidget: Widget {
             KurashioWidgetView(entry: entry)
         }
         .configurationDisplayName("kurashio")
-        .description("室温・ゴミの日・今日の電気量を表示し、Largeでは電気の操作もできます。")
+        .description("室温・湿度・CO2・ゴミの日・今日の電気量を表示し、Largeでは電気の操作もできます。")
         .supportedFamilies([.systemSmall, .systemLarge])
     }
 }

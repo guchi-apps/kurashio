@@ -1,4 +1,5 @@
 import type { DisplayOrderItem } from "@/lib/display-order";
+import { getCo2Level, type Co2Level } from "@/lib/device-metrics";
 import type { LatestData } from "@/lib/types";
 
 /** ホーム画面ウィジェットで選べるセンサー1つぶんの値（`SharedWidgetSnapshot.Sensor` と同じ形） */
@@ -7,6 +8,13 @@ export interface WidgetSensor {
   name: string;
   temperature: number | null;
   humidity: number | null;
+  /** CO2濃度（ppm）。CO2を測れないセンサーでは null（#569） */
+  co2: number | null;
+  /**
+   * CO2の目安（`getCo2Level()`）。しきい値の判定はここだけに置き、ウィジェット（Swift）は
+   * この段階に色を当てるだけにする（判定を2か所に持つと1500ppmちょうどなどで食い違う）
+   */
+  co2Level: Co2Level | null;
   /** 受信が止まっている（値は最後に受信した時点のもの） */
   stale: boolean;
 }
@@ -32,12 +40,15 @@ export function buildWidgetSensors(
   return visibleDisplayOrder.flatMap((item) => {
     if (item.type !== "device") return [];
     const latest = latestByDevice[item.deviceId];
+    const co2 = latest?.co2 ?? null;
     return [
       {
         id: item.deviceId,
         name: getName(item.deviceId),
         temperature: latest?.temperature ?? null,
         humidity: latest?.humidity ?? null,
+        co2,
+        co2Level: co2 == null ? null : getCo2Level(co2).level,
         stale: isStale(item.deviceId),
       },
     ];

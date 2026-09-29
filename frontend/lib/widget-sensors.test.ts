@@ -27,19 +27,28 @@ describe("buildWidgetSensors", () => {
         { type: "aircon" },
         { type: "device", deviceId: 2 },
       ],
-      { 2: { temperature: 26.6, humidity: 61 }, 3: { temperature: 28.5, humidity: 64 } },
+      { 2: { temperature: 26.6, humidity: 61 }, 3: { temperature: 28.5, humidity: 64, co2: 1500 } },
       [2]
     );
     expect(sensors).toEqual([
-      { id: 3, name: "リビング", temperature: 28.5, humidity: 64, stale: false },
-      { id: 2, name: "寝室", temperature: 26.6, humidity: 61, stale: true },
+      { id: 3, name: "リビング", temperature: 28.5, humidity: 64, co2: 1500, co2Level: "high", stale: false },
+      { id: 2, name: "寝室", temperature: 26.6, humidity: 61, co2: null, co2Level: null, stale: true },
     ]);
   });
 
   it("値が届いていないセンサーも選択肢には残す（値は null）", () => {
     expect(build([{ type: "device", deviceId: 4 }], {})).toEqual([
-      { id: 4, name: "屋外", temperature: null, humidity: null, stale: false },
+      { id: 4, name: "屋外", temperature: null, humidity: null, co2: null, co2Level: null, stale: false },
     ]);
+  });
+});
+
+describe("CO2の段階", () => {
+  it("Webの getCo2Level() と同じしきい値で段階を付ける（1000・1500ちょうどは上の段階）", () => {
+    const levels = [999, 1000, 1499, 1500].map(
+      (co2) => build([{ type: "device", deviceId: 3 }], { 3: { temperature: 25, co2 } })[0].co2Level
+    );
+    expect(levels).toEqual(["good", "elevated", "elevated", "high"]);
   });
 });
 
