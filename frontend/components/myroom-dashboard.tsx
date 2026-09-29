@@ -68,6 +68,7 @@ import {
   buildOutdoorLocationReadings,
   formatReading,
   pickCardReadings,
+  buildCo2CardRow,
   type MetricReading,
 } from "@/lib/device-metrics";
 import {
@@ -196,6 +197,8 @@ interface DeviceCardProps {
   badge?: React.ReactNode;
   /** 見出しの左に出すアイコン（屋外など、アクセント色を持たないカード用） */
   titleIcon?: React.ReactNode;
+  /** 計測値の下に足すCO2の行。測れないセンサーでは渡さない */
+  co2?: ReturnType<typeof buildCo2CardRow>;
 }
 
 type MetricsDisplayState = "loading" | "error" | "empty" | "ready";
@@ -251,6 +254,7 @@ function DeviceCard({
   statusNote,
   badge,
   titleIcon,
+  co2,
 }: DeviceCardProps) {
   const className = onClick
     ? "device-card-compact cursor-pointer text-left transition-transform active:scale-[0.98]"
@@ -298,6 +302,16 @@ function DeviceCard({
                 );
               })}
             </div>
+          )}
+          {co2 && (
+            <p className="device-card-compact-co2">
+              CO2
+              <b>{co2.text}</b>
+              {co2.unit}
+              <span className={`device-card-compact-co2-pill is-${co2.level}`}>
+                {co2.label}
+              </span>
+            </p>
           )}
           {badge}
         </div>
@@ -1362,6 +1376,10 @@ export function MyRoomDashboard() {
                         setDevicePanelOpen(true);
                       }}
                       readings={pickCardReadings(indoorReadings)}
+                      co2={buildCo2CardRow(
+                        latestByDevice[deviceId],
+                        pickCardReadings(indoorReadings)
+                      )}
                       metricsState={resolveMetricsDisplayState(
                         indoorReadings,
                         latestLoadStatusByDevice[deviceId],

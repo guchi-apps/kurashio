@@ -228,6 +228,25 @@
   .device-card-compact-sub {
     @apply inline-flex items-center gap-1 text-xs font-bold tabular-nums text-muted-foreground;
   }
+  /* CO2の行（温度・湿度の下）。目安は色つきの丸いバッジで添える */
+  .device-card-compact-co2 {
+    @apply mt-0.5 flex flex-wrap items-center gap-1.5 border-t border-border pt-1.5 text-xs font-bold tabular-nums text-muted-foreground;
+  }
+  .device-card-compact-co2 b {
+    @apply text-sm text-foreground;
+  }
+  .device-card-compact-co2-pill {
+    @apply rounded-full px-2 text-[11px] leading-[18px];
+  }
+  .device-card-compact-co2-pill.is-good {
+    @apply bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300;
+  }
+  .device-card-compact-co2-pill.is-elevated {
+    @apply bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300;
+  }
+  .device-card-compact-co2-pill.is-high {
+    @apply bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300;
+  }
   /* 詳細パネル先頭の「いまの値」 */
   .reading-cell {
     @apply flex flex-col gap-1.5 rounded-[14px] bg-muted px-3 py-2.5;
