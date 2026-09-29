@@ -819,7 +819,7 @@ DaySpan・AIDE が読むタスク一覧に「次の掃除」を並べること�
 
 `GET /api/internal/room-state` は、同じ VPS 上で動く [AIDE](https://github.com/guchi-apps/aide) の
 MCP ツール `aide_room_status` 向けの**読み取り専用**の口です。ログインセッションでは通らず、
-環境変数 `INTERNAL_API_KEY` と一致する `Authorization: Bearer <トークン>` だけを受け付けます。
+issue-deck の共有トークン `MYROOM_INTERNAL_API_KEY`（取得できなければ環境変数 `INTERNAL_API_KEY`）と一致する `Authorization: Bearer <トークン>` だけを受け付けます。操作用は `MYROOM_INTERNAL_CONTROL_API_KEY`（フォールバックは `INTERNAL_CONTROL_API_KEY`）。取得は `backend/shared_token.py`（10分キャッシュ・5秒タイムアウト・失敗時は直前の値）で、`SHARED_TOKEN_API_SECRET` と `SHARED_TOKEN_API_URL` が `.env` に無ければ使いません。
 
 | 状況 | ステータス |
 |------|-----------|
@@ -980,14 +980,20 @@ ALTER 権限がない場合は、スクリプトが表示する SQL を管理者
 | `garbage-notion-data-source-id` | 書き出し先の Notion データソースID（`GARBAGE_NOTION_DATA_SOURCE_ID` として同期。`database_id` ではない） |
 | `cleaning-notion-token` | 次の掃除を書き出す Notion インテグレーションのトークン（`CLEANING_NOTION_TOKEN` として同期）。`garbage-notion-token` と同じ値でよいが、Task データベース側にもそのインテグレーションを接続しておくこと |
 | `cleaning-notion-data-source-id` | 書き出し先（Notion の `☑️ Task`）のデータソースID（`CLEANING_NOTION_DATA_SOURCE_ID` として同期。`database_id` ではない） |
-| `internal-api-key` | サーバー間参照用APIのトークン（`INTERNAL_API_KEY` として同期）。AIDE 側の `op://apps/aide/myroom-token` と**同じ値**にする |
-| `internal-control-api-key` | 照明などの操作専用のサーバー間トークン（`INTERNAL_CONTROL_API_KEY` として同期）。AIDE 側の `AIDE_MYROOM_CONTROL_TOKEN` と**同じ値**にし、`internal-api-key` とは**別の値**にする（#419） |
+| `internal-api-key` | サーバー間参照用APIのトークン（`INTERNAL_API_KEY` として同期）。issue-deck の共有トークン `MYROOM_INTERNAL_API_KEY` が優先で、これはフォールバック（#525） |
+| `internal-control-api-key` | 照明などの操作専用のサーバー間トークン（`INTERNAL_CONTROL_API_KEY` として同期）。共有トークン `MYROOM_INTERNAL_CONTROL_API_KEY` が優先で、これはフォールバック。`internal-api-key` とは**別の値**にする（#419・#525） |
+| `shared-token-api-secret`（item は `apps/issue-deck`） | issue-deck の共有トークンAPIのBearer（`SHARED_TOKEN_API_SECRET` として同期）。取得先URLは organization variable `APP_BASE_URL`。未登録でも環境変数へフォールバックするだけなので、issue-deck の設定画面で `MYROOM_INTERNAL_API_KEY`・`MYROOM_INTERNAL_CONTROL_API_KEY` の利用元に `myroom` が出ているかで確認する（#525） |
 | `nature-remo-token` | 「電気の操作」カードが赤外線を送るための Nature Remo アクセストークン（`NATURE_REMO_TOKEN` として同期）。https://home.nature.global/ で発行 |
 | `db-name` | 接続先データベース名（`DB_NAME` として同期） |
 | `target-dir` | デプロイ先ディレクトリ（例: `/home/guchi/myroom`） |
 | `vapid-private-key` | PWAプッシュ通知（Web Push）用のVAPID秘密鍵（`VAPID_PRIVATE_KEY` として同期）。**PEM ではなく URL-safe base64 の 1 行（43 文字）** |
 | `vapid-public-key` | PWAプッシュ通知用のVAPID公開鍵（`VAPID_PUBLIC_KEY` として同期。URL-safe base64 の 1 行・87 文字） |
 | `vapid-subject` | PWAプッシュ通知用のVAPID subject（`VAPID_SUBJECT` として同期。例: `mailto:you@example.com`） |
+| `apns-auth-key` | iOSアプリ（`ios/`）向けAPNs通知（#527）用のAuth Key（`.p8`）。**PEMをそのまま入れず、ファイルの中身を1行のbase64にしてから**入れる（`base64 -i AuthKey_XXXX.p8 \| tr -d '\n'`）。`APNS_AUTH_KEY` として同期 |
+| `apns-key-id` | 上記Auth KeyのKey ID（Apple Developer Portal → Certificates, Identifiers & Profiles → Keys）。`APNS_KEY_ID` として同期 |
+| `apns-team-id` | Apple DeveloperのTeam ID。`ios/README.md` の個人チーム（`6AA3WFTR94`）と同じ値。`APNS_TEAM_ID` として同期 |
+| `apns-bundle-id` | iOSアプリのBundle ID（`com.gucchii.kurashio`）。`APNS_BUNDLE_ID` として同期 |
+| `apns-environment` | `sandbox` または `production`。`APNS_ENVIRONMENT` として同期。**無料の個人チーム署名では`aps-environment`エンタイトルメントが常に`development`になるため、TestFlight/App Store配布（対象外）をしない限りは`sandbox`のまま** |
 
 **VAPID 鍵の初回登録**（PWA プッシュ通知用・1 回だけ。#293・#337）:
 
@@ -1014,6 +1020,12 @@ cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/myroom --k
 **秘密鍵は PEM 形式では動きません。** `backend/push_notify.py` は環境変数の値をそのまま `pywebpush.webpush(vapid_private_key=...)` へ渡し、pywebpush は `py_vapid.Vapid01.from_string()` で読みます。`from_string()` は改行を落として base64 デコードするだけなので、`-----BEGIN PRIVATE KEY-----` を含む PEM は `Could not deserialize key data` で落ちます。加えて `deploy.yml` の `sync_env_var` は値を `KEY=値` の 1 行として `.env` へ書くため、複数行の PEM は `.env` の書式自体を壊します（python-dotenv が 2 行目以降を別のキーとして読む）。**1Password には必ず 1 行の URL-safe base64 を入れてください。**
 
 未設定でもデプロイは失敗せず、プッシュ通知機能だけが無効のままになります。
+
+**APNs Auth Key の初回登録**（iOSアプリ向け通知用・1 回だけ。#527）:
+
+1. Apple Developer Portal → Certificates, Identifiers & Profiles → Keys で、Apple Push Notifications service (APNs) にチェックを入れたKeyを作成し、`.p8` ファイルをダウンロードする（**ダウンロードは1回きり**）。合わせてKey IDを控える
+2. `base64 -i AuthKey_XXXXXXXXXX.p8 | tr -d '\n' > ~/.cache/myroom-apns/apns-auth-key && chmod 600 ~/.cache/myroom-apns/apns-auth-key`
+3. `provision-secret.sh`（上記VAPIDと同じ手順・`--from-stdin`＋ファイルからのリダイレクト）で `APNS_AUTH_KEY` / `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` / `APNS_ENVIRONMENT`（既定 `sandbox`）を登録する
 
 **アイテム `Notify`**（セキュアノート等・organization 共通。このリポジトリからは同期しない）
 
@@ -1106,6 +1118,8 @@ rsync では `.env` を転送しません。サーバー上の `.env` には、�
 | `CLEANING_NOTION_DATA_SOURCE_ID` | secret `CLEANING_NOTION_DATA_SOURCE_ID` | このリポジトリ |
 | `INTERNAL_API_KEY` | secret `INTERNAL_API_KEY` | このリポジトリ |
 | `INTERNAL_CONTROL_API_KEY` | secret `INTERNAL_CONTROL_API_KEY` | このリポジトリ |
+| `SHARED_TOKEN_API_SECRET` | secret `SHARED_TOKEN_API_SECRET` | このリポジトリ |
+| `SHARED_TOKEN_API_URL` | variable `APP_BASE_URL` | organization 共通 |
 | `NATURE_REMO_TOKEN` | secret `NATURE_REMO_TOKEN` | このリポジトリ |
 | `DB_NAME` | secret `DB_NAME` | このリポジトリ |
 | `DB_USER` | secret `SHARED_DB_USER` | organization 共通 |

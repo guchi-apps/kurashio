@@ -12,7 +12,7 @@ import dataclasses
 import logging
 from typing import Optional
 
-from . import push_notify
+from . import apns_notify, push_notify
 
 logger = logging.getLogger(__name__)
 
@@ -34,24 +34,43 @@ class NotificationEvent:
 
 
 def dispatch_push_event(event: NotificationEvent) -> int:
-    """PWA Pushとして配信する。失敗しても例外は投げない（呼び出し元の処理を止めないため）。"""
+    """PWA Push・APNs（iOSアプリ・#527）の両方へ配信する。
+
+    失敗しても例外は投げない（呼び出し元の処理を止めないため）。2経路とも未設定なら何もしない
+    （`push_notify.broadcast()` / `apns_notify.broadcast()` がそれぞれ `is_configured()` を見る）。
+    """
+    payload = {
+        "title": event.title,
+        "body": event.body,
+        "tag": event.dedupe_key,
+        "url": event.url,
+    }
+    sent = 0
+
     try:
-        result = push_notify.broadcast(
-            {
-                "title": event.title,
-                "body": event.body,
-                "tag": event.dedupe_key,
-                "url": event.url,
-            }
-        )
+        result = push_notify.broadcast(payload)
+        sent += result["sent"]
         logger.info(
-            "Push event dispatched: kind=%s sent=%d/%d dedupe_key=%s",
+            "Web Push event dispatched: kind=%s sent=%d/%d dedupe_key=%s",
             event.kind,
             result["sent"],
             result["total"],
             event.dedupe_key,
         )
-        return result["sent"]
     except Exception:  # 通知の失敗でゴミ・センサーの定期処理を止めない
-        logger.exception("Failed to dispatch push event (kind=%s)", event.kind)
-        return 0
+        logger.exception("Failed to dispatch web push event (kind=%s)", event.kind)
+
+    try:
+        result = apns_notify.broadcast(payload)
+        sent += result["sent"]
+        logger.info(
+            "APNs event dispatched: kind=%s sent=%d/%d dedupe_key=%s",
+            event.kind,
+            result["sent"],
+            result["total"],
+            event.dedupe_key,
+        )
+    except Exception:
+        logger.exception("Failed to dispatch APNs event (kind=%s)", event.kind)
+
+    return sent

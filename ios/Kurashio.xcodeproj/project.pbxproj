@@ -6,8 +6,37 @@
 	objectVersion = 110;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		75B20D2DA11DECF2EF66AFA7 /* KurashioWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0786C9B99F5F10A963F3C85F /* KurashioWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B15E9D4BFDF0869269468A9B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4B52A1E93061842200F8C8D5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4FFCADDFE12A84120132C906;
+			remoteInfo = KurashioWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		8AFE7B53F7DD3C161CA2DECD /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				75B20D2DA11DECF2EF66AFA7 /* KurashioWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		4B52A1F13061842200F8C8D5 /* Kurashio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kurashio.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0786C9B99F5F10A963F3C85F /* KurashioWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KurashioWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +45,20 @@
 			path = Kurashio;
 			sourceTree = "<group>";
 		};
+		EABB005DEF35F3465E8D8B37 /* KurashioWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = KurashioWidget;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		4B52A1EE3061842200F8C8D5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		F705FA5CC5A86A66746A4444 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
 			);
@@ -31,6 +70,7 @@
 			isa = PBXGroup;
 			children = (
 				4B52A1F33061842200F8C8D5 /* Kurashio */,
+				EABB005DEF35F3465E8D8B37 /* KurashioWidget */,
 				4B52A1F23061842200F8C8D5 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -39,6 +79,7 @@
 			isa = PBXGroup;
 			children = (
 				4B52A1F13061842200F8C8D5 /* Kurashio.app */,
+				0786C9B99F5F10A963F3C85F /* KurashioWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -53,8 +94,12 @@
 				4B52A1ED3061842200F8C8D5 /* Sources */,
 				4B52A1EE3061842200F8C8D5 /* Frameworks */,
 				4B52A1EF3061842200F8C8D5 /* Resources */,
+				8AFE7B53F7DD3C161CA2DECD /* Embed Foundation Extensions */,
 			);
 			buildRules = (
+			);
+			dependencies = (
+				7D512CA997F8000B555D02A2 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				4B52A1F33061842200F8C8D5 /* Kurashio */,
@@ -63,6 +108,26 @@
 			productName = Kurashio;
 			productReference = 4B52A1F13061842200F8C8D5 /* Kurashio.app */;
 			productType = "com.apple.product-type.application";
+		};
+		4FFCADDFE12A84120132C906 /* KurashioWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E936B8D794C063D00950D91A /* Build configuration list for PBXNativeTarget "KurashioWidgetExtension" */;
+			buildPhases = (
+				A913482FC934E2CC65C74517 /* Sources */,
+				F705FA5CC5A86A66746A4444 /* Frameworks */,
+				2C457186C3BD642E942AF235 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				EABB005DEF35F3465E8D8B37 /* KurashioWidget */,
+			);
+			name = KurashioWidgetExtension;
+			productName = KurashioWidgetExtension;
+			productReference = 0786C9B99F5F10A963F3C85F /* KurashioWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -75,6 +140,9 @@
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					4B52A1F03061842200F8C8D5 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					4FFCADDFE12A84120132C906 = {
 						CreatedOnToolsVersion = 27.0;
 					};
 				};
@@ -94,12 +162,18 @@
 			projectRoot = "";
 			targets = (
 				4B52A1F03061842200F8C8D5 /* Kurashio */,
+				4FFCADDFE12A84120132C906 /* KurashioWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		4B52A1EF3061842200F8C8D5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		2C457186C3BD642E942AF235 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
@@ -112,7 +186,20 @@
 			files = (
 			);
 		};
+		A913482FC934E2CC65C74517 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		7D512CA997F8000B555D02A2 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4FFCADDFE12A84120132C906 /* KurashioWidgetExtension */;
+			targetProxy = B15E9D4BFDF0869269468A9B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		4B52A1FA3061842300F8C8D5 /* Debug configuration for PBXProject "Kurashio" */ = {
@@ -241,6 +328,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Kurashio/Kurashio.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6AA3WFTR94;
@@ -256,7 +344,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.25.1;
+				MARKETING_VERSION = 4.26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -274,6 +362,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Kurashio/Kurashio.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6AA3WFTR94;
@@ -289,10 +378,68 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 4.25.1;
+				MARKETING_VERSION = 4.26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		166328FEE0C84C5FDC93FC7A /* Debug configuration for PBXNativeTarget "KurashioWidgetExtension" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = KurashioWidget/KurashioWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6AA3WFTR94;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = kurashio;
+				INFOPLIST_KEY_NSExtensionPointIdentifier = "com.apple.widgetkit-extension";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 4.26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio.KurashioWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		ED8E3231BFFDC6F550AF6890 /* Release configuration for PBXNativeTarget "KurashioWidgetExtension" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = KurashioWidget/KurashioWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6AA3WFTR94;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = kurashio;
+				INFOPLIST_KEY_NSExtensionPointIdentifier = "com.apple.widgetkit-extension";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 4.26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio.KurashioWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -318,6 +465,14 @@
 			buildConfigurations = (
 				4B52A1FD3061842300F8C8D5 /* Debug configuration for PBXNativeTarget "Kurashio" */,
 				4B52A1FE3061842300F8C8D5 /* Release configuration for PBXNativeTarget "Kurashio" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		E936B8D794C063D00950D91A /* Build configuration list for PBXNativeTarget "KurashioWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				166328FEE0C84C5FDC93FC7A /* Debug configuration for PBXNativeTarget "KurashioWidgetExtension" */,
+				ED8E3231BFFDC6F550AF6890 /* Release configuration for PBXNativeTarget "KurashioWidgetExtension" */,
 			);
 			defaultConfigurationName = Release;
 		};

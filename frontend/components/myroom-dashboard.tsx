@@ -24,6 +24,7 @@ import {
 } from "@/components/cleaning-detail-panel";
 import { ComingSoonCard } from "@/components/coming-soon-card";
 import { GarbageCard } from "@/components/garbage-card";
+import { NativeWidgetSnapshotSync } from "@/components/native-widget-snapshot-sync";
 import { PowerCard } from "@/components/power-card";
 import { RemoteCard, type RemoteAirconEntry } from "@/components/remote-card";
 import { BillDetailPanel } from "@/components/bill-detail-panel";
@@ -119,7 +120,8 @@ import type {
   CleaningTask,
   CleaningTaskInput,
 } from "@/lib/cleaning";
-import type { GarbageSchedule } from "@/lib/garbage";
+import { buildGarbageHighlight, type GarbageSchedule } from "@/lib/garbage";
+import type { WidgetSnapshot } from "@/lib/native-app";
 import {
   countRemoteButtons,
   countVisibleRemoteButtons,
@@ -145,6 +147,7 @@ import {
   isPredecessorDevice,
 } from "@/lib/device-inheritance";
 import { AuthError, signOutThisApp } from "@/lib/auth";
+import { initializeNativeNotifications } from "@/lib/native-notifications";
 import { resolveAuthGate, useAuthState } from "@/lib/use-auth";
 import { APP_VERSION } from "@/lib/app-version";
 import { formatUpdatedAt } from "@/lib/format-updated-at";
@@ -959,6 +962,13 @@ export function MyRoomDashboard() {
     return () => clearInterval(interval);
   }, [isAuthenticated, layoutReady, fetchData]);
 
+  useEffect(() => {
+    // iOSアプリ（#526）でのAPNs通知（#527）。ログイン後、この画面が開いているあいだ
+    // 端末のトークンをバックエンドの登録と同期し続ける（通知設定シートを開いていなくてもよい）
+    if (!isAuthenticated) return;
+    return initializeNativeNotifications();
+  }, [isAuthenticated]);
+
   const handleLogout = () => {
     setIsAuthenticated(false);
     void signOutThisApp();
@@ -1127,8 +1137,33 @@ export function MyRoomDashboard() {
       })
     : null;
 
+  // iOSアプリのホーム画面ウィジェット（#537）へ渡す値。JWTは含めず、表示中の値だけを渡す
+  const garbageHighlight = garbageSchedule ? buildGarbageHighlight(garbageSchedule) : null;
+  const roomTemperature = latestData?.temperature ?? null;
+  const roomHumidity = latestData?.humidity ?? null;
+  const garbageLabel = garbageHighlight
+    ? garbageHighlight.day.categories.map((category) => category.name).join("・")
+    : null;
+  const garbageDaysUntil = garbageHighlight?.day.days_until ?? null;
+  const todayKwh = energyBreakdown?.today.kwh ?? null;
+  const todayCostYen = energyBreakdown?.today.cost_yen ?? null;
+  // 無関係な再描画のたびにWidgetの再読み込み（WidgetKitの1日あたりの上限あり）が
+  // 走らないよう、値の中身が変わったときだけ新しいオブジェクトを作る
+  const widgetSnapshot: WidgetSnapshot = useMemo(
+    () => ({
+      roomTemperature,
+      roomHumidity,
+      garbageLabel,
+      garbageDaysUntil,
+      todayKwh,
+      todayCostYen,
+    }),
+    [roomTemperature, roomHumidity, garbageLabel, garbageDaysUntil, todayKwh, todayCostYen]
+  );
+
   return (
     <div className="w-full pb-10">
+      <NativeWidgetSnapshotSync snapshot={widgetSnapshot} />
       {/*
         ヘッダーは「いつのデータか」と「アプリの操作」がまとまる場所（#277）。右の3つは
         左から データを取り直す・部屋のようす・アプリ全体の設定。フッターは設定シートへ畳んだ。

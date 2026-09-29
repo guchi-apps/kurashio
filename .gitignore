@@ -10,6 +10,8 @@ data/aircon.json
 data/ui_settings.json
 data/push_subscriptions.json
 data/push_subscriptions.json.lock
+data/apns_tokens.json
+data/apns_tokens.json.lock
 data/sensor_alert_state.json
 data/garbage_notify_state.json
 data/garbage_notion_state.json

@@ -70,6 +70,7 @@ jobs:
       DB_PORT: ${{ secrets.SHARED_DB_PORT }}
       DB_USER: ${{ secrets.SHARED_DB_USER }}
       HOST: ${{ secrets.SERVER_HOST }}
+      SHARED_TOKEN_API_URL: ${{ vars.APP_BASE_URL }}
       SSH_PORT: ${{ secrets.SERVER_SSH_PORT }}
       SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}
       SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
@@ -88,11 +89,17 @@ jobs:
       LOGIN_WEBHOOK_URL: ${{ secrets.SIGNALY_LOGIN_WEBHOOK_URL }}
       NATURE_REMO_TOKEN: ${{ secrets.NATURE_REMO_TOKEN }}
       SENSOR_WEBHOOK_URL: ${{ secrets.SENSOR_WEBHOOK_URL }}
+      SHARED_TOKEN_API_SECRET: ${{ secrets.SHARED_TOKEN_API_SECRET }}
       SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
       TARGET_DIR: ${{ secrets.TARGET_DIR }}
       VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
       VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
       VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+      APNS_AUTH_KEY: ${{ secrets.APNS_AUTH_KEY }}
+      APNS_KEY_ID: ${{ secrets.APNS_KEY_ID }}
+      APNS_TEAM_ID: ${{ secrets.APNS_TEAM_ID }}
+      APNS_BUNDLE_ID: ${{ secrets.APNS_BUNDLE_ID }}
+      APNS_ENVIRONMENT: ${{ secrets.APNS_ENVIRONMENT }}
 
     steps:
       - uses: actions/checkout@v4
@@ -174,12 +181,23 @@ jobs:
           # 照明などの操作専用のサーバー間トークン（#419）。空でもデプロイは通り、
           # 操作用の内部APIが常に503を返すだけ（backend/internal_auth.py）。
           INTERNAL_CONTROL_API_KEY: ${{ env.INTERNAL_CONTROL_API_KEY }}
+          # issue-deck の共有トークンAPI（#525）。INTERNAL_API_KEY 等をここから取得する。
+          # 空でもデプロイは通り、上の環境変数へフォールバックするだけ。
+          SHARED_TOKEN_API_URL: ${{ env.SHARED_TOKEN_API_URL }}
+          SHARED_TOKEN_API_SECRET: ${{ env.SHARED_TOKEN_API_SECRET }}
           NATURE_REMO_TOKEN: ${{ env.NATURE_REMO_TOKEN }}
           # PWAプッシュ通知（Web Push）用のVAPID鍵（#293）。空でもデプロイは通り、
           # push_notify.is_configured() が false のまま機能全体が無効になるだけ。
           VAPID_PRIVATE_KEY: ${{ env.VAPID_PRIVATE_KEY }}
           VAPID_PUBLIC_KEY: ${{ env.VAPID_PUBLIC_KEY }}
           VAPID_SUBJECT: ${{ env.VAPID_SUBJECT }}
+          # iOSアプリ（ios/・#526）向けのAPNs通知（#527）。空でもデプロイは通り、
+          # apns_notify.is_configured() が false のまま機能全体が無効になるだけ。
+          APNS_AUTH_KEY: ${{ env.APNS_AUTH_KEY }}
+          APNS_KEY_ID: ${{ env.APNS_KEY_ID }}
+          APNS_TEAM_ID: ${{ env.APNS_TEAM_ID }}
+          APNS_BUNDLE_ID: ${{ env.APNS_BUNDLE_ID }}
+          APNS_ENVIRONMENT: ${{ env.APNS_ENVIRONMENT }}
           DB_USER: ${{ env.DB_USER }}
           DB_PASSWORD: ${{ env.DB_PASSWORD }}
           DB_HOST: ${{ env.DB_HOST }}
@@ -203,10 +221,17 @@ jobs:
           CLEANING_NOTION_DATA_SOURCE_ID_B64=$(b64 "$CLEANING_NOTION_DATA_SOURCE_ID")
           INTERNAL_API_KEY_B64=$(b64 "$INTERNAL_API_KEY")
           INTERNAL_CONTROL_API_KEY_B64=$(b64 "$INTERNAL_CONTROL_API_KEY")
+          SHARED_TOKEN_API_URL_B64=$(b64 "$SHARED_TOKEN_API_URL")
+          SHARED_TOKEN_API_SECRET_B64=$(b64 "$SHARED_TOKEN_API_SECRET")
           NATURE_REMO_TOKEN_B64=$(b64 "$NATURE_REMO_TOKEN")
           VAPID_PRIVATE_KEY_B64=$(b64 "$VAPID_PRIVATE_KEY")
           VAPID_PUBLIC_KEY_B64=$(b64 "$VAPID_PUBLIC_KEY")
           VAPID_SUBJECT_B64=$(b64 "$VAPID_SUBJECT")
+          APNS_AUTH_KEY_B64=$(b64 "$APNS_AUTH_KEY")
+          APNS_KEY_ID_B64=$(b64 "$APNS_KEY_ID")
+          APNS_TEAM_ID_B64=$(b64 "$APNS_TEAM_ID")
+          APNS_BUNDLE_ID_B64=$(b64 "$APNS_BUNDLE_ID")
+          APNS_ENVIRONMENT_B64=$(b64 "$APNS_ENVIRONMENT")
           DB_USER_B64=$(b64 "$DB_USER")
           DB_PASSWORD_B64=$(b64 "$DB_PASSWORD")
           DB_HOST_B64=$(b64 "$DB_HOST")
@@ -243,10 +268,17 @@ jobs:
             sync_env_var CLEANING_NOTION_DATA_SOURCE_ID '${CLEANING_NOTION_DATA_SOURCE_ID_B64}'
             sync_env_var INTERNAL_API_KEY '${INTERNAL_API_KEY_B64}'
             sync_env_var INTERNAL_CONTROL_API_KEY '${INTERNAL_CONTROL_API_KEY_B64}'
+            sync_env_var SHARED_TOKEN_API_URL '${SHARED_TOKEN_API_URL_B64}'
+            sync_env_var SHARED_TOKEN_API_SECRET '${SHARED_TOKEN_API_SECRET_B64}'
             sync_env_var NATURE_REMO_TOKEN '${NATURE_REMO_TOKEN_B64}'
             sync_env_var VAPID_PRIVATE_KEY '${VAPID_PRIVATE_KEY_B64}'
             sync_env_var VAPID_PUBLIC_KEY '${VAPID_PUBLIC_KEY_B64}'
             sync_env_var VAPID_SUBJECT '${VAPID_SUBJECT_B64}'
+            sync_env_var APNS_AUTH_KEY '${APNS_AUTH_KEY_B64}'
+            sync_env_var APNS_KEY_ID '${APNS_KEY_ID_B64}'
+            sync_env_var APNS_TEAM_ID '${APNS_TEAM_ID_B64}'
+            sync_env_var APNS_BUNDLE_ID '${APNS_BUNDLE_ID_B64}'
+            sync_env_var APNS_ENVIRONMENT '${APNS_ENVIRONMENT_B64}'
             sync_env_var DB_USER '${DB_USER_B64}'
             sync_env_var DB_PASSWORD '${DB_PASSWORD_B64}'
             sync_env_var DB_HOST '${DB_HOST_B64}'
