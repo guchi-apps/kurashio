@@ -113,6 +113,19 @@ open ios/Kurashio.xcodeproj
 `node ios/scripts/sync-version.mjs` を実行すれば `frontend/package.json` の値へ書き換えられる
 （冪等なので、既に一致していれば何もしない）。
 
+### 暗号化非該当フラグ（#571）
+
+**本体アプリは `INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO`（Debug/Release 両方）を持つ。**
+`Info.plist` の `ITSAppUsesNonExemptEncryption = false` と同じで、TestFlight にビルドを上げるたびに
+出る輸出規制（暗号化）の質問が出なくなる。本体は `GENERATE_INFOPLIST_FILE = YES` なので
+Info.plist ファイルは作らず、ビルド設定から生成している。
+
+- 前提は「OS標準の暗号化（WKWebView の HTTPS など）だけを使い、独自の暗号を実装していない」こと。
+  独自の暗号処理を入れたら見直す
+- ウィジェット拡張には付けていない（質問はアプリ本体のバンドルに対するもの）
+- Xcode が無い環境で足したため未確認。Mac mini でアーカイブしたあと、生成された Info.plist に
+  `ITSAppUsesNonExemptEncryption` が `false` で入っていることを確かめる
+
 ### 開発サーバーへ向けるとき
 
 `Kurashio/AppConfig.swift` の `baseURL` だけを変えます。**LAN IP の `http://` のままでは Google ログインが
