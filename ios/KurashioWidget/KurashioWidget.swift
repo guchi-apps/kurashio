@@ -8,7 +8,8 @@ struct KurashioWidget: Widget {
     let kind: String = "KurashioWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: KurashioTimelineProvider()) { entry in
+        // 室温・湿度を出すセンサーを「ウィジェットを編集」で選べるよう、設定付きにしている（#560）
+        AppIntentConfiguration(kind: kind, intent: SelectSensorIntent.self, provider: KurashioTimelineProvider()) { entry in
             KurashioWidgetView(entry: entry)
         }
         .configurationDisplayName("kurashio")
