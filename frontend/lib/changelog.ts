@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.27.0",
+    date: "2026-09-29",
+    changes: [
+      "「いまの部屋」のカードに、CO2濃度と換気の目安が表示されるようになりました。1000ppm未満は「良好」、1500ppm未満は「やや高め」、それ以上は「換気を」と色付きのバッジでひと目で分かります。",
+    ],
+  },
+  {
     version: "4.26.0",
     date: "2026-09-29",
     changes: [
