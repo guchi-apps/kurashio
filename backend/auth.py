@@ -123,6 +123,18 @@ def verify_token(token: str) -> Dict[str, Any]:
     return payload
 
 
+def _is_verified_google_login(payload: Dict[str, Any]) -> bool:
+    app_metadata = payload.get("app_metadata")
+    if not isinstance(app_metadata, dict) or app_metadata.get("provider") != "google":
+        return False
+    user_metadata = payload.get("user_metadata")
+    if not isinstance(user_metadata, dict):
+        user_metadata = {}
+    # Googleログインでは user_metadata.email_verified に入る。トップレベルも念のため見る。
+    verified = user_metadata.get("email_verified", payload.get("email_verified"))
+    return verified is True
+
+
 # 同期関数にしてスレッドプールで動かす（JWKS取得の同期HTTPでイベントループを止めない）。
 def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
     if not token:
@@ -136,6 +148,14 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
     email = str(payload.get("email", "")).lower()
     if email not in ALLOWED_GOOGLE_EMAILS:
         logger.warning("Login rejected: email not in allowlist (%s)", email)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="このGoogleアカウントではログインできません",
+        )
+    # Supabaseは他アプリと共有のプロジェクト。メール/パスワード登録などで許可リストの
+    # アドレスを名乗れてしまわないよう、Googleログインかつメール確認済みのトークンだけ通す。
+    if not _is_verified_google_login(payload):
+        logger.warning("Login rejected: not a verified Google login (%s)", email)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="このGoogleアカウントではログインできません",
