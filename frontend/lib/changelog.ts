@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.30.1",
+    date: "2026-09-30",
+    changes: [
+      "デバイスの詳細画面で、「いまの値」の各タイル（温度・湿度など）を押すと、下のグラフがその項目に切り替わるようになりました。選んでいる項目は枠で分かります。",
+    ],
+  },
+  {
     version: "4.29.1",
     date: "2026-09-30",
     changes: [
