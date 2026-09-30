@@ -41,3 +41,16 @@ def test_remove_tokens_bulk(monkeypatch, tmp_path):
     apns_subscriptions.upsert_token("token-b")
     apns_subscriptions.remove_tokens(["token-a", "token-missing"])
     assert apns_subscriptions.list_tokens() == ["token-b"]
+
+
+def test_environment_is_recorded_per_token(monkeypatch, tmp_path):
+    monkeypatch.setattr(apns_subscriptions, "TOKENS_PATH", tmp_path / "apns_tokens.json")
+    apns_subscriptions.upsert_token("token-a")
+    assert apns_subscriptions.list_entries() == [("token-a", None)]
+
+    apns_subscriptions.set_environment("token-a", "production")
+    apns_subscriptions.upsert_token("token-a")  # 再登録しても環境は消えない
+    assert apns_subscriptions.list_entries() == [("token-a", "production")]
+
+    apns_subscriptions.set_environment("unknown", "sandbox")  # 無いトークンは何もしない
+    assert apns_subscriptions.list_tokens() == ["token-a"]

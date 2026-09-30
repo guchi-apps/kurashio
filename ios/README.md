@@ -211,9 +211,11 @@ do not support the Push Notifications capability」となり、プロビジョ�
 （`Kurashio.entitlements` から `aps-environment` を外して個人チームへ戻す形は採っていない）。
 `project.pbxproj` の `DEVELOPMENT_TEAM` と、サーバー側の `APNS_TEAM_ID` はこのチームの Team ID に揃える。
 
-Xcode で開発ビルドを入れる限り `aps-environment` は `development` になる（TestFlight/App Store配布は
-対象外）。そのため`APNS_ENVIRONMENT`は`sandbox`のままでよく、APNsの
-`api.sandbox.push.apple.com`だけに疎通する。
+Xcode の開発ビルドは `aps-environment` が `development`（APNsは sandbox）、TestFlight 配布版は
+`production` になる。**バックエンドは端末トークンごとに送信先を振り分ける**（#593）:
+`BadDeviceToken` が返ったら反対側の環境で再送し、通ったほうを `data/apns_tokens.json` に記録して次回から
+そちらへ送る。両方で `BadDeviceToken` のときだけトークンを削除する。`APNS_ENVIRONMENT` は環境が未判定の
+トークンを最初に試す側でしかない（初回だけ送信が2回になることがある）。
 
 ### Mac mini・iPhoneでの初回設定・テスト手順（#527）
 
