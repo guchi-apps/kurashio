@@ -29,21 +29,23 @@ jobs:
         id: build
         run: |
           base="origin/${{ github.base_ref }}"
-          # -U0 の差分から、ファイル見出しと MARKETING_VERSION の行を除いた変更行を数える
-          shell_changes=$(git diff -U0 "$base"...HEAD -- ios/ \
-            | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' \
-            | grep -vE '^[+-][[:space:]]*MARKETING_VERSION = [^;]+;[[:space:]]*$' | wc -l)
+          # 判定は ios/scripts/ios-changes.mjs（TestFlight配布 ios-testflight.yml と同じ関数）に揃える。
+          # 配布物（Kurashio/・KurashioWidget/・xcodeproj）の変更だけを数え、README・scripts・
+          # 版番号の行だけの差分は除く
+          shell_changes=$(node ios/scripts/ios-changes.mjs --base "$base" --head HEAD --json \
+            | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).changedFiles.length")
           shared=$(git diff --name-only "$base"...HEAD -- \
             frontend/lib/native-app.ts frontend/lib/widget-sensors.ts \
             frontend/components/native-widget-snapshot-sync.tsx)
           {
             echo '<!-- ios-rebuild-notice -->'
             if [ "$shell_changes" -gt 0 ]; then
-              echo '### 📱 iOSアプリの入れ直しが必要です'
+              echo '### 📱 iOSアプリの更新が必要です'
               echo
-              echo '`ios/` に殻の変更が含まれています。**Web版が main へデプロイされた後に**、'
-              echo 'subpc から `ios/scripts/remote-install.sh`（Mac mini なら `ios/scripts/install-to-iphone.sh`）を実行してください。'
-              echo '手順の詳細は `ios/README.md` を参照。'
+              echo '`ios/` に配布物（Swift・Widget・Xcode設定・アセット）の変更が含まれています。'
+              echo '**Web版が main へデプロイされた後に、TestFlight へ自動配布されます**（`ios-testflight.yml`）。'
+              echo '配布後は iPhone の TestFlight アプリで更新してください。'
+              echo '開発ビルドを直接入れたいときは `ios/scripts/remote-install.sh`。手順・失敗時の対処は `ios/README.md` を参照。'
               echo
             fi
             if [ -n "$shared" ]; then

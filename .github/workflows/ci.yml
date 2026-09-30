@@ -50,6 +50,10 @@ jobs:
       - name: Check iOS consistency
         run: node ios/scripts/check-consistency.mjs
 
+      # TestFlight配布の判定・App Store Connect APIの純関数のテスト（#591）。依存なし
+      - name: Test iOS distribution scripts
+        run: node --test ios/scripts/*.test.mjs
+
       - name: Install dependencies
         working-directory: ./frontend
         run: npm ci

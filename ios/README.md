@@ -17,7 +17,7 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 | 変えたもの | Web版（PWA・ブラウザ） | iOSアプリ |
 |---|---|---|
 | 画面・機能（`frontend/`・`backend/`） | main へマージ → 自動デプロイ | **何もしなくてよい。** 次に開いたとき（または10分ごとの更新チェック #277）にWeb版の新しいビルドが出る |
-| アプリの殻（`ios/`） | 影響なし（`out/` 以外は配信されない） | Mac mini でビルドし直して iPhone へ入れ直す |
+| アプリの殻（`ios/`） | 影響なし（`out/` 以外は配信されない） | main のリリースで **TestFlight へ自動配布**（配布物が変わったときだけ・#591）。iPhone の TestFlight アプリで更新する。開発ビルドは Mac mini から入れ直す |
 | アイコン（`frontend/assets/kurashio-app-icon.png`） | `node scripts/generate-icons.mjs`（`frontend/`で実行） | 同じスクリプトで `ios/.../AppIcon.appiconset` も書き出される。**そのあとビルドし直す** |
 | バージョン | `frontend/package.json`（changelog と揃える） | Xcode の `MARKETING_VERSION`。`frontend/package.json` と自動で同期される（下記「バージョンの同期」参照。#535） |
 
@@ -31,7 +31,7 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 |---|---|---|---|
 | `frontend/`・`backend/` のみ | 不要 | main へのマージで自動デプロイ。アプリは次に開いたとき（10分ごとの更新チェック #277）に反映 | なし |
 | `frontend/lib/native-app.ts`・`widget-sensors.ts` など Swift と形を共有するファイル | 不要（ただし Swift 側と揃っているか確認） | CI が `check-consistency.mjs` で戻り先スキーム・ブリッジ名などを照合。develop→main のPRに確認コメント | 形（メッセージ・スナップショットの項目）を変えたなら Swift 側も直す |
-| `ios/` の Swift・pbxproj・アイコン | **要る** | CI が共有 Swift の一致・pbxproj の整合を照合。develop→main のPRに「入れ直しが必要」のコメント（版番号だけの差分は除く） | 下の「入れ直し」を1コマンド実行 |
+| `ios/` の Swift・pbxproj・アイコン | **要る** | CI が共有 Swift の一致・pbxproj の整合を照合。develop→main のPRに「更新が必要」のコメント。**main のデプロイ後に TestFlight へ自動配布**（下の「TestFlight への自動配布」） | TestFlight アプリで更新（開発ビルドなら下の「入れ直し」を1コマンド実行） |
 | 版番号（`MARKETING_VERSION`） | 不要（次に入れ直すときに反映） | リリースのバンプPRが `sync-version.mjs` で同期（#535） | なし |
 
 **いつ入れ直すか: Web側が main へデプロイされた後に、`main` から。** 殻は本番URLを開くので、
@@ -67,6 +67,76 @@ ios/scripts/install-to-iphone.sh     # main を取り込み → 整合チェッ�
 - 作業ツリーに未コミットの変更があると中止する（誤って上書きしないため）
 - **subpc からは実行結果を確かめられない**（Xcode が無い）。スクリプトを直したときは Mac mini で1回実行して確かめる
 - 手作業のまま残るのは、初回の準備（Supabase・Xcode・デベロッパモード）と、約1年ごとの署名切れのときの入れ直しの起動だけ
+
+## TestFlight への自動配布（#591）
+
+**リリースで `ios/` の配布物が変わったときだけ、Web の本番反映のあとに TestFlight の内部テストグループへ
+自動で配る。** 開発ビルドの入れ直し（下の「入れ直し」）に頼らず、iPhone の TestFlight アプリで更新できる。
+自動では入らないので、更新は TestFlight アプリで自分で行う。
+
+```
+Deploy to Production 成功
+  → ios-testflight-trigger.yml（薄い起動役。main の本体を dispatch）
+    → ios-testflight.yml:  判定 → 署名・ビルド・アップロード → ビルド処理待ち・内部グループ配布 → 印（タグ）
+```
+
+| 段階（ジョブ） | 何をする | 失敗したら |
+|---|---|---|
+| 判定 | 最後に配布し終えたコミット（タグ `ios-testflight/<ビルド番号>`）との差分を見る。**対象は `ios/Kurashio/`・`ios/KurashioWidget/`・`ios/Kurashio.xcodeproj/` のみ**（README・`ios/scripts/`・版番号の行だけの差分は不要）。印が無ければ初回として要配布 | main に無いコミット・判定エラー。要らなければ「スキップ（Webのみ）」と理由が run のサマリーに出る |
+| 署名・ビルド・アップロード | macOS runner でクラウド署名（App Store Connect APIキー）→ アーカイブ → IPA → `altool` でアップロード。ビルド番号はアプリ本体・Widget とも同じ値 | 署名（プロビジョニング）・アーカイブ・アップロードのどのステップで落ちたかがログで分かる |
+| ビルド処理待ち・内部グループ配布 | Apple の処理（最大40分）を待ち、内部グループへ割り当て、利用可能になるまで確認。最後に印を付ける | 処理失敗・輸出コンプライアンス・グループ未設定など。**印は付かない** |
+
+- **Web と iOS は別の run。** Web が成功して iOS だけが失敗することがある（Signaly にも別通知が出る）。
+  iOS の失敗を Web の成功として隠さない
+- **版番号:** 表示バージョン（`MARKETING_VERSION`）は `frontend/package.json` と同期済み（#535）。
+  ビルド番号は `run_number * 100 + run_attempt`（Actions が発行する値なので重複しない・Re-run all jobs でも新しい番号）。
+  リポジトリ内の `CURRENT_PROJECT_VERSION`（1）は変えず、`xcodebuild` の引数で上書きする
+- **取りこぼさない:** 印は配布し終えたときだけ進む。失敗した配布の変更も、複数リリースをまたいでも、
+  次の判定が「配布済みとの差分」で見るので拾われる（リリースごとの差分ではない）
+- **判定だけ確かめる:** Actions → iOS TestFlight → Run workflow で `dry_run` にチェック。手元なら
+  `node ios/scripts/ios-changes.mjs`
+
+### 失敗したとき・やり直すとき
+
+1. run のサマリーとログで、どの段階かを確かめる（原因は `::error::` に出る）
+2. 原因（下表）を直したら、**同じ run の「Re-run failed jobs」**、または Run workflow で**同じ `sha`** を指定して再実行する。
+   アップロード済みのビルド番号は二重に上げない（`build-exists` で確認）。印が進んでいないので、何度やり直しても安全
+3. Apple の処理が40分を超えたときは終了コード2（待ちきれず）。しばらく待って Re-run failed jobs で続きから確かめられる
+
+| 症状 | 原因と対処 |
+|---|---|
+| `ASC_KEY_ID が未登録です` | 下の初期設定をしていない |
+| `App Store Connect APIの認証に失敗しました（HTTP 401/403）` | **キーの失効**（下記）または権限不足（「App管理」以上） |
+| `Communication with Apple failed` / プロファイル作成失敗 | 同じキー・チームで App ID・App Group（Widget）が作れない。初回は Xcode で一度 Archive して App ID・App Group・配布用証明書を作っておく |
+| `内部グループを1つに決められません` | 内部グループが複数。repository variable `TESTFLIGHT_GROUP` に名前を入れる |
+| `MISSING_EXPORT_COMPLIANCE` | `ITSAppUsesNonExemptEncryption`（下の「暗号化非該当フラグ」）を確認 |
+| `MARKETING_VERSION がずれています` | `node ios/scripts/sync-version.mjs` を実行して develop へ反映 |
+
+### 初期設定（初回だけ・本人の操作）
+
+1. App Store Connect → ユーザとアクセス → 統合 → **チームキー**で、アクセス権「App管理」のAPIキーを発行する
+   （`.p8` は**一度しかダウンロードできない**）。Key ID と Issuer ID を控える
+2. 1Password の `apps/MyRoom` に `asc-key-id`・`asc-issuer-id`・`asc-key-p8`（`.p8` の中身を **base64 の1行**にした値。
+   改行を含む値は入れない）を登録し、`sync-secrets.yml` で GitHub の repository secret へ同期する
+   （`.github/secrets-manifest.tsv` の `ASC_*`）。リポジトリには一切置かない。実行環境はランナーの一時領域で、ジョブの最後に削除する
+3. App Store Connect で kurashio の App と、自分だけの**内部テストグループ**を作る（`#548` で作成済み）。
+   グループが複数あるときだけ repository variable `TESTFLIGHT_GROUP` に名前を入れる
+4. 動作確認: 上の `dry_run` → 手動 dispatch（`dry_run` を外す）。**subpc に Xcode は無いので、署名・ビルドは
+   最初の実 run で初めて確かめられる**（このワークフローは Mac 側での実機確認前提）
+
+### キーの失効・期限切れ
+
+APIキーは自動では期限切れにならないが、App Store Connect で**取り消す・権限を下げると 401/403** になる。
+その場合は上の1〜2をやり直す（新しいキーを発行して1Passwordの値を差し替え、同期）。通知先は Signaly
+（CI・デプロイと同じチャンネル。種別「iOS配布（TestFlight）」）。**チームのライセンス更新（年1回）**が切れると署名自体が
+できなくなるので、Apple Developer Program の更新も本人の操作。
+
+### 対象外・既知の制約
+
+- TestFlight 版は `aps-environment` が production になるが、バックエンドが端末トークンごとに APNs の
+  送信先を振り分ける（#593。下の「署名は Apple Developer Program が前提」）ため、プッシュ通知も届く
+- App Store 一般公開・外部テスターへの配布はしない。IssueDeck のリリース画面への表示は issue-deck 側の
+  別 Issue（この run のサマリー・タグ `ios-testflight/*`・Actions の結果が連携元）
 
 ## Mac mini でのビルド・iPhone へのインストール
 
