@@ -120,3 +120,28 @@ def test_import_kepco_csv_rejects_invalid_csv(authed_client):
     )
     assert response.status_code == 400
     assert "CSV" in response.json()["detail"] or "データ抽出対象期間" in response.json()["detail"]
+
+
+def test_import_kepco_csv_hides_db_error_detail_and_logs(authed_client, monkeypatch, caplog):
+    def boom(*args, **kwargs):
+        raise RuntimeError("INSERT INTO kepco_hourly_usage secret-table")
+
+    class FakeDb:
+        def rollback(self):
+            pass
+
+    from backend.main import app
+
+    app.dependency_overrides[database.get_db] = lambda: FakeDb()
+    monkeypatch.setattr(database, "DB_MOCK", False)
+    monkeypatch.setattr(kepco_import, "upsert_kepco_hourly", boom)
+    with caplog.at_level("ERROR"):
+        response = authed_client.post(
+            "/api/energy/kepco/import",
+            files={"file": ("Hour__202608.csv", HOURLY_CSV.encode("utf-8"), "text/csv")},
+        )
+    del app.dependency_overrides[database.get_db]
+    assert response.status_code == 500
+    assert response.json()["detail"] == "internal error"
+    assert "kepco importの保存に失敗" in caplog.text
+    assert "secret-table" in caplog.text
