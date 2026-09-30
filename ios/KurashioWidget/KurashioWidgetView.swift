@@ -73,7 +73,6 @@ private struct SmallContentView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
         .containerBackground(.fill.tertiary, for: .widget)
     }
 }
@@ -90,7 +89,6 @@ private struct SmallDualContentView: View {
             SensorBlock(reading: second)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .padding()
         .containerBackground(.fill.tertiary, for: .widget)
     }
 }
@@ -100,30 +98,40 @@ private struct SensorBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(reading.name ?? "いまの室温")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            // 止まっている段は行を増やさず、名前の行の末尾に添える（2台とも止まっても高さに収まる）
+            HStack(spacing: 4) {
+                Text(reading.name ?? "いまの室温")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if reading.stale {
+                    Text("受信停止")
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+            }
+            .font(.caption2)
+            // 温度・湿度を1行、CO2を次の行に分けて、幅が足りず「…」で切れないようにする
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(reading.temperature.map { String(format: "%.1f℃", $0) } ?? "—")
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: 22, weight: .bold))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                    .minimumScaleFactor(0.6)
                 Text(reading.humidity.map { "\(Int($0))%" } ?? "—")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                if let co2 = reading.co2 {
-                    HStack(spacing: 2) {
-                        Co2Dot(level: reading.co2Level)
-                        Text("\(Int(co2.rounded()))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                    .lineLimit(1)
+            }
+            if let co2 = reading.co2 {
+                HStack(spacing: 3) {
+                    Co2Dot(level: reading.co2Level)
+                    Text("CO2 \(Int(co2.rounded())) ppm")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
             }
-            .lineLimit(1)
-            // 止まっている段にだけ添える
-            StaleNote(stale: reading.stale)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
