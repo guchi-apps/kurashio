@@ -147,9 +147,15 @@ jobs:
       - name: アップロード（App Store Connect）
         run: |
           # 「Re-run failed jobs」でアップロード済みのビルドを二重に上げない
-          if node ios/scripts/asc-api.mjs build-exists --version "$VERSION" --build "$BUILD"; then
+          # 終了コード: 0=あり / 10=未アップロード / それ以外=API障害（障害を「未アップロード」と誤認して二重に上げない）
+          rc=0
+          node ios/scripts/asc-api.mjs build-exists --version "$VERSION" --build "$BUILD" || rc=$?
+          if [ "$rc" -eq 0 ]; then
             echo "build ${BUILD} は既にアップロード済みのためスキップします。"
             exit 0
+          elif [ "$rc" -ne 10 ]; then
+            echo "::error::アップロード済みかを確かめられませんでした（終了コード ${rc}）。再実行してください。"
+            exit "$rc"
           fi
           xcrun altool --upload-app --type ios \
             --file "$(ls "$RUNNER_TEMP"/export/*.ipa | head -n 1)" \

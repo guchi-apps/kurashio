@@ -10,7 +10,8 @@
 //   BUNDLE_ID（既定 com.gucchii.kurashio）
 // **キーの中身・JWTはログに出さない。** 失敗の理由は段階名つきの短い文で返す。
 //
-// 終了コード: 0=成功（build-exists は存在するとき0・無いとき1）
+// 終了コード: 0=成功（build-exists は存在するとき0）
+//   10=build-exists で未アップロード（失敗ではない。API障害の1と区別するため別の値にしている）
 //   2=待ちきれなかった（Appleの処理が遅い。再実行で続きから確かめられる）
 //   1=それ以外の失敗（認証・処理失敗・割当て失敗）
 
@@ -196,7 +197,7 @@ async function main() {
     const app = await findApp(client, bundleId);
     const b = await findBuild(client, app.id, opts.version, opts.build);
     console.log(b ? `build ${opts.build} は既にあります（${b.attributes.processingState}）` : "未アップロード");
-    process.exit(b ? 0 : 1);
+    process.exit(b ? 0 : 10);
   } else if (command === "wait-and-assign") {
     await waitAndAssign(client, {
       version: opts.version,
