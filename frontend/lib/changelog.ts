@@ -34,6 +34,15 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.31.1",
+    date: "2026-10-01",
+    changes: [
+      "消費電力の「時間ごと」表示で、当日のまだ来ていない時間帯を「記録なし」と表示するようにしました。",
+      "完了済みの掃除がNotionへ反映されず、チェックが外れないことがある問題を直しました。",
+      "ログインの安全性と安定性を高めました。",
+    ],
+  },
+  {
     version: "4.31.0",
     date: "2026-10-01",
     changes: [
