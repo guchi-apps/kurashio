@@ -69,3 +69,42 @@ def test_get_current_user_is_sync():
     import inspect
 
     assert not inspect.iscoroutinefunction(auth.get_current_user)
+
+
+def _user_with(monkeypatch, payload):
+    monkeypatch.setattr(auth, "verify_token", lambda token: payload)
+    return auth.get_current_user(token="t")
+
+
+def _google_payload(**overrides):
+    payload = {
+        "email": "test@example.com",
+        "app_metadata": {"provider": "google", "providers": ["google"]},
+        "user_metadata": {"email_verified": True},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_verified_google_login_is_allowed(monkeypatch):
+    payload = _google_payload()
+    assert _user_with(monkeypatch, payload) is payload
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        # 許可リストのメールでも、メール/パスワード登録のトークンは通さない
+        {"app_metadata": {"provider": "email", "providers": ["email"]}},
+        {"app_metadata": {}},
+        {"app_metadata": None},
+        # メールが未確認・確認済みの記載が無い
+        {"user_metadata": {"email_verified": False}},
+        {"user_metadata": {}},
+        {"user_metadata": {"email_verified": "true"}},
+    ],
+)
+def test_unverified_or_non_google_login_is_403(monkeypatch, overrides):
+    with pytest.raises(HTTPException) as exc_info:
+        _user_with(monkeypatch, _google_payload(**overrides))
+    assert exc_info.value.status_code == 403
