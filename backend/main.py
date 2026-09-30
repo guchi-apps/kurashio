@@ -2061,7 +2061,7 @@ def get_energy_hourly(
         parsed_date = energy.parse_date(date)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    return energy.get_hourly(db, parsed_date)
+    return energy.get_hourly(db, parsed_date, now=get_now_jst())
 
 
 @app.post("/api/energy/kepco/import")
@@ -2090,7 +2090,8 @@ async def import_kepco_hourly_csv(
         return {"status": "ok", **result}
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.exception("kepco importの保存に失敗")
+        raise HTTPException(status_code=500, detail="internal error") from e
 
 
 def _handle_bambu_events(events: List[Any]) -> None:

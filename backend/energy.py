@@ -659,6 +659,7 @@ def build_hourly(
     date: datetime.date,
     unit_price: float,
     kepco_hours: Optional[Sequence[Dict[str, Any]]] = None,
+    now: Optional[datetime.datetime] = None,
 ) -> Dict[str, Any]:
     """1日ぶんの時系列スナップショットから時間帯ごとの内訳を組み立てる。DBアクセスを含まない。
 
@@ -666,6 +667,10 @@ def build_hourly(
     エアコン・スマートプラグ実測との差分を `KEPCO_OTHER_SOURCE`（「その他」）として
     積み増す。KEPCO実測のほうが小さい（測定誤差・端数処理由来）ときは0に丸め、
     マイナスにはしない。
+
+    `now`（JSTのnaive datetime）を渡すと、開始時刻が`now`より後の時間帯
+    （当日のまだ来ていない時間帯）は 0 kWh ではなく `kwh: None`（記録なし）にする。
+    過去の日の夜間が 0 になるのは意図どおりなので、過去日には影響しない。
     """
     by_source: Dict[str, List[Dict[str, Any]]] = {}
     for row in readings:
@@ -684,6 +689,9 @@ def build_hourly(
 
     hours: List[Dict[str, Any]] = []
     for hour in range(24):
+        if now is not None and datetime.datetime.combine(date, datetime.time(hour)) > now:
+            hours.append({"hour": hour, "kwh": None, "cost_yen": None, "by_source": {}})
+            continue
         boundary_end = datetime.datetime.combine(date, datetime.time(hour, 59, 59))
         boundary_start = boundary_end - datetime.timedelta(hours=1)
 
@@ -751,7 +759,11 @@ def _fetch_kepco_hours(db: Session, date: datetime.date) -> List[Dict[str, Any]]
     return [{"hour": row.hour, "kwh": row.kwh} for row in rows]
 
 
-def get_hourly(db: Optional[Session], date: datetime.date) -> Dict[str, Any]:
+def get_hourly(
+    db: Optional[Session],
+    date: datetime.date,
+    now: Optional[datetime.datetime] = None,
+) -> Dict[str, Any]:
     unit_price = get_unit_price(db)
 
     if database.DB_MOCK or db is None:
@@ -761,4 +773,4 @@ def get_hourly(db: Optional[Session], date: datetime.date) -> Dict[str, Any]:
         readings = _fetch_readings(db, date)
         kepco_hours = _fetch_kepco_hours(db, date)
 
-    return build_hourly(readings, date, unit_price, kepco_hours=kepco_hours)
+    return build_hourly(readings, date, unit_price, kepco_hours=kepco_hours, now=now)
