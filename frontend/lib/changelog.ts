@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.30.3",
+    date: "2026-09-30",
+    changes: [
+      "iPhoneのSmallサイズのウィジェットで、温度・湿度・CO2の表示が見切れないように余白を調整しました。",
+    ],
+  },
+  {
     version: "4.30.1",
     date: "2026-09-30",
     changes: [
