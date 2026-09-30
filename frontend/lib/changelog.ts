@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.31.0",
+    date: "2026-10-01",
+    changes: [
+      "iPhoneのホーム画面ウィジェットに「ミディアム」サイズが加わりました。室温・湿度・CO2を最大4か所ぶん、1つのウィジェットに並べて見られます。",
+    ],
+  },
+  {
     version: "4.30.3",
     date: "2026-09-30",
     changes: [
