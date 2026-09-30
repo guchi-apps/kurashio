@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, Optional
 
@@ -35,9 +36,19 @@ ALLOWED_GOOGLE_EMAILS = {
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
+# 未知のkidによる再取得の最小間隔。kidは未検証のトークンのヘッダーから取った値なので、
+# でたらめなkidを送るだけでSupabaseへのリクエストを起こせてしまうのを防ぐ。
+JWKS_REFETCH_MIN_INTERVAL_SECONDS = 60
+
 # kid -> JWK の辞書。Supabase側のキーローテーションに追従できるよう、
-# 未知のkidに出会ったら一度だけ再フェッチする。
-_jwks_cache: Dict[str, Any] = {"keys_by_kid": {}, "fetched_at": 0.0}
+# 未知のkidに出会ったら（最小間隔を空けて）再フェッチする。
+# fetched_at は成功した時刻、attempted_at は成功・失敗を問わず最後に取りに行った時刻。
+_jwks_cache: Dict[str, Any] = {"keys_by_kid": {}, "fetched_at": None, "attempted_at": None}
+_jwks_lock = threading.Lock()
+
+
+class JwksUnavailableError(Exception):
+    """JWKSを取得できず、検証に使える鍵も手元に無い。"""
 
 
 def _fetch_jwks() -> Dict[str, Any]:
@@ -48,16 +59,36 @@ def _fetch_jwks() -> Dict[str, Any]:
 
 
 def _get_signing_key(kid: str) -> Dict[str, Any]:
-    now = time.monotonic()
-    is_stale = now - _jwks_cache["fetched_at"] > JWKS_CACHE_TTL_SECONDS
-    if kid not in _jwks_cache["keys_by_kid"] or is_stale:
-        _jwks_cache["keys_by_kid"] = _fetch_jwks()
-        _jwks_cache["fetched_at"] = now
+    with _jwks_lock:
+        now = time.monotonic()
+        fetched_at = _jwks_cache["fetched_at"]
+        attempted_at = _jwks_cache["attempted_at"]
+        keys_by_kid = _jwks_cache["keys_by_kid"]
 
-    key = _jwks_cache["keys_by_kid"].get(kid)
-    if not key:
-        raise JWTError(f"Unknown JWT key id: {kid}")
-    return key
+        is_stale = fetched_at is None or now - fetched_at > JWKS_CACHE_TTL_SECONDS
+        needs_fetch = is_stale or kid not in keys_by_kid
+        throttled = (
+            attempted_at is not None
+            and now - attempted_at < JWKS_REFETCH_MIN_INTERVAL_SECONDS
+        )
+        if needs_fetch and not throttled:
+            _jwks_cache["attempted_at"] = now
+            try:
+                _jwks_cache["keys_by_kid"] = _fetch_jwks()
+                _jwks_cache["fetched_at"] = now
+            except (requests.RequestException, ValueError, KeyError) as exc:
+                # 古いキャッシュが残っていればそれで検証を続ける。
+                logger.warning("JWKS fetch failed: %s", exc)
+                if not _jwks_cache["keys_by_kid"]:
+                    raise JwksUnavailableError(str(exc)) from exc
+            keys_by_kid = _jwks_cache["keys_by_kid"]
+
+        key = keys_by_kid.get(kid)
+        if not key:
+            if not keys_by_kid:
+                raise JwksUnavailableError("JWKS is not available")
+            raise JWTError(f"Unknown JWT key id: {kid}")
+        return key
 
 
 def verify_token(token: str) -> Dict[str, Any]:
@@ -77,6 +108,11 @@ def verify_token(token: str) -> Dict[str, Any]:
             audience=SUPABASE_AUDIENCE,
             issuer=SUPABASE_ISSUER,
         )
+    except JwksUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="認証サーバーに接続できません。しばらくしてからやり直してください",
+        ) from exc
     except JWTError as exc:
         logger.warning("Supabase JWT verification failed: %s", exc)
         raise HTTPException(
@@ -87,7 +123,8 @@ def verify_token(token: str) -> Dict[str, Any]:
     return payload
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
+# 同期関数にしてスレッドプールで動かす（JWKS取得の同期HTTPでイベントループを止めない）。
+def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
