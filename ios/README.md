@@ -318,7 +318,7 @@ Xcode の開発ビルドは `aps-environment` が `development`（APNsは sandbo
 
 ## ホーム画面ウィジェット（`KurashioWidget`・#537）
 
-室温・ゴミの日・今日の電気量を表示する、iOS標準のホーム画面ウィジェット（Small/Large）。
+室温・ゴミの日・今日の電気量を表示する、iOS標準のホーム画面ウィジェット（Small/Medium/Large）。
 **Largeには電気の操作ボタンも並ぶ**（#546。下の「電気の操作ボタン」の節）。
 
 ### 表示用データだけをApp Group経由で共有する（JWTは渡さない）
@@ -359,6 +359,10 @@ App Group共有のUserDefaultsへ書き写す方式にした。
 - **Smallは CO2 も出し、「2つ目のセンサー」を選ぶと2台を上下2段で並べる**（#569）。2つ目が未選択・一覧から
   消えた・1つ目と同じときは1台表示へ倒す（2つ目は `reading()` の既定フォールバックを使わず
   `secondReading()` で探す。使うと消えたセンサーの段に既定の値が出て同じ値が2段並ぶ）
+- **Medium は最大4台を並べる**（#614）。「2〜4つ目のセンサー」を選んだ順に、1台は大きく・2台は左右・
+  3〜4台は2×2で出す。3つ目・4つ目は Medium だけで使い、Small・Large では無視する。未選択・一覧から消えた・
+  すでに出しているセンサーと同じものは詰めて落とす（`KurashioEntry.mediumReadings`。同じ値が並ばないため）。
+  Web側・`SharedWidgetSnapshot.swift` は変えていない（`sensors` にすでに全センサーが入っている）
 - **CO2の段階（緑・黄・赤）の判定はWeb側の `getCo2Level()` だけが持つ。** `WidgetSensor.co2Level` で届いた
   段階にSwiftが色を当てるだけで、ppmのしきい値はSwiftに書かない
 - **保存するときに項目ごとに型を整える**（`SharedWidgetSnapshot.save()`）。WKWebView から届いた辞書をそのまま

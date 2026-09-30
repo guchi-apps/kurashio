@@ -10,6 +10,8 @@ struct KurashioWidgetView: View {
         if let snapshot = entry.snapshot, let reading = entry.roomReading {
             if family == .systemLarge {
                 LargeContentView(snapshot: snapshot, reading: reading, pressResult: entry.pressResult)
+            } else if family == .systemMedium {
+                MediumContentView(readings: entry.mediumReadings)
             } else {
                 if let second = entry.secondReading {
                     SmallDualContentView(first: reading, second: second)
@@ -90,6 +92,47 @@ private struct SmallDualContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .containerBackground(.fill.tertiary, for: .widget)
+    }
+}
+
+/// Medium（329×155pt相当）: 最大4地点を2×2で並べる（#614）。1台は大きく、2台は左右、3〜4台は2×2
+private struct MediumContentView: View {
+    let readings: [SharedWidgetSnapshot.RoomReading]
+
+    var body: some View {
+        Group {
+            if readings.count <= 1, let only = readings.first {
+                SmallContentView(reading: only)
+            } else if readings.count == 2 {
+                HStack(alignment: .center, spacing: 0) {
+                    SensorBlock(reading: readings[0])
+                    Divider().padding(.horizontal, 12)
+                    SensorBlock(reading: readings[1])
+                }
+            } else {
+                VStack(spacing: 0) {
+                    row(readings.prefix(2))
+                    Divider().padding(.vertical, 4)
+                    row(readings.dropFirst(2))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .containerBackground(.fill.tertiary, for: .widget)
+    }
+
+    private func row(_ items: ArraySlice<SharedWidgetSnapshot.RoomReading>) -> some View {
+        HStack(alignment: .center, spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, reading in
+                if index > 0 { Divider().padding(.horizontal, 12) }
+                SensorBlock(reading: reading)
+            }
+            // 3台のときは右下を空けて、左下のブロックの幅を上段と揃える
+            if items.count == 1 {
+                Divider().padding(.horizontal, 12).hidden()
+                Color.clear.frame(maxWidth: .infinity)
+            }
+        }
     }
 }
 
