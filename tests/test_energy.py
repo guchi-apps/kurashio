@@ -349,6 +349,25 @@ def test_build_hourly_computes_deltas_between_snapshots():
     assert hours[23]["kwh"] == 0.0
 
 
+def test_build_hourly_marks_future_hours_of_today_as_no_record():
+    readings = [_reading(8, 0, 0.5), _reading(9, 0, 1.2)]
+    now = datetime.datetime(2026, 8, 22, 10, 30)
+    result = energy.build_hourly(readings, datetime.date(2026, 8, 22), 31.0, now=now)
+
+    hours = {row["hour"]: row for row in result["hours"]}
+    assert hours[9]["kwh"] == 0.7
+    # いま（10時台）は進行中の時間帯なので記録あり（差分0）
+    assert hours[10]["kwh"] == 0.0
+    # まだ来ていない11時台以降は「記録なし」
+    assert hours[11]["kwh"] is None
+    assert hours[11]["cost_yen"] is None
+    assert hours[23]["kwh"] is None
+
+    # 過去の日は now より前なので、夜間は従来どおり 0
+    past = energy.build_hourly(readings, datetime.date(2026, 8, 22), 31.0, now=datetime.datetime(2026, 8, 23, 9, 0))
+    assert {row["hour"]: row for row in past["hours"]}[23]["kwh"] == 0.0
+
+
 def test_build_hourly_splits_by_source():
     readings = [
         _reading(8, 0, 0.5, source="aircon"),
