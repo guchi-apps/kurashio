@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from . import atomic_json
 
 JST = timezone(timedelta(hours=9))
+#: 端末のトークンが有効なAPNsの環境。開発ビルドは sandbox、TestFlight/App Store は production
+ENVIRONMENTS = ("sandbox", "production")
 TOKENS_PATH = Path(__file__).resolve().parent.parent / "data" / "apns_tokens.json"
 
 
@@ -33,6 +35,30 @@ def _sanitize_items(data: Any) -> List[Dict[str, Any]]:
 
 def list_tokens() -> List[str]:
     return [item["token"] for item in _sanitize_items(atomic_json.read_json(TOKENS_PATH, []))]
+
+
+def list_entries() -> List[Tuple[str, Optional[str]]]:
+    """`(トークン, 送信先環境)` の一覧。環境が未判定の端末は None（#593）。"""
+    result: List[Tuple[str, Optional[str]]] = []
+    for item in _sanitize_items(atomic_json.read_json(TOKENS_PATH, [])):
+        environment = item.get("environment")
+        result.append((item["token"], environment if environment in ENVIRONMENTS else None))
+    return result
+
+
+def set_environment(token: str, environment: str) -> None:
+    """トークンの送信先環境（`sandbox` / `production`）を記録する。無いトークンは何もしない。"""
+    if environment not in ENVIRONMENTS:
+        raise ValueError("invalid environment")
+
+    def _mutate(data: Any) -> List[Dict[str, Any]]:
+        items = _sanitize_items(data)
+        for item in items:
+            if item.get("token") == token:
+                item["environment"] = environment
+        return items
+
+    atomic_json.update_json(TOKENS_PATH, [], _mutate)
 
 
 def upsert_token(token: str, *, user_agent: str = "") -> None:

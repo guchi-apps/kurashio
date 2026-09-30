@@ -103,8 +103,62 @@ def test_broadcast_removes_bad_device_token(monkeypatch, tmp_path):
     _set_tokens_path(monkeypatch, tmp_path)
     apns_subscriptions.upsert_token("token-bad")
 
-    _use_fake_client(monkeypatch, [FakeResponse(400, reason="BadDeviceToken")])
+    # 両環境で BadDeviceToken のときだけ削除する
+    calls = _use_fake_client(
+        monkeypatch,
+        [FakeResponse(400, reason="BadDeviceToken"), FakeResponse(400, reason="BadDeviceToken")],
+    )
 
     result = apns_notify.broadcast({"title": "t", "body": "b", "tag": "x", "url": "/"})
     assert result == {"sent": 0, "total": 1}
+    assert len(calls) == 2
     assert apns_subscriptions.list_tokens() == []
+
+
+PAYLOAD = {"title": "t", "body": "b", "tag": "x", "url": "/"}
+
+
+def test_broadcast_falls_back_to_other_environment_and_remembers(monkeypatch, tmp_path):
+    _configure_apns(monkeypatch)
+    monkeypatch.setenv("APNS_ENVIRONMENT", "sandbox")
+    _set_tokens_path(monkeypatch, tmp_path)
+    apns_subscriptions.upsert_token("token-tf")
+
+    calls = _use_fake_client(
+        monkeypatch, [FakeResponse(400, reason="BadDeviceToken"), FakeResponse(200)]
+    )
+    assert apns_notify.broadcast(PAYLOAD) == {"sent": 1, "total": 1}
+    assert "api.sandbox.push.apple.com" in calls[0]["url"]
+    assert "api.push.apple.com" in calls[1]["url"]
+    assert apns_subscriptions.list_entries() == [("token-tf", "production")]
+
+    # 2回目は記録した環境へ1回で送る
+    calls = _use_fake_client(monkeypatch, [FakeResponse(200)])
+    assert apns_notify.broadcast(PAYLOAD) == {"sent": 1, "total": 1}
+    assert len(calls) == 1
+    assert calls[0]["url"].startswith("https://api.push.apple.com/")
+
+
+def test_broadcast_routes_each_token_to_its_environment(monkeypatch, tmp_path):
+    _configure_apns(monkeypatch)
+    _set_tokens_path(monkeypatch, tmp_path)
+    apns_subscriptions.upsert_token("token-dev")
+    apns_subscriptions.upsert_token("token-tf")
+    apns_subscriptions.set_environment("token-dev", "sandbox")
+    apns_subscriptions.set_environment("token-tf", "production")
+
+    calls = _use_fake_client(monkeypatch, [FakeResponse(200), FakeResponse(200)])
+    assert apns_notify.broadcast(PAYLOAD) == {"sent": 2, "total": 2}
+    assert "api.sandbox.push.apple.com" in calls[0]["url"]
+    assert "api.push.apple.com/" in calls[1]["url"] and "sandbox" not in calls[1]["url"]
+
+
+def test_broadcast_keeps_token_on_non_token_400(monkeypatch, tmp_path):
+    _configure_apns(monkeypatch)
+    _set_tokens_path(monkeypatch, tmp_path)
+    apns_subscriptions.upsert_token("token-a")
+
+    calls = _use_fake_client(monkeypatch, [FakeResponse(400, reason="DeviceTokenNotForTopic")])
+    assert apns_notify.broadcast(PAYLOAD) == {"sent": 0, "total": 1}
+    assert len(calls) == 1
+    assert apns_subscriptions.list_tokens() == ["token-a"]

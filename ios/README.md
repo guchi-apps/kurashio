@@ -133,9 +133,8 @@ APIキーは自動では期限切れにならないが、App Store Connect で**
 
 ### 対象外・既知の制約
 
-- **TestFlight 版にはプッシュ通知が届かない。** 配布用の署名では `aps-environment` が production になるが、
-  バックエンドの APNs は `APNS_ENVIRONMENT`（既定 `sandbox`）1つで全端末へ送るため。端末ごとの環境の振り分けは
-  別 Issue で扱う。通知が要る間は、従来どおり開発ビルド（下の「入れ直し」）を使う
+- TestFlight 版は `aps-environment` が production になるが、バックエンドが端末トークンごとに APNs の
+  送信先を振り分ける（#593。下の「署名は Apple Developer Program が前提」）ため、プッシュ通知も届く
 - App Store 一般公開・外部テスターへの配布はしない。IssueDeck のリリース画面への表示は issue-deck 側の
   別 Issue（この run のサマリー・タグ `ios-testflight/*`・Actions の結果が連携元）
 
@@ -282,9 +281,11 @@ do not support the Push Notifications capability」となり、プロビジョ�
 （`Kurashio.entitlements` から `aps-environment` を外して個人チームへ戻す形は採っていない）。
 `project.pbxproj` の `DEVELOPMENT_TEAM` と、サーバー側の `APNS_TEAM_ID` はこのチームの Team ID に揃える。
 
-Xcode で開発ビルドを入れる限り `aps-environment` は `development` になる。そのため`APNS_ENVIRONMENT`は
-`sandbox`のままでよく、APNsの`api.sandbox.push.apple.com`だけに疎通する。**TestFlight 配布版
-（#591）は production になるため通知が届かない**（上の「対象外・既知の制約」）。
+Xcode の開発ビルドは `aps-environment` が `development`（APNsは sandbox）、TestFlight 配布版は
+`production` になる。**バックエンドは端末トークンごとに送信先を振り分ける**（#593）:
+`BadDeviceToken` が返ったら反対側の環境で再送し、通ったほうを `data/apns_tokens.json` に記録して次回から
+そちらへ送る。両方で `BadDeviceToken` のときだけトークンを削除する。`APNS_ENVIRONMENT` は環境が未判定の
+トークンを最初に試す側でしかない（初回だけ送信が2回になることがある）。
 
 ### Mac mini・iPhoneでの初回設定・テスト手順（#527）
 

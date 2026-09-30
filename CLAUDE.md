@@ -169,7 +169,7 @@ develop→main のPRには `.github/workflows/ios-rebuild-notice.yml` が「入�
 `ios-rebuild-notice.yml` も同じ関数を呼ぶ（**判定を2か所に書かない**）。**印（タグ `ios-testflight/<番号>`）は
 内部グループへの配布が済んだあとにだけ付ける。** 途中で失敗しても印が進まないので変更を取りこぼさない。
 IPA は公開リポジトリの artifact に載せない（署名・アップロードは同じジョブ）。TestFlight 版は
-`aps-environment=production` のため**現状プッシュ通知が届かない**（APNs の環境振り分けは別Issue）。
+`aps-environment=production` だが、バックエンドが端末トークンごとに APNs の送信先を振り分けるので通知も届く（#593）。
 
 Web側の分岐は `frontend/lib/native-app.ts` の `isNativeApp()`
 （ブリッジ `window.webkit.messageHandlers.kurashioAuth` の有無）に集め、**Web・PWA の挙動は変えない。**

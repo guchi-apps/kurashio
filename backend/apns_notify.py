@@ -65,12 +65,17 @@ def _environment() -> str:
     return (os.getenv("APNS_ENVIRONMENT") or "sandbox").strip().lower()
 
 
-def _host() -> str:
-    return (
-        "api.push.apple.com"
-        if _environment() == "production"
-        else "api.sandbox.push.apple.com"
-    )
+def _default_environment() -> str:
+    """環境がまだ分かっていないトークンを最初に試す側。"""
+    return "production" if _environment() == "production" else "sandbox"
+
+
+def _other_environment(environment: str) -> str:
+    return "sandbox" if environment == "production" else "production"
+
+
+def _host(environment: str) -> str:
+    return "api.push.apple.com" if environment == "production" else "api.sandbox.push.apple.com"
 
 
 def is_configured() -> bool:
@@ -104,12 +109,17 @@ def _signing_token() -> Optional[str]:
         return token
 
 
-def _send_to_token(client: httpx.Client, token: str, payload: Dict[str, Any]) -> Optional[int]:
-    """1件へ送信する。成功は None、失敗はHTTPステータス相当（不明な失敗は -1）を返す。"""
+def _send_to_token(
+    client: httpx.Client, token: str, payload: Dict[str, Any], environment: str
+) -> Tuple[Optional[int], Optional[str]]:
+    """1件へ送信する。成功は `(None, None)`、失敗は `(HTTPステータス相当, reason)`。
+
+    不明な失敗のステータスは -1。
+    """
     signing_token = _signing_token()
     bundle_id = _bundle_id()
     if not (signing_token and bundle_id):
-        return None
+        return None, None
 
     body = {
         "aps": {
@@ -132,16 +142,16 @@ def _send_to_token(client: httpx.Client, token: str, payload: Dict[str, Any]) ->
 
     try:
         response = client.post(
-            f"https://{_host()}/3/device/{token}",
+            f"https://{_host(environment)}/3/device/{token}",
             headers=headers,
             content=json.dumps(body, ensure_ascii=False),
         )
     except Exception as exc:  # HTTP/2接続・ネットワーク周りの予期しない失敗
         logger.error("Unexpected error sending APNs push (token=...%s): %s", token[-6:], exc)
-        return -1
+        return -1, None
 
     if response.status_code == 200:
-        return None
+        return None, None
 
     reason = None
     try:
@@ -149,12 +159,38 @@ def _send_to_token(client: httpx.Client, token: str, payload: Dict[str, Any]) ->
     except Exception:
         pass
     logger.warning(
-        "APNs push failed (status=%s reason=%s token=...%s)",
+        "APNs push failed (status=%s reason=%s env=%s token=...%s)",
         response.status_code,
         reason,
+        environment,
         token[-6:],
     )
-    return response.status_code
+    return response.status_code, reason
+
+
+def _send_with_fallback(
+    client: httpx.Client,
+    token: str,
+    known_environment: Optional[str],
+    payload: Dict[str, Any],
+) -> Tuple[bool, Optional[str], bool]:
+    """1端末へ送る。`(成功したか, 成功した環境, 無効なトークンか)` を返す。
+
+    TestFlight/App Storeのトークンはproduction、Xcodeの開発ビルドはsandboxでしか通らず、
+    環境違いは `400 BadDeviceToken` で返る（#593）。記録済みの環境→反対側の順に試し、
+    `BadDeviceToken` のときだけ次の環境へ進む。それ以外の失敗（設定側の400・429・5xx）は
+    トークンのせいではないので、反対側へ回さず削除もしない。
+    """
+    first = known_environment or _default_environment()
+    for environment in (first, _other_environment(first)):
+        status, reason = _send_to_token(client, token, payload, environment)
+        if status is None:
+            return True, environment, False
+        if status == 410:
+            return False, None, True
+        if not (status == 400 and reason == "BadDeviceToken"):
+            return False, None, False
+    return False, None, True
 
 
 def broadcast(payload: Dict[str, Any]) -> Dict[str, int]:
@@ -170,20 +206,23 @@ def broadcast(payload: Dict[str, Any]) -> Dict[str, int]:
         logger.debug("APNs keys not configured; skipping native push")
         return {"sent": sent, "total": total}
 
-    tokens = apns_subscriptions.list_tokens()
-    total = len(tokens)
-    if not tokens:
+    entries = apns_subscriptions.list_entries()
+    total = len(entries)
+    if not entries:
         return {"sent": sent, "total": total}
 
     expired: List[str] = []
     with httpx.Client(http2=True, timeout=10.0) as client:
-        for token in tokens:
-            status = _send_to_token(client, token, payload)
-            if status in (400, 410):
+        for token, known_environment in entries:
+            ok, environment, invalid = _send_with_fallback(
+                client, token, known_environment, payload
+            )
+            if invalid:
                 expired.append(token)
-                continue
-            if status is None:
+            elif ok:
                 sent += 1
+                if environment != known_environment and environment:
+                    apns_subscriptions.set_environment(token, environment)
 
     if expired:
         apns_subscriptions.remove_tokens(expired)
