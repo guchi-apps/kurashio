@@ -263,6 +263,21 @@ def test_plan_changes_leaves_unchanged_pages_alone():
     assert changes == {"create": [], "update": [], "archive": []}
 
 
+def test_plan_changes_updates_completed_page_even_if_date_is_unchanged():
+    # その日のうちに実施済みで次回の日付が動かないページにチェックが付いた場合
+    expected = [{"title": "掃除: トイレ", "date": "2026-08-29", "memo": "7日ごと"}]
+    existing = [
+        {"page_id": "p1", "title": "掃除: トイレ", "date": "2026-08-29", "memo": "7日ごと", "done": True, "tags": ["掃除"]}
+    ]
+    changes = cleaning_notion.plan_changes(expected, existing)
+
+    assert [item["page_id"] for item in changes["update"]] == ["p1"]
+    properties = cleaning_notion.to_notion_properties(
+        changes["update"][0], RESOLVED, changes["update"][0]["tags"]
+    )
+    assert properties["完了"]["checkbox"] is False
+
+
 def test_to_notion_properties_keeps_other_tags():
     entry = {"title": "掃除: トイレ", "date": "2026-08-29", "memo": "7日ごと"}
     properties = cleaning_notion.to_notion_properties(entry, RESOLVED, ["生活", "掃除"])

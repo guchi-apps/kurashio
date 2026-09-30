@@ -261,7 +261,13 @@ def plan_changes(
         {**expected_by_title[title], "page_id": page["page_id"], "tags": page["tags"]}
         for title, page in existing_by_title.items()
         if title in expected_by_title
-        and (page["date"] != expected_by_title[title]["date"] or page["memo"] != expected_by_title[title]["memo"])
+        and (
+            page["date"] != expected_by_title[title]["date"]
+            or page["memo"] != expected_by_title[title]["memo"]
+            # 完了済みは日付が変わらなくても更新してチェックを外す。残すと日をまたいだ
+            # 最初の同期で find_completed が再び拾い、実施していない日の記録が入る
+            or page["done"]
+        )
     ]
     archive = [
         page for title, page in existing_by_title.items() if title not in expected_by_title
