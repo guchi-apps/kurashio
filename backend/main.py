@@ -2061,7 +2061,7 @@ def get_energy_hourly(
         parsed_date = energy.parse_date(date)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
-    return energy.get_hourly(db, parsed_date)
+    return energy.get_hourly(db, parsed_date, now=get_now_jst())
 
 
 @app.post("/api/energy/kepco/import")
