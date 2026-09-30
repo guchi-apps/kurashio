@@ -126,6 +126,11 @@ Deploy to Production 成功
 4. 動作確認: 上の `dry_run` → 手動 dispatch（`dry_run` を外す）。**subpc に Xcode は無いので、署名・ビルドは
    最初の実 run で初めて確かめられる**（このワークフローは Mac 側での実機確認前提）
 
+**CI の Xcode は Mac mini と同じ 27 系にそろえる**（#606）。`project.pbxproj` は Xcode 27 で保存すると
+`objectVersion = 110` になり、`macos-26` の既定（Xcode 26.6）は「新しすぎるプロジェクト形式」で開けず
+終了コード74で落ちる。そのため build ジョブは `runs-on: xcode-27`（プレビュー。既定 Xcode 27.0）で動かし、
+前提の確認で Xcode 27 未満なら明示的に落とす。Xcode 27 が GA して `macos-27` 等に移るときは `runs-on` を直す。
+
 ### キーの失効・期限切れ
 
 APIキーは自動では期限切れにならないが、App Store Connect で**取り消す・権限を下げると 401/403** になる。
