@@ -79,8 +79,9 @@ jobs:
             if [ "$NEEDED" = "true" ]; then
               echo "- 結果: **iOS更新が必要** — ${REASON}"
               echo "- ビルド番号: ${BUILD}"
-              [ -n "$FILES" ] && printf '%s\n' "$FILES"
-              [ "${{ inputs.dry_run }}" = "true" ] && echo "- dry_run のためビルドしません"
+              # `[ ... ] && cmd` は偽のとき終了コード1になり、末尾に来るとステップごと失敗する。if で書く
+              if [ -n "$FILES" ]; then printf '%s\n' "$FILES"; fi
+              if [ "${{ inputs.dry_run }}" = "true" ]; then echo "- dry_run のためビルドしません"; fi
             else
               echo "- 結果: **iOS配布をスキップ**（Webのみの更新） — ${REASON}"
             fi
@@ -121,6 +122,8 @@ jobs:
 
       - name: 署名・アーカイブ（アプリ本体とWidgetに同じビルド番号）
         run: |
+          # パイプの左（xcodebuild）の失敗を握り潰さない（既定の bash -e は pipefail なし）
+          set -o pipefail
           xcodebuild archive \
             -project ios/Kurashio.xcodeproj -scheme Kurashio -configuration Release \
             -destination 'generic/platform=iOS' \
