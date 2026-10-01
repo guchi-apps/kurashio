@@ -10,8 +10,8 @@ export interface WidgetAircon {
   targetTemperature: number | null;
 }
 
-/** ウィジェットに載せる上限。Mediumで2台並べる（#649） */
-export const WIDGET_AIRCON_LIMIT = 2;
+/** ウィジェットに載せる台数。ダッシュボードが状態を持つのは表示中の1台だけなので1台に絞る（#649） */
+export const WIDGET_AIRCON_LIMIT = 1;
 
 /** ウィジェットからの操作。`temp_up` / `temp_down` は0.5℃刻み */
 export type WidgetAirconAction = "power_on" | "power_off" | "temp_up" | "temp_down";
@@ -21,9 +21,10 @@ export function isWidgetAirconAction(value: unknown): value is WidgetAirconActio
 }
 
 /**
- * 操作できるエアコンを先頭から `limit` 台。操作できない構成（`controllable` が false）では空。
- * ダッシュボードが状態を持っているのは表示中の1台だけなので、状態はその台にだけ入れる
- * （他の台のために取得を増やさない）。操作は状態に頼らず、押した時点でWeb側が読み直す。
+ * 操作できるエアコン。操作できない構成（`controllable` が false）では空。
+ * 対象はダッシュボードが状態を持っている表示中の1台（`latest`）。状態の無い台のために
+ * 取得を増やさない。`latest` がまだ無いときは先頭の台を、状態なしで出す。
+ * 設定温度の値は自動運転ではシフト量（`mode` が AUTO）なので、読む側が `mode` で出し分ける。
  */
 export function buildWidgetAircons(
   units: AirconUnitInfo[],
@@ -32,7 +33,9 @@ export function buildWidgetAircons(
   limit: number = WIDGET_AIRCON_LIMIT
 ): WidgetAircon[] {
   if (!controllable) return [];
-  return units.slice(0, limit).map((unit) => {
+  const active = units.find((unit) => unit.ac_id === latest?.ac_id);
+  const ordered = active ? [active, ...units.filter((unit) => unit !== active)] : units;
+  return ordered.slice(0, limit).map((unit) => {
     const state = latest?.ac_id === unit.ac_id ? latest : null;
     return {
       id: unit.ac_id,

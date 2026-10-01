@@ -54,7 +54,6 @@ struct ControlTimelineProvider: TimelineProvider {
             ],
             aircons: [
                 .init(id: 1, name: "リビング", power: "ON", mode: "COOLING", roomTemperature: 27.8, targetTemperature: 26.0),
-                .init(id: 2, name: "寝室", power: nil, mode: nil, roomTemperature: nil, targetTemperature: nil),
             ]
         )
     }
