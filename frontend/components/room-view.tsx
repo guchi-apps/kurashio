@@ -267,7 +267,7 @@ export function RoomView() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-[480px] px-4 py-4 lg:max-w-[1180px] lg:px-6">
+      <div className="mx-auto max-w-[480px] px-4 py-4 md:max-w-none md:px-6 lg:max-w-[1180px]">
         <header className="mb-4 flex items-center gap-2 border-b px-0.5 pb-3.5">
           <Link
             href="/"
@@ -312,7 +312,7 @@ export function RoomView() {
         </header>
 
         <div className="flex flex-col gap-4 lg:flex-row">
-          <div className="relative h-[340px] shrink-0 overflow-hidden rounded-[20px] bg-card shadow-sm lg:h-[560px] lg:min-w-0 lg:flex-1">
+          <div className="relative h-[340px] md:h-[460px] shrink-0 overflow-hidden rounded-[20px] bg-card shadow-sm lg:h-[560px] lg:min-w-0 lg:flex-1">
             {loading ? (
               <RoomStageMessage>部屋を組み立てています…</RoomStageMessage>
             ) : failed ? (

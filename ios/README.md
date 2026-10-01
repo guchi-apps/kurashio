@@ -9,7 +9,7 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 | 表示名 | kurashio |
 | Bundle ID | `com.gucchii.kurashio`（AIDE-ios の `com.gucchii.AIDEios` とは別） |
 | 署名 | Automatic（有料の Apple Developer Program のチーム `6AA3WFTR94`。無料の個人チームではプッシュ通知を使えない・#560） |
-| 対応 | iPhone・縦向き・iOS 18以上 |
+| 対応 | iPhone（縦向き）・iPad（縦横4方向・ウィンドウは1つだけ）・iOS 18以上。ウィジェットは iPhone のみ（#642） |
 | ログインの戻り先 | `kurashio://auth-callback` |
 
 ## Web版とiOS版で、更新が要る場所の違い
@@ -63,7 +63,7 @@ ios/scripts/install-to-iphone.sh     # main を取り込み → 整合チェッ�
   別の接続で先に解除しても次の接続には引き継がれない（`errSecInternalComponent`）。Mac mini で直接
   `install-to-iphone.sh` を実行するときだけ、事前に一度 `security unlock-keychain ~/Library/Keychains/login.keychain-db` を実行する
 - `remote-install.sh` は取り込み（`git fetch` / `merge --ff-only`）を先に SSH で済ませてからスクリプトを呼ぶ
-  （Mac mini のチェックアウトが古くても起動できる）。入れ先は実機（`reality == physical`）かつ接続中（`tunnelState == connected`）の iPhone だけを自動選択する
+  （Mac mini のチェックアウトが古くても起動できる）。入れ先は実機（`reality == physical`）かつ接続中（`tunnelState == connected`）の iPhone / iPad を自動選択する（2台以上繋がっていると止まるので `IOS_DEVICE=<名前か識別子>` で指定する）
 - 作業ツリーに未コミットの変更があると中止する（誤って上書きしないため）
 - **subpc からは実行結果を確かめられない**（Xcode が無い）。スクリプトを直したときは Mac mini で1回実行して確かめる
 - 手作業のまま残るのは、初回の準備（Supabase・Xcode・デベロッパモード）と、約1年ごとの署名切れのときの入れ直しの起動だけ
@@ -144,6 +144,21 @@ APIキーは自動では期限切れにならないが、App Store Connect で**
   送信先を振り分ける（#593。下の「署名は Apple Developer Program が前提」）ため、プッシュ通知も届く
 - App Store 一般公開・外部テスターへの配布はしない。IssueDeck のリリース画面への表示は issue-deck 側の
   別 Issue（この run のサマリー・タグ `ios-testflight/*`・Actions の結果が連携元）
+
+## iPad 対応（#642）
+
+アプリ本体は iPhone・iPad の両対応（`TARGETED_DEVICE_FAMILY = "1,2"`）。iPad 専用のレイアウトは Web 側
+（幅768px以上で多列）が担う。**注意点**:
+
+- **iPad の向きは4方向すべて宣言する。** `UIRequiresFullScreen` を付けない iPad 対応アプリは足りないと
+  App Store Connect が ITMS-90474 でアップロードを断る（`check-consistency.mjs` が照合する）
+- **ウィンドウは1つに限る。** 通知のタップ・端末トークンの受け先（`appDelegate.webViewModel`）が1つしか
+  持てないため。`INFOPLIST_KEY_UIApplicationSupportsMultipleScenes` という設定キーは無いので、
+  `ios/Kurashio/Info.plist` に `UIApplicationSupportsMultipleScenes = false` を書き、
+  `INFOPLIST_KEY_UIApplicationSceneManifest_Generation = NO` にしている。複数ウィンドウに対応するなら
+  受け先の持ち方を変える別作業になる
+- 確認（Mac mini）: ビルドした `.app` の `plutil -p Info.plist` で `UIApplicationSupportsMultipleScenes` が
+  `false` であること、iPad 実機で「新規ウィンドウ」が出ないこと
 
 ## Mac mini でのビルド・iPhone へのインストール
 
