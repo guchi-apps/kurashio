@@ -123,6 +123,7 @@ import type {
 } from "@/lib/cleaning";
 import { buildGarbageHighlight, type GarbageSchedule } from "@/lib/garbage";
 import type { WidgetSnapshot } from "@/lib/native-app";
+import { buildWidgetGarbageDays } from "@/lib/widget-garbage";
 import { buildWidgetRemoteButtons } from "@/lib/widget-remote-buttons";
 import { buildWidgetSensors, pickDefaultWidgetSensor } from "@/lib/widget-sensors";
 import {
@@ -1112,6 +1113,12 @@ export function MyRoomDashboard() {
     ? garbageHighlight.day.categories.map((category) => category.name).join("・")
     : null;
   const garbageDaysUntil = garbageHighlight?.day.days_until ?? null;
+  // 「ごみの日」ウィジェット用。値が変わらない限り同じ参照にして、無用な再送を避ける
+  const garbageUpcoming = useMemo(
+    () => (garbageSchedule ? buildWidgetGarbageDays(garbageSchedule) : []),
+    [garbageSchedule]
+  );
+  const garbageCollectionTime = garbageSchedule?.collection_time ?? null;
   const todayKwh = energyBreakdown?.today.kwh ?? null;
   const todayCostYen = energyBreakdown?.today.cost_yen ?? null;
   // **フックなので、下の認証ゲートの早期 return より前に置くこと**（後ろに置くと
@@ -1129,6 +1136,8 @@ export function MyRoomDashboard() {
       sensors: widgetSensors,
       garbageLabel,
       garbageDaysUntil,
+      garbageUpcoming,
+      garbageCollectionTime,
       todayKwh,
       todayCostYen,
       remoteButtons: widgetRemoteButtons,
@@ -1138,6 +1147,8 @@ export function MyRoomDashboard() {
       widgetSensors,
       garbageLabel,
       garbageDaysUntil,
+      garbageUpcoming,
+      garbageCollectionTime,
       todayKwh,
       todayCostYen,
       widgetRemoteButtons,

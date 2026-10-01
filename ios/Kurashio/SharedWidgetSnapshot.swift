@@ -40,6 +40,21 @@ enum SharedWidgetSnapshot {
         var groupName: String
     }
 
+    /// 「ごみの日」ウィジェットに並べる品目1つぶん。`color` はアプリで設定した `#rrggbb`
+    struct GarbageCategory: Codable, Hashable {
+        var name: String
+        var color: String
+    }
+
+    /// 「ごみの日」ウィジェットの収集日1日ぶん（Web側の `WidgetGarbageDay`）。
+    /// **日数は持たない。** 端末の日付から数える（ダッシュボードを開かない日にも正しく進むように）
+    struct GarbageDay: Codable, Hashable {
+        /// "2026-08-26"
+        var date: String
+        var weekday: String
+        var categories: [GarbageCategory]
+    }
+
     struct Snapshot: Codable {
         /// センサーを選んでいないときに出す室温・湿度（Web側の `pickDefaultWidgetSensor()`）
         var roomTemperature: Double?
@@ -52,6 +67,10 @@ enum SharedWidgetSnapshot {
         var garbageLabel: String?
         /// 上記の収集日までの日数（0=今日、1=明日）
         var garbageDaysUntil: Int?
+        /// 「ごみの日」ウィジェット用の、今日以降の収集日（日付順・最大5件）。古いWeb版からは届かない
+        var garbageUpcoming: [GarbageDay]?
+        /// 今日の収集が終わる時刻（"08:30"）。これを過ぎたら今日の収集は済みとみなす
+        var garbageCollectionTime: String?
         var todayKwh: Double?
         var todayCostYen: Int?
         /// 電気の操作ボタン（ダッシュボードで非表示にしたものを除く）。#546 より前のWeb版からは届かない
@@ -138,6 +157,8 @@ enum SharedWidgetSnapshot {
             sensors: (raw["sensors"] as? [[String: Any]])?.compactMap(sensor),
             garbageLabel: raw["garbageLabel"] as? String,
             garbageDaysUntil: double(raw["garbageDaysUntil"]).map { Int($0.rounded()) },
+            garbageUpcoming: (raw["garbageUpcoming"] as? [[String: Any]])?.compactMap(garbageDay),
+            garbageCollectionTime: raw["garbageCollectionTime"] as? String,
             todayKwh: double(raw["todayKwh"]),
             todayCostYen: double(raw["todayCostYen"]).map { Int($0.rounded()) },
             remoteButtons: (raw["remoteButtons"] as? [[String: Any]])?.compactMap(remoteButton)
@@ -171,6 +192,15 @@ enum SharedWidgetSnapshot {
             label: (raw["label"] as? String) ?? id,
             groupName: (raw["groupName"] as? String) ?? ""
         )
+    }
+
+    private static func garbageDay(_ raw: [String: Any]) -> GarbageDay? {
+        guard let date = raw["date"] as? String, !date.isEmpty else { return nil }
+        let categories = (raw["categories"] as? [[String: Any]] ?? []).compactMap { item -> GarbageCategory? in
+            guard let name = item["name"] as? String, !name.isEmpty else { return nil }
+            return GarbageCategory(name: name, color: (item["color"] as? String) ?? "")
+        }
+        return GarbageDay(date: date, weekday: (raw["weekday"] as? String) ?? "", categories: categories)
     }
 
     private static func sensor(_ raw: [String: Any]) -> Sensor? {
