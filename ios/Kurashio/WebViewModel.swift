@@ -109,9 +109,10 @@ final class WebViewModel: NSObject, ObservableObject {
 
     /// ウィジェットの表示データ（`SharedWidgetSnapshot`）が変わった直後に呼ぶ。
     /// Widgetは自発的に再読み込みしない設計（`KurashioTimelineProvider`の`.never`ポリシー）のため、
-    /// 変化のたびにこちらから明示的に再評価を促す
+    /// 変化のたびにこちらから明示的に再評価を促す。
+    /// ウィジェットは複数ある（`KurashioWidget`・`GarbageWidget`・#647）ので kind は指定せず全部を再読み込みする
     private func reloadWidgetTimelines() {
-        // 室温の「KurashioWidget」と電気の「KurashioEnergyWidget」の両方を再評価する（#648）
+        // 室温の「KurashioWidget」・電気の「KurashioEnergyWidget」・ごみの日の「KurashioGarbageWidget」を再評価する（#648・#647）
         WidgetCenter.shared.reloadAllTimelines()
     }
 

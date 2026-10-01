@@ -336,6 +336,12 @@ Xcode の開発ビルドは `aps-environment` が `development`（APNsは sandbo
 室温・ゴミの日・今日の電気量を表示する、iOS標準のホーム画面ウィジェット（Small/Medium/Large）。
 **Largeには電気の操作ボタンも並ぶ**（#546。下の「電気の操作ボタン」の節）。
 
+**ごみの日だけを出す別ウィジェット（`GarbageWidget`・kind `KurashioGarbageWidget`・Small/Medium・#647）**
+も同じバンドルに入っている。スナップショットの `garbageUpcoming`（今日以降の収集日・最大5件）と
+`garbageCollectionTime` から描く。**日数は保存せず端末の日付（JST）で数え**、0時と各収集日の収集時刻に
+タイムラインのエントリを積むので、ダッシュボードを開かない日も表示が進む。アプリ側の再読み込みは
+`reloadAllTimelines()` なので、ウィジェットを増やしても `WebViewModel.swift` を直す必要はない。
+
 ### 「今日の電気」ウィジェット（`KurashioEnergyWidget`・#648）
 
 上とは別のウィジェット（kind は `KurashioEnergyWidget`・Smallのみ・設定なし）。今日のkWh・電気代・
