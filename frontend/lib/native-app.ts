@@ -160,6 +160,12 @@ export interface WidgetSnapshot {
   garbageDaysUntil: number | null;
   todayKwh: number | null;
   todayCostYen: number | null;
+  /** 昨日の使用量（KEPCO差分の「その他」を除く）。記録が無ければ null（#648） */
+  yesterdayKwh: number | null;
+  /** 今月の累計使用量（#648） */
+  monthKwh: number | null;
+  /** 上の電気の値の基準日（JST・`2026-10-01`）。ウィジェットが日付またぎを見分ける（#648） */
+  energyDate: string | null;
   /** Largeに並べる電気の操作ボタン（#546）。押した結果は `reportWidgetPressResult()` で返す */
   remoteButtons: WidgetRemoteButton[];
   /** エアコンの操作ウィジェットに並べる台（#649）。操作できない構成では空 */

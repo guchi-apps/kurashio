@@ -111,6 +111,7 @@ final class WebViewModel: NSObject, ObservableObject {
     /// Widgetは自発的に再読み込みしない設計（`KurashioTimelineProvider`の`.never`ポリシー）のため、
     /// 変化のたびにこちらから明示的に再評価を促す
     private func reloadWidgetTimelines() {
+        // 室温の「KurashioWidget」と電気の「KurashioEnergyWidget」の両方を再評価する（#648）
         WidgetCenter.shared.reloadAllTimelines()
     }
 

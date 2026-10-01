@@ -7,5 +7,6 @@ struct KurashioWidgetBundle: WidgetBundle {
         KurashioWidget()
         KurashioRemoteWidget()
         KurashioAirconWidget()
+        KurashioEnergyWidget()
     }
 }
