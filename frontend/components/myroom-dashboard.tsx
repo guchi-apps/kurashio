@@ -126,6 +126,7 @@ import type { WidgetSnapshot } from "@/lib/native-app";
 import { buildWidgetGarbageDays } from "@/lib/widget-garbage";
 import { buildWidgetRemoteButtons } from "@/lib/widget-remote-buttons";
 import { buildWidgetSensors, pickDefaultWidgetSensor } from "@/lib/widget-sensors";
+import { buildWidgetEnergy } from "@/lib/widget-energy";
 import {
   countRemoteButtons,
   countVisibleRemoteButtons,
@@ -1119,8 +1120,10 @@ export function MyRoomDashboard() {
     [garbageSchedule]
   );
   const garbageCollectionTime = garbageSchedule?.collection_time ?? null;
-  const todayKwh = energyBreakdown?.today.kwh ?? null;
-  const todayCostYen = energyBreakdown?.today.cost_yen ?? null;
+  const { todayKwh, todayCostYen, yesterdayKwh, monthKwh, energyDate } = useMemo(
+    () => buildWidgetEnergy(energyBreakdown),
+    [energyBreakdown]
+  );
   // **フックなので、下の認証ゲートの早期 return より前に置くこと**（後ろに置くと
   // ログイン判定の前後でフックの数が変わり、React #310 で画面ごと落ちる。#559）。
   // 無関係な再描画のたびにWidgetの再読み込み（WidgetKitの1日あたりの上限あり）が
@@ -1140,6 +1143,9 @@ export function MyRoomDashboard() {
       garbageCollectionTime,
       todayKwh,
       todayCostYen,
+      yesterdayKwh,
+      monthKwh,
+      energyDate,
       remoteButtons: widgetRemoteButtons,
     }),
     [
@@ -1151,6 +1157,9 @@ export function MyRoomDashboard() {
       garbageCollectionTime,
       todayKwh,
       todayCostYen,
+      yesterdayKwh,
+      monthKwh,
+      energyDate,
       widgetRemoteButtons,
     ]
   );

@@ -342,6 +342,21 @@ Xcode の開発ビルドは `aps-environment` が `development`（APNsは sandbo
 タイムラインのエントリを積むので、ダッシュボードを開かない日も表示が進む。アプリ側の再読み込みは
 `reloadAllTimelines()` なので、ウィジェットを増やしても `WebViewModel.swift` を直す必要はない。
 
+### 「今日の電気」ウィジェット（`KurashioEnergyWidget`・#648）
+
+上とは別のウィジェット（kind は `KurashioEnergyWidget`・Smallのみ・設定なし）。今日のkWh・電気代・
+昨日との比較（バーと差）・今月の累計を出す。実装は `EnergyWidget.swift`、Web側の値の組み立ては
+`frontend/lib/widget-energy.ts`。
+
+- **昨日の値は `daily` から KEPCO差分の「その他」を引いて出す。** `daily` にだけ「その他」が足し込まれ、
+  今日・今月は機器の実測だけなので、そのまま比べると基準がずれる
+- **`energyDate`（JSTの基準日）が端末の今日と違えば「ダッシュボードを開いて更新してください」を出す。**
+  更新はダッシュボードを開いたときだけなので、0時を過ぎると前日の値を「今日」と出してしまうため。
+  翌0時のエントリをタイムラインに積んで切り替える
+- **再読み込みは `reloadAllTimelines()`。** kind を1つだけ指定すると、もう一方のウィジェットが更新されない
+- スナップショットに項目を足したら `SharedWidgetSnapshot.save()` の項目ごとの読み替えにも足す
+  （足さないと値が届いても常に nil になる）
+
 ### 表示用データだけをApp Group経由で共有する（JWTは渡さない）
 
 WKWebView が持つ Supabase セッションは、Swift 側から本来アクセスできない（前述のGoogleログインの節）。

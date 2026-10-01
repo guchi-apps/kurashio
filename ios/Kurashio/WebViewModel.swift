@@ -112,6 +112,7 @@ final class WebViewModel: NSObject, ObservableObject {
     /// 変化のたびにこちらから明示的に再評価を促す。
     /// ウィジェットは複数ある（`KurashioWidget`・`GarbageWidget`・#647）ので kind は指定せず全部を再読み込みする
     private func reloadWidgetTimelines() {
+        // 室温の「KurashioWidget」・電気の「KurashioEnergyWidget」・ごみの日の「KurashioGarbageWidget」を再評価する（#648・#647）
         WidgetCenter.shared.reloadAllTimelines()
     }
 
