@@ -630,7 +630,8 @@ export function hasOutdoorMetricData(
   historyData: HistoryPoint[],
   metric: ChartMetric
 ): boolean {
-  if (isIndoorOnlyMetric(metric)) return false;
+  // 屋外の気圧は表示しない（#637）
+  if (isIndoorOnlyMetric(metric) || metric === "pressure") return false;
   const key = `outdoor_${metric}` as keyof HistoryPoint;
   return historyData.some((point) => {
     const value = point[key];
