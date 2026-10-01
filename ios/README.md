@@ -118,7 +118,7 @@ Deploy to Production 成功
 
 1. App Store Connect → ユーザとアクセス → 統合 → **チームキー**で、アクセス権「App管理」のAPIキーを発行する
    （`.p8` は**一度しかダウンロードできない**）。Key ID と Issuer ID を控える
-2. 1Password の `apps/MyRoom` に `asc-key-id`・`asc-issuer-id`・`asc-key-p8`（`.p8` の中身を **base64 の1行**にした値。
+2. 1Password の `apps/AppStoreConnect`（他のアプリでも使えるキーなので、アプリ共通の専用アイテムに置く・#657）に `key-id`・`issuer-id`・`key-p8`（`.p8` の中身を **base64 の1行**にした値。
    改行を含む値は入れない）を登録し、`sync-secrets.yml` で GitHub の repository secret へ同期する
    （`.github/secrets-manifest.tsv` の `ASC_*`）。リポジトリには一切置かない。実行環境はランナーの一時領域で、ジョブの最後に削除する
 3. App Store Connect で kurashio の App と、自分だけの**内部テストグループ**を作る（`#548` で作成済み）。
@@ -134,7 +134,7 @@ Deploy to Production 成功
 ### キーの失効・期限切れ
 
 APIキーは自動では期限切れにならないが、App Store Connect で**取り消す・権限を下げると 401/403** になる。
-その場合は上の1〜2をやり直す（新しいキーを発行して1Passwordの値を差し替え、同期）。通知先は Signaly
+その場合は上の1〜2をやり直す（新しいキーを発行して`apps/AppStoreConnect` の値を差し替え、同期）。通知先は Signaly
 （CI・デプロイと同じチャンネル。種別「iOS配布（TestFlight）」）。**チームのライセンス更新（年1回）**が切れると署名自体が
 できなくなるので、Apple Developer Program の更新も本人の操作。
 
