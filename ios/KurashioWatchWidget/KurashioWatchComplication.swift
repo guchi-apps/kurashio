@@ -43,6 +43,20 @@ struct WatchTimelineProvider: AppIntentTimelineProvider {
         Timeline(entries: [entry(for: configuration)], policy: .never)
     }
 
+    /// 文字盤の編集で最初に並ぶ候補。watchOS の `AppIntentTimelineProvider` は既定の実装が無く必須。
+    /// センサーは選ばず（自動）、円形に出す値だけを変えた3つを返す
+    func recommendations() -> [AppIntentRecommendation<SelectWatchSensorIntent>] {
+        [
+            (WatchMetric.temperature, "温度"),
+            (WatchMetric.humidity, "湿度"),
+            (WatchMetric.co2, "CO2濃度"),
+        ].map { metric, title in
+            let intent = SelectWatchSensorIntent()
+            intent.circularMetric = metric
+            return AppIntentRecommendation(intent: intent, description: LocalizedStringResource(stringLiteral: title))
+        }
+    }
+
     private func entry(for configuration: SelectWatchSensorIntent) -> WatchEntry {
         let sensor = WatchSnapshot.load().flatMap { WatchSnapshot.sensor(in: $0, id: configuration.sensor?.id) }
         return WatchEntry(date: Date(), sensor: sensor, metric: configuration.circularMetric)
