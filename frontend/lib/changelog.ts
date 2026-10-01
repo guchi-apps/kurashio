@@ -34,6 +34,15 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.32.0",
+    date: "2026-10-01",
+    changes: [
+      "iPadで使えるようになりました。画面幅が768px以上のときは、ダッシュボードのカードが複数列で並びます。",
+      "推移グラフの凡例で、非表示にした項目が初期状態では畳まれるようになりました。リンクで開閉できます。",
+      "屋外では気圧を表示しないようにし、気圧のデータが無い指標のタブも出ないようにしました。",
+    ],
+  },
+  {
     version: "4.31.1",
     date: "2026-10-01",
     changes: [
