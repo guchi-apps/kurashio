@@ -34,6 +34,16 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.33.0",
+    date: "2026-10-01",
+    changes: [
+      "iPhoneのホーム画面に置けるウィジェットが増えました。",
+      "「ごみの日」ウィジェット（小・中サイズ）：次のごみ収集日を確認できます。",
+      "「今日の電気」ウィジェット（小サイズ）：今日の消費電力をひと目で確認できます。",
+      "電気・エアコンの操作ウィジェット：ホーム画面から電気のボタンを押したり、表示中のエアコン1台を操作したりできます。自動運転の表示も分かりやすくなりました。",
+    ],
+  },
+  {
     version: "4.32.0",
     date: "2026-10-01",
     changes: [
