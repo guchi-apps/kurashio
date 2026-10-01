@@ -859,7 +859,7 @@ export function DeviceVisibilityPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[480px] pb-10">
+    <div className="mx-auto w-full max-w-[480px] pb-10 md:max-w-[880px]">
       <div className="space-y-6 px-5 pt-12">
         <header className="flex items-center gap-3">
           <Link

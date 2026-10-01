@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Mac mini 上で main を取り込み、Xcode でビルドして接続中の iPhone へ入れ直す（#568）。
+# Mac mini 上で main を取り込み、Xcode でビルドして接続中の iPhone / iPad へ入れ直す（#568）。
 # Mac mini のチェックアウトで直接実行するか、subpc から remote-install.sh 経由で呼ぶ。
 #
 #   ios/scripts/install-to-iphone.sh
 #
 # 環境変数（すべて任意）:
 #   IOS_BRANCH   取り込むブランチ（既定 main。Web側が main へデプロイされた後に入れ直すため）
-#   IOS_DEVICE   入れ先の iPhone の識別子か名前（既定は接続中の iPhone を自動選択）
+#   IOS_DEVICE   入れ先の iPhone / iPad の識別子か名前（既定は接続中の1台を自動選択。2台以上繋がっていると止まる）
 #   IOS_SKIP_PULL=1  git の取り込みを省く（手元の変更をそのままビルドしたいとき）
 set -euo pipefail
 
@@ -43,20 +43,31 @@ want = os.environ.get("IOS_DEVICE", "")
 devices = json.load(open(sys.argv[1]))["result"]["devices"]
 def ok(d):
     # シャットダウン中のシミュレータ（reality: simulated）は install できないので実機だけを選ぶ
-    return d.get("hardwareProperties", {}).get("deviceType") == "iPhone" and \
+    return d.get("hardwareProperties", {}).get("deviceType") in ("iPhone", "iPad") and \
         d.get("hardwareProperties", {}).get("reality") == "physical" and \
         d.get("connectionProperties", {}).get("tunnelState") == "connected"
+found = []
 for d in devices:
     if not ok(d):
         continue
     names = (d["identifier"], d.get("deviceProperties", {}).get("name", ""))
     if not want or want in names:
-        print(d["identifier"])
-        break
+        found.append((d["identifier"], names[1]))
+if len(found) > 1:
+    # 先に見つけた端末へ黙って入れない。候補を stderr へ出し、空を返して呼び出し側で止める
+    print("複数の端末が繋がっています（IOS_DEVICE で名前か識別子を指定してください）:", file=sys.stderr)
+    for ident, name in found:
+        print(f"  {name} ({ident})", file=sys.stderr)
+    print("AMBIGUOUS")
+elif found:
+    print(found[0][0])
 PY
 )"
+if [ "$DEVICE" = "AMBIGUOUS" ]; then
+  exit 1
+fi
 if [ -z "$DEVICE" ]; then
-  echo "接続中の iPhone が見つかりません。USBで繋ぎ、ロックを解除して、信頼を許可してください。" >&2
+  echo "接続中の iPhone / iPad が見つかりません。USBで繋ぎ、ロックを解除して、信頼を許可してください。" >&2
   exit 1
 fi
 echo "入れ先: $DEVICE"
