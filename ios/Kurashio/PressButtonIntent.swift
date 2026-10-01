@@ -43,3 +43,35 @@ struct PressRemoteButtonIntent: AppIntent {
         return .result()
     }
 }
+
+/// ホーム画面ウィジェット（エアコンの操作・#649）のボタンを押したときの処理。
+/// 仕組みは `PressRemoteButtonIntent` と同じ（認証を持たず、アプリのWebセッションが送る）。
+/// `action` は `power_on` / `power_off` / `temp_up` / `temp_down`
+struct PressAirconIntent: AppIntent {
+    static var title: LocalizedStringResource { "エアコンの操作" }
+    static var description: IntentDescription { "エアコンの電源・設定温度を変えます。" }
+    static var openAppWhenRun: Bool { true }
+
+    @Parameter(title: "エアコンID")
+    var acId: Int
+
+    @Parameter(title: "操作")
+    var action: String
+
+    init() {
+        acId = 0
+        action = ""
+    }
+
+    init(acId: Int, action: String) {
+        self.acId = acId
+        self.action = action
+    }
+
+    func perform() async throws -> some IntentResult {
+        guard acId > 0, !action.isEmpty else { return .result() }
+        WidgetPressStore.setPending(buttonId: "aircon:\(acId):\(action)", acId: acId, action: action)
+        NotificationCenter.default.post(name: .widgetPressPending, object: nil)
+        return .result()
+    }
+}

@@ -321,7 +321,12 @@ extension WebViewModel {
     fileprivate func deliverPendingWidgetPress() {
         guard let pending = WidgetPressStore.pending() else { return }
         // キー（UUID）とボタンID（remote.json 由来）を、JSの文字列としてそのまま埋めない
-        let detail: [String: String] = ["key": pending.key, "buttonId": pending.buttonId]
+        var detail: [String: Any] = ["key": pending.key, "buttonId": pending.buttonId]
+        // エアコンの操作（#649）だけ。電気の操作では付けない
+        if let acId = pending.acId, let action = pending.action {
+            detail["acId"] = acId
+            detail["action"] = action
+        }
         guard
             let data = try? JSONSerialization.data(withJSONObject: detail),
             let json = String(data: data, encoding: .utf8)
