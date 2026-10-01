@@ -54,6 +54,12 @@ enum SharedWidgetSnapshot {
         var garbageDaysUntil: Int?
         var todayKwh: Double?
         var todayCostYen: Int?
+        /// 昨日の使用量（KEPCO差分の「その他」を除く）。記録が無い・#648より前のWeb版からは届かない
+        var yesterdayKwh: Double?
+        /// 今月の累計使用量（#648）
+        var monthKwh: Double?
+        /// 電気の値の基準日（JST・`2026-10-01`）。0時を過ぎて古い値のまま出さないために使う（#648）
+        var energyDate: String?
         /// 電気の操作ボタン（ダッシュボードで非表示にしたものを除く）。#546 より前のWeb版からは届かない
         var remoteButtons: [RemoteButton]?
     }
@@ -140,6 +146,9 @@ enum SharedWidgetSnapshot {
             garbageDaysUntil: double(raw["garbageDaysUntil"]).map { Int($0.rounded()) },
             todayKwh: double(raw["todayKwh"]),
             todayCostYen: double(raw["todayCostYen"]).map { Int($0.rounded()) },
+            yesterdayKwh: double(raw["yesterdayKwh"]),
+            monthKwh: double(raw["monthKwh"]),
+            energyDate: raw["energyDate"] as? String,
             remoteButtons: (raw["remoteButtons"] as? [[String: Any]])?.compactMap(remoteButton)
         )
         guard let defaults else { return }
