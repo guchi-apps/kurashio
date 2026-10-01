@@ -54,6 +54,8 @@ describe("decide", () => {
     git("config", "user.name", "t");
     write("ios/Kurashio/App.swift", "let a = 1\n");
     write("ios/KurashioWidget/W.swift", "let w = 1\n");
+    write("ios/KurashioWatch/A.swift", "let a = 1\n");
+    write("ios/KurashioWatchWidget/C.swift", "let c = 1\n");
     write("ios/README.md", "# a\n");
     write("ios/scripts/x.sh", "echo a\n");
     write(PBX, pbx("1.0.0", 1));
@@ -107,5 +109,17 @@ describe("decide", () => {
   it("印はビルド番号の数値順で最新を選ぶ（99 < 200）", () => {
     git("tag", "ios-testflight/99");
     assert.equal(decide({ cwd: dir }).base, "ios-testflight/200");
+  });
+
+  it("Watchアプリ・Watchのコンプリケーションだけの変更も要配布（#655）", () => {
+    git("tag", "ios-testflight/300");
+    assert.equal(decide({ cwd: dir }).needed, false);
+    write("ios/KurashioWatch/A.swift", "let a = 2\n");
+    commit("watch app");
+    assert.deepEqual(decide({ cwd: dir }).changedFiles, ["ios/KurashioWatch/A.swift"]);
+    git("tag", "ios-testflight/400");
+    write("ios/KurashioWatchWidget/C.swift", "let c = 2\n");
+    commit("watch widget");
+    assert.deepEqual(decide({ cwd: dir }).changedFiles, ["ios/KurashioWatchWidget/C.swift"]);
   });
 });

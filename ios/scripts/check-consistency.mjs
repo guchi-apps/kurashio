@@ -26,6 +26,13 @@ export function collectProblems(files) {
     );
   }
 
+  // 1b. Watch用の値の受け渡し（WatchSnapshot.swift）も、3つのフォルダに同じ内容を置く（#655）
+  if (files.watchApp !== undefined && (files.watchSnapshotApp !== files.watchApp || files.watchSnapshotApp !== files.watchWidget)) {
+    problems.push(
+      "ios/Kurashio/・ios/KurashioWatch/・ios/KurashioWatchWidget/ の WatchSnapshot.swift の内容が違います（3つを揃えること）"
+    );
+  }
+
   // 2. MARKETING_VERSION は frontend/package.json の version と一致（#535）
   const { version } = JSON.parse(files.packageJson);
   const versions = [...files.pbxproj.matchAll(/MARKETING_VERSION = ([^;]+);/g)].map(
@@ -119,6 +126,9 @@ function main() {
   const problems = collectProblems({
     sharedApp: read("ios", "Kurashio", "SharedWidgetSnapshot.swift"),
     sharedWidget: read("ios", "KurashioWidget", "SharedWidgetSnapshot.swift"),
+    watchSnapshotApp: read("ios", "Kurashio", "WatchSnapshot.swift"),
+    watchApp: read("ios", "KurashioWatch", "WatchSnapshot.swift"),
+    watchWidget: read("ios", "KurashioWatchWidget", "WatchSnapshot.swift"),
     packageJson: read("frontend", "package.json"),
     pbxproj: read("ios", "Kurashio.xcodeproj", "project.pbxproj"),
     nativeApp: read("frontend", "lib", "native-app.ts"),

@@ -26,6 +26,8 @@ __pycache__/
 venv/
 # collectors/tapo_to_myroom.py 用の専用venv（python-kasa）
 collectors/.venv-tapo/
+# collectors/tapo_to_myroom.py が覚える探索結果（IPと名前。環境ごとの値）
+collectors/.tapo-hosts.json
 # collectors/bambu_to_myroom.py 用の専用venv（paho-mqtt）
 collectors/.venv-bambu/
 .pytest_cache/

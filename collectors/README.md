@@ -127,6 +127,25 @@ collectors/.venv-tapo/bin/python collectors/tapo_to_myroom.py --dry-run -v
 collectors/.venv-tapo/bin/python collectors/tapo_to_myroom.py --days 31
 ```
 
+### プラグを足したら自動で反映される（#660）
+
+**`TAPO_HOSTS` は任意。** 収集のたびに LAN 上の Tapo 機器を探し、計測できるものを読む。
+結果は `collectors/.tapo-hosts.json`（gitignore 済み）に1時間覚え、毎回 /24 を走査しないようにしている。
+Tapo アプリで足したプラグは、最大1時間（キャッシュが切れた次の定期実行）で消費電力に出る。
+
+```bash
+# 今すぐ反映したいとき（キャッシュを捨てて探し直す）
+collectors/.venv-tapo/bin/python collectors/tapo_to_myroom.py --rediscover
+# または systemd から: キャッシュを消して service を起動
+rm -f collectors/.tapo-hosts.json && systemctl --user start myroom-tapo-energy.service
+```
+
+- `TAPO_HOSTS` に書いた行は**名前の固定**と**探索で見つからない機器の指定**に使う。同じ IP は書いた側が優先
+- 探索で得た IP に繋がらなかったときは、その回のうちに1度だけ探し直す（IP が変わった場合の追従）
+- 探索はブロードキャスト→0台なら /24 のユニキャスト走査（下の ufw の節）。計測に対応しない機器（電球など）は対象外
+- **名前はプラグ自身の alias。Tapo アプリで名前を変えると別の取得元になる**（記録は古い名前に残る）。
+  固定したいときは `TAPO_HOSTS` に `IP=名前` を書く
+
 ### 過去ぶんはプラグ本体から取れる
 
 **P110 系は日別の使用量をプラグ自身が覚えている。** `get_energy_data`（`interval=1440`）で

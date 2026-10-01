@@ -58,6 +58,7 @@ final class WebViewModel: NSObject, ObservableObject {
     func startIfNeeded() {
         guard !hasStarted else { return }
         hasStarted = true
+        WatchSync.shared.activate()
 
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let available = path.status == .satisfied
@@ -284,10 +285,14 @@ extension WebViewModel: WKScriptMessageHandler {
             guard let snapshot = body["snapshot"] as? [String: Any] else { return }
             SharedWidgetSnapshot.save(snapshot)
             reloadWidgetTimelines()
+            // Apple Watch（#655）。センサーの値だけを送る（中身が前回と同じなら送らない）
+            WatchSync.shared.send(snapshot: snapshot)
         case "widgetSnapshotCleared":
             SharedWidgetSnapshot.clear()
             WidgetPressStore.clear()
             reloadWidgetTimelines()
+            // Watchに残る別アカウントの値も消す（#655）
+            WatchSync.shared.clear()
         case "widgetReady":
             deliverPendingWidgetPress()
         case "widgetPressResult":

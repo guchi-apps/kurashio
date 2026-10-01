@@ -9,6 +9,7 @@ import asyncio
 import datetime
 import importlib.util
 import ipaddress
+import json
 import pathlib
 
 import pytest
@@ -398,3 +399,120 @@ class TestCloseDevice:
                 raise RuntimeError("already gone")
 
         asyncio.run(tapo.close_device(Device()))
+
+
+class TestHostsOptional:
+    """#660: TAPO_HOSTS が無くても収集の設定は組める（探索で補う）。"""
+
+    def test_collect_config_without_hosts(self, monkeypatch):
+        monkeypatch.setenv("TAPO_USERNAME", "user@example.com")
+        monkeypatch.setenv("TAPO_PASSWORD", "x")
+        monkeypatch.delenv("TAPO_HOSTS", raising=False)
+        assert tapo.load_config()["hosts"] == []
+
+    def test_broken_hosts_still_fail_collect(self, monkeypatch):
+        monkeypatch.setenv("TAPO_USERNAME", "user@example.com")
+        monkeypatch.setenv("TAPO_PASSWORD", "x")
+        monkeypatch.setenv("TAPO_HOSTS", "=冷蔵庫")
+        with pytest.raises(tapo.ConfigError):
+            tapo.load_config()
+
+
+class TestMergeHosts:
+    def test_manual_wins_for_same_ip(self):
+        merged = tapo.merge_hosts(
+            [("192.168.2.21", "冷蔵庫")],
+            [("192.168.2.21", "Tapo P110"), ("192.168.2.30", "新しいプラグ")],
+        )
+        assert merged == [("192.168.2.21", "冷蔵庫"), ("192.168.2.30", "新しいプラグ")]
+
+    def test_manual_only_device_is_kept(self):
+        assert tapo.merge_hosts([("192.168.2.9", None)], []) == [("192.168.2.9", None)]
+
+
+class TestHostsCache:
+    def test_round_trip_and_fresh(self, tmp_path):
+        path = str(tmp_path / "cache.json")
+        tapo.save_hosts_cache(path, [("192.168.2.30", "新しいプラグ")], now=1000.0)
+        hosts, fresh = tapo.load_hosts_cache(path, now=1000.0 + 60)
+        assert hosts == [("192.168.2.30", "新しいプラグ")]
+        assert fresh is True
+
+    def test_expired_keeps_hosts_but_not_fresh(self, tmp_path):
+        path = str(tmp_path / "cache.json")
+        tapo.save_hosts_cache(path, [("192.168.2.30", None)], now=1000.0)
+        hosts, fresh = tapo.load_hosts_cache(
+            path, now=1000.0 + tapo.HOSTS_CACHE_TTL_SECONDS + 1
+        )
+        assert hosts == [("192.168.2.30", None)]
+        assert fresh is False
+
+    def test_missing_or_broken_file(self, tmp_path):
+        assert tapo.load_hosts_cache(str(tmp_path / "none.json"), now=0) == ([], False)
+        broken = tmp_path / "broken.json"
+        broken.write_text("{not json", encoding="utf-8")
+        assert tapo.load_hosts_cache(str(broken), now=0) == ([], False)
+        wrong = tmp_path / "wrong.json"
+        wrong.write_text(json.dumps({"saved_at": 1}), encoding="utf-8")
+        assert tapo.load_hosts_cache(str(wrong), now=0) == ([], False)
+
+
+class TestResolveHosts:
+    CONFIG = {"username": "u", "password": "p", "hosts": [("192.168.2.21", "冷蔵庫")]}
+
+    @pytest.fixture(autouse=True)
+    def _fake_credentials(self, monkeypatch):
+        monkeypatch.setattr(tapo, "Credentials", lambda *_: object())
+
+    def _patch_discover(self, monkeypatch, result):
+        calls = []
+
+        async def fake(credentials, scan=None):
+            calls.append(1)
+            return result
+
+        monkeypatch.setattr(tapo, "discover_hosts", fake)
+        return calls
+
+    def test_discovers_and_caches(self, monkeypatch, tmp_path):
+        calls = self._patch_discover(monkeypatch, [("192.168.2.30", "新しいプラグ")])
+        path = str(tmp_path / "c.json")
+        hosts, discovered = asyncio.run(
+            tapo.resolve_hosts(self.CONFIG, path, rediscover=False, now=1000.0)
+        )
+        assert discovered is True
+        assert hosts == [("192.168.2.21", "冷蔵庫"), ("192.168.2.30", "新しいプラグ")]
+        # 2回目はキャッシュが新しいので探索しない
+        hosts2, discovered2 = asyncio.run(
+            tapo.resolve_hosts(self.CONFIG, path, rediscover=False, now=1100.0)
+        )
+        assert discovered2 is False and hosts2 == hosts
+        assert len(calls) == 1
+
+    def test_rediscover_ignores_fresh_cache(self, monkeypatch, tmp_path):
+        calls = self._patch_discover(monkeypatch, [("192.168.2.31", "もう1台")])
+        path = str(tmp_path / "c.json")
+        tapo.save_hosts_cache(path, [("192.168.2.30", "古い")], now=1000.0)
+        hosts, discovered = asyncio.run(
+            tapo.resolve_hosts(self.CONFIG, path, rediscover=True, now=1010.0)
+        )
+        assert discovered is True and len(calls) == 1
+        assert ("192.168.2.31", "もう1台") in hosts
+        assert ("192.168.2.30", "古い") not in hosts
+
+    def test_empty_discovery_keeps_previous_cache(self, monkeypatch, tmp_path):
+        self._patch_discover(monkeypatch, [])
+        path = str(tmp_path / "c.json")
+        tapo.save_hosts_cache(path, [("192.168.2.30", "前回")], now=0.0)
+        hosts, _ = asyncio.run(
+            tapo.resolve_hosts(self.CONFIG, path, rediscover=False, now=10_000.0)
+        )
+        assert ("192.168.2.30", "前回") in hosts
+
+    def test_empty_discovery_is_remembered(self, monkeypatch, tmp_path):
+        """0台のまま5分ごとに /24 を走査し直さない。"""
+        calls = self._patch_discover(monkeypatch, [])
+        path = str(tmp_path / "c.json")
+        asyncio.run(tapo.resolve_hosts(self.CONFIG, path, False, now=1000.0))
+        asyncio.run(tapo.resolve_hosts(self.CONFIG, path, False, now=1300.0))
+        assert len(calls) == 1
