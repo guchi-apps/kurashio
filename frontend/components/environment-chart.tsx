@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Droplets, Eye, EyeOff, Gauge, Sun, Thermometer, Wind } from "lucide-react";
+import { ChevronDown, ChevronUp, Droplets, Eye, EyeOff, Gauge, Sun, Thermometer, Wind } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AIRCON_CHART_DEVICE_ID,
@@ -1011,6 +1011,12 @@ export function EnvironmentChart({
     lineVisibility,
   ]);
 
+  // 非表示の行は既定で凡例から外し、リンクで開いたときだけ末尾へ並べる（#638）。
+  // 開閉は画面を開いている間だけ覚え、設定へは保存しない
+  const [showHiddenRows, setShowHiddenRows] = useState(false);
+  const visibleSeriesRows = chartSeriesRows.filter((row) => row.visible);
+  const hiddenSeriesRows = chartSeriesRows.filter((row) => !row.visible);
+
   const selectionLabel =
     effectiveSelectionTime != null
       ? formatActivePointLabel(effectiveSelectionTime, viewRange, isMinMaxMode)
@@ -1184,6 +1190,63 @@ export function EnvironmentChart({
     </Tabs>
   );
 
+  const renderSeriesRow = (row: ChartSeriesRow) => (
+    <div key={row.id} className="flex items-center gap-1.5 px-1">
+      <p
+        className={cn("shrink-0 text-sm font-bold", !row.visible && "opacity-40")}
+        style={{ color: row.color }}
+      >
+        {row.name}
+      </p>
+      <div
+        className={cn(
+          "min-w-2 flex-1 border-b border-dashed",
+          !row.visible ? "border-muted-foreground/20" : "border-muted-foreground/40"
+        )}
+      />
+      {awaitingLatest ? (
+        <span
+          className="h-5 w-[74px] shrink-0 animate-pulse rounded-md bg-muted"
+          aria-hidden="true"
+        />
+      ) : (
+        <p
+          className={cn("shrink-0 text-lg font-bold", !row.visible && "opacity-40")}
+          style={{ color: row.color }}
+        >
+          {row.minValue != null || row.maxValue != null ? (
+            <>
+              <span className="text-xs font-normal">最高</span>
+              {formatMetricValue(row.maxValue, chartMetric)}
+              {unit}
+              {" / "}
+              <span className="text-xs font-normal">最低</span>
+              {formatMetricValue(row.minValue, chartMetric)}
+              {unit}
+            </>
+          ) : (
+            formatSeriesRowValue(row, chartMetric, unit)
+          )}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={() =>
+          onLineVisibilityChange(row.visibilityKey, !row.visible)
+        }
+        aria-pressed={row.visible}
+        aria-label={`${row.name}の表示切替`}
+        className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        {row.visible ? (
+          <Eye className="size-5" strokeWidth={1.75} />
+        ) : (
+          <EyeOff className="size-5" strokeWidth={1.75} />
+        )}
+      </button>
+    </div>
+  );
+
   return (
     <div className="climate-card flex flex-col gap-0 overflow-hidden p-0">
       {hideMetricTabs ? null : (
@@ -1200,62 +1263,30 @@ export function EnvironmentChart({
             </p>
           )}
           <div className="flex flex-col gap-2">
-            {chartSeriesRows.map((row) => (
-              <div key={row.id} className="flex items-center gap-1.5 px-1">
-                <p
-                  className={cn("shrink-0 text-sm font-bold", !row.visible && "opacity-40")}
-                  style={{ color: row.color }}
-                >
-                  {row.name}
-                </p>
-                <div
-                  className={cn(
-                    "min-w-2 flex-1 border-b border-dashed",
-                    !row.visible ? "border-muted-foreground/20" : "border-muted-foreground/40"
-                  )}
-                />
-                {awaitingLatest ? (
-                  <span
-                    className="h-5 w-[74px] shrink-0 animate-pulse rounded-md bg-muted"
-                    aria-hidden="true"
-                  />
+            {visibleSeriesRows.map(renderSeriesRow)}
+            {hiddenSeriesRows.length > 0 && showHiddenRows && (
+              <>
+                <p className="px-1 pt-1 text-xs text-muted-foreground">非表示の項目</p>
+                {hiddenSeriesRows.map(renderSeriesRow)}
+              </>
+            )}
+            {hiddenSeriesRows.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowHiddenRows((current) => !current)}
+                aria-expanded={showHiddenRows}
+                className="flex items-center gap-1 self-start px-1 py-1 text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+              >
+                {showHiddenRows ? (
+                  <ChevronUp className="size-4" />
                 ) : (
-                  <p
-                    className={cn("shrink-0 text-lg font-bold", !row.visible && "opacity-40")}
-                    style={{ color: row.color }}
-                  >
-                    {row.minValue != null || row.maxValue != null ? (
-                      <>
-                        <span className="text-xs font-normal">最高</span>
-                        {formatMetricValue(row.maxValue, chartMetric)}
-                        {unit}
-                        {" / "}
-                        <span className="text-xs font-normal">最低</span>
-                        {formatMetricValue(row.minValue, chartMetric)}
-                        {unit}
-                      </>
-                    ) : (
-                      formatSeriesRowValue(row, chartMetric, unit)
-                    )}
-                  </p>
+                  <ChevronDown className="size-4" />
                 )}
-                <button
-                  type="button"
-                  onClick={() =>
-                    onLineVisibilityChange(row.visibilityKey, !row.visible)
-                  }
-                  aria-pressed={row.visible}
-                  aria-label={`${row.name}の表示切替`}
-                  className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  {row.visible ? (
-                    <Eye className="size-5" strokeWidth={1.75} />
-                  ) : (
-                    <EyeOff className="size-5" strokeWidth={1.75} />
-                  )}
-                </button>
-              </div>
-            ))}
+                {showHiddenRows
+                  ? "非表示の項目を隠す"
+                  : `非表示の項目を表示（${hiddenSeriesRows.length}）`}
+              </button>
+            )}
           </div>
         </div>
       )}

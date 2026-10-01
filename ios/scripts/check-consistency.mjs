@@ -87,6 +87,31 @@ export function collectProblems(files) {
     );
   }
 
+  // 6. iPad対応（#642）: 向きは4方向すべて宣言する（足りないと App Store Connect が
+  //    ITMS-90474 でアップロードを断る）。ウィンドウは1つに限る（通知・端末トークンの受け先
+  //    appDelegate.webViewModel が1つしか持てない）。INFOPLIST_KEY_UIApplicationSupportsMultipleScenes
+  //    という設定キーは無いので、アプリ本体の Info.plist に false を書く
+  const ipadOrientations = [...files.pbxproj.matchAll(
+    /INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "([^"]*)"/g
+  )];
+  if (ipadOrientations.length === 0) {
+    problems.push("project.pbxproj に iPad の向き（UISupportedInterfaceOrientations_iPad）がありません");
+  }
+  for (const m of ipadOrientations) {
+    for (const o of ["Portrait", "PortraitUpsideDown", "LandscapeLeft", "LandscapeRight"]) {
+      if (!m[1].split(/\s+/).includes(`UIInterfaceOrientation${o}`)) {
+        problems.push(`iPad の向きに UIInterfaceOrientation${o} がありません（4方向すべて必要）`);
+      }
+    }
+  }
+  if (
+    !/UIApplicationSupportsMultipleScenes<\/key>\s*<false\/>/.test(files.appInfoPlist)
+  ) {
+    problems.push(
+      "ios/Kurashio/Info.plist に UIApplicationSupportsMultipleScenes = false がありません（iPad で複数ウィンドウが開くと通知・トークンの受け先がずれる）"
+    );
+  }
+
   return problems;
 }
 
@@ -98,6 +123,7 @@ function main() {
     pbxproj: read("ios", "Kurashio.xcodeproj", "project.pbxproj"),
     nativeApp: read("frontend", "lib", "native-app.ts"),
     appConfig: read("ios", "Kurashio", "AppConfig.swift"),
+    appInfoPlist: read("ios", "Kurashio", "Info.plist"),
   });
 
   if (problems.length > 0) {

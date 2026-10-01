@@ -1249,7 +1249,7 @@ export function MyRoomDashboard() {
       <header className="fixed inset-x-0 top-0 z-[45] border-b border-header-band-border bg-header-band pt-[env(safe-area-inset-top)]">
         <div
           ref={headerBarRef}
-          className="mx-auto w-full max-w-[480px] px-5 pt-[calc(0.625rem+var(--pwa-header-safe-gap))] pb-2.5 lg:max-w-[1040px] lg:px-8"
+          className="mx-auto w-full max-w-[480px] px-5 pt-[calc(0.625rem+var(--pwa-header-safe-gap))] pb-2.5 md:max-w-none md:px-8 lg:max-w-[1280px]"
         >
           <div className="flex items-center justify-between gap-3 px-0.5">
             <h1 className="shrink-0">
@@ -1328,7 +1328,7 @@ export function MyRoomDashboard() {
       />
 
       {/* 帯の下は、これまでどおり本文の幅・余白（バナーもここから並ぶ） */}
-      <div className="mx-auto w-full max-w-[480px] space-y-6 px-5 pt-5 lg:max-w-[1040px] lg:px-8">
+      <div className="mx-auto w-full max-w-[480px] space-y-6 px-5 pt-5 md:max-w-none md:px-8 lg:max-w-[1280px]">
         {isOfflineMode && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
             オフライン表示中
@@ -1370,7 +1370,7 @@ export function MyRoomDashboard() {
                 <SettingsIconButton label="表示設定" href="/devices" />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
               {visibleDisplayOrder.map((item) => {
                 if (item.type === "device") {
                   const deviceId = item.deviceId;
@@ -1543,7 +1543,7 @@ export function MyRoomDashboard() {
               />
             </div>
             {visibleLifeCards.length > 0 ? (
-              <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:items-start">
+              <div className="flex flex-col gap-3 md:grid md:grid-cols-2 md:items-start">
                 {visibleLifeCards.map((card) => {
                   if (card.key === REMOTE_CARD_KEY) {
                     return (
@@ -1637,7 +1637,7 @@ export function MyRoomDashboard() {
                   {DASHBOARD_SECTION_LABELS.comingSoon}
                 </h2>
               </div>
-              <div className="flex flex-col gap-2.5 lg:grid lg:grid-cols-2 lg:items-start">
+              <div className="flex flex-col gap-2.5 md:grid md:grid-cols-2 md:items-start">
                 {COMING_SOON_CARDS.map((card) => (
                   <ComingSoonCard key={card.key} card={card} />
                 ))}

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  getAvailableChartMetrics,
+  hasOutdoorMetricData,
   calcDiscomfortIndex,
   buildAirconTargetChartSegments,
   buildAirconTargetChartSeries,
@@ -565,5 +567,26 @@ describe("computeVisibleYDomain", () => {
     ) as [number, number] | ["auto", "auto"];
 
     expect([min, max]).toEqual(["auto", "auto"]);
+  });
+});
+
+describe("hasOutdoorMetricData（#637）", () => {
+  it("屋外の気圧はデータがあっても対象外にする", () => {
+    const history = [
+      { datetimeObj: 1, outdoor_temperature: 20, outdoor_pressure: 1010 },
+    ] as unknown as Parameters<typeof hasOutdoorMetricData>[0];
+    expect(hasOutdoorMetricData(history, "temperature")).toBe(true);
+    expect(hasOutdoorMetricData(history, "pressure")).toBe(false);
+  });
+});
+
+describe("getAvailableChartMetrics（#637）", () => {
+  it("機器の気圧が無く屋外の気圧だけがある履歴では、気圧タブを出さない", () => {
+    const history = [
+      { datetimeObj: 1, d2_temperature: 24, outdoor_pressure: 1010 },
+    ] as unknown as Parameters<typeof getAvailableChartMetrics>[0];
+    const metrics = getAvailableChartMetrics(history, [2]);
+    expect(metrics).toContain("temperature");
+    expect(metrics).not.toContain("pressure");
   });
 });
