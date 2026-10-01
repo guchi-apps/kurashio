@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.34.0",
+    date: "2026-10-02",
+    changes: [
+      "Apple Watchで、部屋の温度・湿度・CO2濃度を確認できるようになりました。文字盤のコンプリケーションにも表示でき、見たいセンサーを選べます。",
+    ],
+  },
+  {
     version: "4.33.0",
     date: "2026-10-01",
     changes: [
