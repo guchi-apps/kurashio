@@ -1,7 +1,8 @@
 import type { ChartMetric, ChartViewRange, HistoryPoint, TimeRange } from "@/lib/types";
 
+/** 屋外の線・タブを持たない指標。屋外の気圧は表示しない（#637） */
 function isIndoorOnlyMetric(metric: ChartMetric): boolean {
-  return metric === "co2" || metric === "illuminance";
+  return metric === "co2" || metric === "illuminance" || metric === "pressure";
 }
 import {
   CHART_METRICS,

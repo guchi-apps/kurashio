@@ -67,7 +67,7 @@ describe("device-metrics", () => {
     expect(card.map((r) => r.metric)).toEqual(["pressure", "co2"]);
   });
 
-  it("屋外はCO2・照度を持たない", () => {
+  it("屋外はCO2・照度・気圧を持たない（#637）", () => {
     expect(
       buildOutdoorReadings({
         device_id: 1,
@@ -76,7 +76,7 @@ describe("device-metrics", () => {
         outdoor_humidity: 64,
         outdoor_pressure: 1005.4,
       }).map((r) => r.metric)
-    ).toEqual(["temperature", "humidity", "pressure"]);
+    ).toEqual(["temperature", "humidity"]);
   });
 
   it("エアコンは室温だけを返す", () => {

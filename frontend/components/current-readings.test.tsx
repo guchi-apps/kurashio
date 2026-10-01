@@ -62,7 +62,7 @@ describe("CurrentReadings", () => {
     expect(render(<CurrentReadings readings={buildIndoorReadings(null)} />)).toBe("");
   });
 
-  it("屋外はCO2・照度の枠を作らない", () => {
+  it("屋外はCO2・照度・気圧の枠を作らない（#637）", () => {
     const html = render(
       <CurrentReadings
         readings={buildOutdoorReadings({
@@ -75,7 +75,8 @@ describe("CurrentReadings", () => {
       />
     );
     expect(html).toContain("29.8");
-    expect(html).toContain("1005");
+    expect(html).not.toContain("1005");
+    expect(html).not.toContain("hPa");
     expect(html).not.toContain("ppm");
     expect(html).not.toContain("lx");
   });

@@ -102,7 +102,6 @@ export function buildOutdoorReadings(
   return buildReadings({
     temperature: data.outdoor_temperature,
     humidity: data.outdoor_humidity,
-    pressure: data.outdoor_pressure,
   });
 }
 
@@ -114,7 +113,6 @@ export function buildOutdoorLocationReadings(
   return buildReadings({
     temperature: data.temperature,
     humidity: data.humidity,
-    pressure: data.pressure,
   });
 }
 
