@@ -336,6 +336,27 @@ Xcode の開発ビルドは `aps-environment` が `development`（APNsは sandbo
 室温・ゴミの日・今日の電気量を表示する、iOS標準のホーム画面ウィジェット（Small/Medium/Large）。
 **Largeには電気の操作ボタンも並ぶ**（#546。下の「電気の操作ボタン」の節）。
 
+**ごみの日だけを出す別ウィジェット（`GarbageWidget`・kind `KurashioGarbageWidget`・Small/Medium・#647）**
+も同じバンドルに入っている。スナップショットの `garbageUpcoming`（今日以降の収集日・最大5件）と
+`garbageCollectionTime` から描く。**日数は保存せず端末の日付（JST）で数え**、0時と各収集日の収集時刻に
+タイムラインのエントリを積むので、ダッシュボードを開かない日も表示が進む。アプリ側の再読み込みは
+`reloadAllTimelines()` なので、ウィジェットを増やしても `WebViewModel.swift` を直す必要はない。
+
+### 「今日の電気」ウィジェット（`KurashioEnergyWidget`・#648）
+
+上とは別のウィジェット（kind は `KurashioEnergyWidget`・Smallのみ・設定なし）。今日のkWh・電気代・
+昨日との比較（バーと差）・今月の累計を出す。実装は `EnergyWidget.swift`、Web側の値の組み立ては
+`frontend/lib/widget-energy.ts`。
+
+- **昨日の値は `daily` から KEPCO差分の「その他」を引いて出す。** `daily` にだけ「その他」が足し込まれ、
+  今日・今月は機器の実測だけなので、そのまま比べると基準がずれる
+- **`energyDate`（JSTの基準日）が端末の今日と違えば「ダッシュボードを開いて更新してください」を出す。**
+  更新はダッシュボードを開いたときだけなので、0時を過ぎると前日の値を「今日」と出してしまうため。
+  翌0時のエントリをタイムラインに積んで切り替える
+- **再読み込みは `reloadAllTimelines()`。** kind を1つだけ指定すると、もう一方のウィジェットが更新されない
+- スナップショットに項目を足したら `SharedWidgetSnapshot.save()` の項目ごとの読み替えにも足す
+  （足さないと値が届いても常に nil になる）
+
 ### 表示用データだけをApp Group経由で共有する（JWTは渡さない）
 
 WKWebView が持つ Supabase セッションは、Swift 側から本来アクセスできない（前述のGoogleログインの節）。
@@ -415,6 +436,31 @@ JWT・固定トークンをウィジェットへ渡す案は採っていない�
 - **`PressButtonIntent.swift` も両フォルダに同じ内容を置く**（`openAppWhenRun` の `perform()` はアプリの
   プロセスで動くため、アプリ側でもコンパイルが要る）。変更は両方揃える
 - Swift は subpc でビルドできない。Mac mini と実機で、コールドスタート・起動済み・未ログイン・機内モードを確かめること
+
+### 電気・エアコンの操作ウィジェット（Small・Medium・#649）
+
+`kurashio` ウィジェットとは別に、操作専用の2つ（`KurashioRemoteWidget`・`KurashioAirconWidget`）を
+ウィジェットギャラリーから置ける。設定項目は持たず、プロバイダは `ControlTimelineProvider` を共有する。
+
+- **電気の操作**: Smallは先頭2件、Mediumは先頭6件（ダッシュボードで表示中のボタン）。押下は #546 と同じ
+  `PressRemoteButtonIntent`
+- **エアコンの操作**: Small・Mediumとも**ダッシュボードで表示中の1台**（Mediumは左に状態・右にボタン）。電源の「オン」「オフ」と設定温度の「−」「＋」（0.5℃）。
+  `PressAirconIntent`（`acId` と `action` = `power_on` / `power_off` / `temp_up` / `temp_down`）
+- 送り方は電気の操作と同じ（ウィジェットは認証を持たず、アプリが前面に出て Web のセッションが
+  `POST /api/aircon/units/{ac_id}/control` を送る）。押下の保留（`WidgetPressStore.Pending`）に
+  `acId`・`action` を足しただけで、保留の受け渡し・最大1回・60秒の期限は共通
+- **温度の＋−は、押した時点で `GET /api/aircon/units/{ac_id}/state` を読み直して計算する。** ウィジェットの
+  表示値はダッシュボードを開いたときのもので古いことがあるため、表示値からの差分は送らない
+- **電源は状態に頼らず「オン」「オフ」の2ボタン**にしている（表示が古いと入切が逆になるため）
+- スナップショットの `aircons` は、操作できる構成（白くまくんの設定済み・オンライン）のときだけ入り、
+  **ダッシュボードが状態を持つ表示中の1台だけ**（2台目のために取得を増やさない）。操作できないときは
+  「操作できるエアコンがありません」を出す
+- **自動運転の設定温度は温度ではなくシフト量。** ウィジェットは `mode` が AUTO のとき「自動 +1.0」と出し、
+  ＋−は Web 側の `stepAirconTemperature()`（AUTOは±5.0の範囲）で計算する
+- Webの反映は `frontend/lib/widget-aircon.ts`（スナップショットの組み立て・操作の型）と
+  `components/native-widget-press-receiver.tsx`（送信）。`WebViewModel` は結果の ack ですべてのウィジェットを再読み込みする
+- Swift は subpc でビルドできない。Mac mini・実機で、ウィジェットギャラリーに2つが並ぶこと、
+  押下でアプリが開いてトーストが出ること、結果の印が約30秒出ることを確かめる
 
 ### App Group の登録が必要（初回だけ）
 

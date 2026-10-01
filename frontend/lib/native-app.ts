@@ -7,6 +7,8 @@
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { supabaseConfig } from "@/lib/supabase-client";
+import type { WidgetGarbageDay } from "@/lib/widget-garbage";
+import type { WidgetAircon } from "@/lib/widget-aircon";
 import type { WidgetRemoteButton } from "@/lib/widget-remote-buttons";
 import type { WidgetSensor } from "@/lib/widget-sensors";
 
@@ -157,10 +159,25 @@ export interface WidgetSnapshot {
   garbageLabel: string | null;
   /** 上記の収集日までの日数（0=今日、1=明日）。`garbageLabel` が null なら意味を持たない */
   garbageDaysUntil: number | null;
+  /**
+   * 「ごみの日」ウィジェット用の、今日以降の収集日（最大5件・日付順）。
+   * 日数は渡さず、ウィジェットが端末の日付から数える（`buildWidgetGarbageDays()`）
+   */
+  garbageUpcoming: WidgetGarbageDay[];
+  /** 今日の収集が終わる時刻（"08:30"）。ウィジェットが今日の収集を済みとみなす境目。不明なら null */
+  garbageCollectionTime: string | null;
   todayKwh: number | null;
   todayCostYen: number | null;
+  /** 昨日の使用量（KEPCO差分の「その他」を除く）。記録が無ければ null（#648） */
+  yesterdayKwh: number | null;
+  /** 今月の累計使用量（#648） */
+  monthKwh: number | null;
+  /** 上の電気の値の基準日（JST・`2026-10-01`）。ウィジェットが日付またぎを見分ける（#648） */
+  energyDate: string | null;
   /** Largeに並べる電気の操作ボタン（#546）。押した結果は `reportWidgetPressResult()` で返す */
   remoteButtons: WidgetRemoteButton[];
+  /** エアコンの操作ウィジェットに並べる台（#649）。操作できない構成では空 */
+  aircons: WidgetAircon[];
 }
 
 /**
@@ -197,6 +214,9 @@ export const NATIVE_WIDGET_PRESS_AVAILABLE_EVENT = "myroom-native-widget-press-a
 export interface WidgetPress {
   key: string;
   buttonId: string;
+  /** エアコンの操作（#649）のときだけ入る。電気の操作では無い */
+  acId?: number;
+  action?: string;
 }
 
 export type WidgetPressStatus = "sent" | "failed" | "unknown";

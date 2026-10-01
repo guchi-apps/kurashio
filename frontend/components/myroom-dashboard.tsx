@@ -123,8 +123,11 @@ import type {
 } from "@/lib/cleaning";
 import { buildGarbageHighlight, type GarbageSchedule } from "@/lib/garbage";
 import type { WidgetSnapshot } from "@/lib/native-app";
+import { buildWidgetGarbageDays } from "@/lib/widget-garbage";
+import { buildWidgetAircons } from "@/lib/widget-aircon";
 import { buildWidgetRemoteButtons } from "@/lib/widget-remote-buttons";
 import { buildWidgetSensors, pickDefaultWidgetSensor } from "@/lib/widget-sensors";
+import { buildWidgetEnergy } from "@/lib/widget-energy";
 import {
   countRemoteButtons,
   countVisibleRemoteButtons,
@@ -1112,8 +1115,16 @@ export function MyRoomDashboard() {
     ? garbageHighlight.day.categories.map((category) => category.name).join("・")
     : null;
   const garbageDaysUntil = garbageHighlight?.day.days_until ?? null;
-  const todayKwh = energyBreakdown?.today.kwh ?? null;
-  const todayCostYen = energyBreakdown?.today.cost_yen ?? null;
+  // 「ごみの日」ウィジェット用。値が変わらない限り同じ参照にして、無用な再送を避ける
+  const garbageUpcoming = useMemo(
+    () => (garbageSchedule ? buildWidgetGarbageDays(garbageSchedule) : []),
+    [garbageSchedule]
+  );
+  const garbageCollectionTime = garbageSchedule?.collection_time ?? null;
+  const { todayKwh, todayCostYen, yesterdayKwh, monthKwh, energyDate } = useMemo(
+    () => buildWidgetEnergy(energyBreakdown),
+    [energyBreakdown]
+  );
   // **フックなので、下の認証ゲートの早期 return より前に置くこと**（後ろに置くと
   // ログイン判定の前後でフックの数が変わり、React #310 で画面ごと落ちる。#559）。
   // 無関係な再描画のたびにWidgetの再読み込み（WidgetKitの1日あたりの上限あり）が
@@ -1121,6 +1132,10 @@ export function MyRoomDashboard() {
   // （センサーの一覧は30秒ごとの取得で作り直されるため、同じ内容なら送らない判定は
   // `NativeWidgetSnapshotSync` が中身で行う）
   const widgetRemoteButtons = useMemo(() => buildWidgetRemoteButtons(remoteButtons), [remoteButtons]);
+  const widgetAircons = useMemo(
+    () => buildWidgetAircons(airconUnits, airconLatest, airconControlEnabled && !isOfflineMode),
+    [airconUnits, airconLatest, airconControlEnabled, isOfflineMode]
+  );
   const widgetSnapshot: WidgetSnapshot = useMemo(
     () => ({
       roomTemperature: defaultWidgetSensor?.temperature ?? null,
@@ -1129,18 +1144,30 @@ export function MyRoomDashboard() {
       sensors: widgetSensors,
       garbageLabel,
       garbageDaysUntil,
+      garbageUpcoming,
+      garbageCollectionTime,
       todayKwh,
       todayCostYen,
+      yesterdayKwh,
+      monthKwh,
+      energyDate,
       remoteButtons: widgetRemoteButtons,
+      aircons: widgetAircons,
     }),
     [
       defaultWidgetSensor,
       widgetSensors,
       garbageLabel,
       garbageDaysUntil,
+      garbageUpcoming,
+      garbageCollectionTime,
       todayKwh,
       todayCostYen,
+      yesterdayKwh,
+      monthKwh,
+      energyDate,
       widgetRemoteButtons,
+      widgetAircons,
     ]
   );
 

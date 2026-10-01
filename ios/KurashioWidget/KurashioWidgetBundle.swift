@@ -5,5 +5,9 @@ import WidgetKit
 struct KurashioWidgetBundle: WidgetBundle {
     var body: some Widget {
         KurashioWidget()
+        GarbageWidget()
+        KurashioRemoteWidget()
+        KurashioAirconWidget()
+        KurashioEnergyWidget()
     }
 }

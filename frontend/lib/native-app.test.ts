@@ -129,9 +129,17 @@ describe("syncWidgetSnapshot", () => {
     sensors: [{ id: 3, name: "リビング", temperature: 24.6, humidity: 58, co2: null, co2Level: null, stale: false }],
     garbageLabel: "燃えるゴミ",
     garbageDaysUntil: 1,
+    garbageUpcoming: [
+      { date: "2026-08-26", weekday: "水", categories: [{ name: "燃えるゴミ", color: "#e67e22" }] },
+    ],
+    garbageCollectionTime: "08:30",
     todayKwh: 9.4,
     todayCostYen: 312,
+    yesterdayKwh: 8.6,
+    monthKwh: 142,
+    energyDate: "2026-10-01",
     remoteButtons: [{ id: "b1", label: "照明オン", groupName: "リビング" }],
+    aircons: [],
   };
 
   it("アプリの外では何もせず false を返す", () => {

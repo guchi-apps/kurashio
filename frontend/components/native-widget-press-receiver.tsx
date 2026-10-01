@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { sendRemoteButton } from "@/lib/api";
+import { fetchAirconControlState, sendAirconControl, sendRemoteButton } from "@/lib/api";
 import {
   isNativeApp,
   NATIVE_WIDGET_PRESS_AVAILABLE_EVENT,
@@ -12,7 +12,25 @@ import {
 } from "@/lib/native-app";
 import { REMOTE_SENT_MESSAGE_MS } from "@/lib/remote";
 import { supabase } from "@/lib/supabase-client";
+import { stepAirconTemperature, type AirconControlCommand } from "@/lib/types";
+import { isWidgetAirconAction, type WidgetAirconAction } from "@/lib/widget-aircon";
 import { claimPressKey } from "@/lib/widget-press";
+
+/** 電源はそのまま、温度は押した時点の現在値から0.5℃動かして送る（ウィジェットの表示値は古いことがある） */
+async function sendWidgetAirconAction(acId: number, action: WidgetAirconAction): Promise<string> {
+  if (action === "power_on" || action === "power_off") {
+    const command: AirconControlCommand = { power: action === "power_on" ? "ON" : "OFF" };
+    const state = await sendAirconControl(acId, command);
+    return `${state.name ?? "エアコン"}を${action === "power_on" ? "オン" : "オフ"}にしました`;
+  }
+  const current = await fetchAirconControlState(acId);
+  if (current.target_temperature == null) {
+    throw new Error("設定温度を読めないため、温度を変えられませんでした");
+  }
+  const next = stepAirconTemperature(current.target_temperature, action === "temp_up" ? 1 : -1, current.mode);
+  const state = await sendAirconControl(acId, { target_temperature: next });
+  return `${state.name ?? current.name ?? "エアコン"}を${next}℃にしました`;
+}
 
 /**
  * iPhoneのホーム画面ウィジェットで押された電気の操作ボタンを、ここで送る（#546）。
@@ -54,6 +72,7 @@ export function NativeWidgetPressReceiver() {
     const onPress = async (event: Event) => {
       const press = (event as CustomEvent<WidgetPress>).detail;
       if (!press?.key || !press.buttonId) return;
+      const airconAction = press.acId != null && isWidgetAirconAction(press.action) ? press.action : null;
       if (inFlightRef.current.has(press.key)) return;
       inFlightRef.current.add(press.key);
       try {
@@ -64,9 +83,15 @@ export function NativeWidgetPressReceiver() {
           return;
         }
         try {
-          const result = await sendRemoteButton(press.buttonId);
-          reportWidgetPressResult(press.key, "sent");
-          show(`${result.group_name} ${result.label} を送信しました`, false);
+          if (airconAction && press.acId != null) {
+            const text = await sendWidgetAirconAction(press.acId, airconAction);
+            reportWidgetPressResult(press.key, "sent");
+            show(text, false);
+          } else {
+            const result = await sendRemoteButton(press.buttonId);
+            reportWidgetPressResult(press.key, "sent");
+            show(`${result.group_name} ${result.label} を送信しました`, false);
+          }
         } catch (err) {
           reportWidgetPressResult(press.key, "failed");
           show(err instanceof Error ? err.message : "送信できませんでした", true);

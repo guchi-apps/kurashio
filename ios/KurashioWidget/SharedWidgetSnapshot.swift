@@ -40,6 +40,33 @@ enum SharedWidgetSnapshot {
         var groupName: String
     }
 
+    /// 「ごみの日」ウィジェットに並べる品目1つぶん。`color` はアプリで設定した `#rrggbb`
+    struct GarbageCategory: Codable, Hashable {
+        var name: String
+        var color: String
+    }
+
+    /// 「ごみの日」ウィジェットの収集日1日ぶん（Web側の `WidgetGarbageDay`）。
+    /// **日数は持たない。** 端末の日付から数える（ダッシュボードを開かない日にも正しく進むように）
+    struct GarbageDay: Codable, Hashable {
+        /// "2026-08-26"
+        var date: String
+        var weekday: String
+        var categories: [GarbageCategory]
+    }
+
+    /// エアコンの操作ウィジェットに並べる1台ぶん（Web側の `WidgetAircon`）。
+    /// 状態はダッシュボードが持っている台（表示中の1台）だけ入り、他の台は nil。操作は状態に頼らず、
+    /// 押した時点でWeb側が現在値を読み直して送る
+    struct Aircon: Codable, Hashable {
+        var id: Int
+        var name: String
+        var power: String?
+        var mode: String?
+        var roomTemperature: Double?
+        var targetTemperature: Double?
+    }
+
     struct Snapshot: Codable {
         /// センサーを選んでいないときに出す室温・湿度（Web側の `pickDefaultWidgetSensor()`）
         var roomTemperature: Double?
@@ -52,10 +79,22 @@ enum SharedWidgetSnapshot {
         var garbageLabel: String?
         /// 上記の収集日までの日数（0=今日、1=明日）
         var garbageDaysUntil: Int?
+        /// 「ごみの日」ウィジェット用の、今日以降の収集日（日付順・最大5件）。古いWeb版からは届かない
+        var garbageUpcoming: [GarbageDay]?
+        /// 今日の収集が終わる時刻（"08:30"）。これを過ぎたら今日の収集は済みとみなす
+        var garbageCollectionTime: String?
         var todayKwh: Double?
         var todayCostYen: Int?
+        /// 昨日の使用量（KEPCO差分の「その他」を除く）。記録が無い・#648より前のWeb版からは届かない
+        var yesterdayKwh: Double?
+        /// 今月の累計使用量（#648）
+        var monthKwh: Double?
+        /// 電気の値の基準日（JST・`2026-10-01`）。0時を過ぎて古い値のまま出さないために使う（#648）
+        var energyDate: String?
         /// 電気の操作ボタン（ダッシュボードで非表示にしたものを除く）。#546 より前のWeb版からは届かない
         var remoteButtons: [RemoteButton]?
+        /// エアコンの操作対象（操作できない構成・非表示のときは空）。#649 より前のWeb版からは届かない
+        var aircons: [Aircon]?
     }
 
     /// ウィジェットに出す室温・湿度。`name` は選んだ（または既定の）センサーの名前で、
@@ -138,9 +177,15 @@ enum SharedWidgetSnapshot {
             sensors: (raw["sensors"] as? [[String: Any]])?.compactMap(sensor),
             garbageLabel: raw["garbageLabel"] as? String,
             garbageDaysUntil: double(raw["garbageDaysUntil"]).map { Int($0.rounded()) },
+            garbageUpcoming: (raw["garbageUpcoming"] as? [[String: Any]])?.compactMap(garbageDay),
+            garbageCollectionTime: raw["garbageCollectionTime"] as? String,
             todayKwh: double(raw["todayKwh"]),
             todayCostYen: double(raw["todayCostYen"]).map { Int($0.rounded()) },
-            remoteButtons: (raw["remoteButtons"] as? [[String: Any]])?.compactMap(remoteButton)
+            yesterdayKwh: double(raw["yesterdayKwh"]),
+            monthKwh: double(raw["monthKwh"]),
+            energyDate: raw["energyDate"] as? String,
+            remoteButtons: (raw["remoteButtons"] as? [[String: Any]])?.compactMap(remoteButton),
+            aircons: (raw["aircons"] as? [[String: Any]])?.compactMap(aircon)
         )
         guard let defaults else { return }
         do {
@@ -170,6 +215,27 @@ enum SharedWidgetSnapshot {
             id: id,
             label: (raw["label"] as? String) ?? id,
             groupName: (raw["groupName"] as? String) ?? ""
+        )
+    }
+
+    private static func garbageDay(_ raw: [String: Any]) -> GarbageDay? {
+        guard let date = raw["date"] as? String, !date.isEmpty else { return nil }
+        let categories = (raw["categories"] as? [[String: Any]] ?? []).compactMap { item -> GarbageCategory? in
+            guard let name = item["name"] as? String, !name.isEmpty else { return nil }
+            return GarbageCategory(name: name, color: (item["color"] as? String) ?? "")
+        }
+        return GarbageDay(date: date, weekday: (raw["weekday"] as? String) ?? "", categories: categories)
+    }
+
+    private static func aircon(_ raw: [String: Any]) -> Aircon? {
+        guard let id = double(raw["id"]).map({ Int($0.rounded()) }) else { return nil }
+        return Aircon(
+            id: id,
+            name: (raw["name"] as? String) ?? "エアコン \(id)",
+            power: raw["power"] as? String,
+            mode: raw["mode"] as? String,
+            roomTemperature: double(raw["roomTemperature"]),
+            targetTemperature: double(raw["targetTemperature"])
         )
     }
 
@@ -210,10 +276,15 @@ enum WidgetPressStore {
     static let resultLifetime: TimeInterval = 30
 
     /// `key` は押下ごとに変わる（Webが二重送信を避けるのに使う）
+    ///
+    /// エアコンの操作（#649）のときは `acId` と `action`（`power_on` / `power_off` / `temp_up` / `temp_down`）が入り、
+    /// `buttonId` は結果の照合用に `aircon:<acId>:<action>` とする。電気の操作では2つとも nil
     struct Pending: Codable {
         var key: String
         var buttonId: String
         var pressedAt: Date
+        var acId: Int? = nil
+        var action: String? = nil
     }
 
     enum Status: String, Codable {
@@ -232,8 +303,8 @@ enum WidgetPressStore {
         UserDefaults(suiteName: "group.com.gucchii.kurashio")
     }
 
-    static func setPending(buttonId: String, now: Date = Date()) {
-        let pending = Pending(key: UUID().uuidString, buttonId: buttonId, pressedAt: now)
+    static func setPending(buttonId: String, acId: Int? = nil, action: String? = nil, now: Date = Date()) {
+        let pending = Pending(key: UUID().uuidString, buttonId: buttonId, pressedAt: now, acId: acId, action: action)
         guard let data = try? JSONEncoder().encode(pending) else { return }
         defaults?.set(data, forKey: pendingKey)
     }
