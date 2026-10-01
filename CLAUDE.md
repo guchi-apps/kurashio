@@ -925,7 +925,7 @@ secret / variable で、1Passwordは「人が管理する唯一の正」とし�
 
 `@claude` コメントを起点に、計画提示〜実装〜develop向けPR作成までを GitHub Actions 上で無人実行する。
 ワークフローの実体は `guchi-apps/issue-deck` にあり、このリポジトリの `.github/workflows/` には
-`uses:` で参照する薄い caller だけを置いている（タグは全 caller で揃える。現在は `@workflows/v23`）。
+`uses:` で参照する薄い caller だけを置いている（タグは全 caller で揃える。具体的な版はここに書かず、`.github/workflows/*.yml` の既存の caller と同じタグにする。版を上げたら `prompts-ref` も同じ版に揃える）。
 
 | ファイル | 役割 |
 |---|---|
