@@ -123,6 +123,7 @@ import type {
 } from "@/lib/cleaning";
 import { buildGarbageHighlight, type GarbageSchedule } from "@/lib/garbage";
 import type { WidgetSnapshot } from "@/lib/native-app";
+import { buildWidgetAircons } from "@/lib/widget-aircon";
 import { buildWidgetRemoteButtons } from "@/lib/widget-remote-buttons";
 import { buildWidgetSensors, pickDefaultWidgetSensor } from "@/lib/widget-sensors";
 import {
@@ -1121,6 +1122,10 @@ export function MyRoomDashboard() {
   // （センサーの一覧は30秒ごとの取得で作り直されるため、同じ内容なら送らない判定は
   // `NativeWidgetSnapshotSync` が中身で行う）
   const widgetRemoteButtons = useMemo(() => buildWidgetRemoteButtons(remoteButtons), [remoteButtons]);
+  const widgetAircons = useMemo(
+    () => buildWidgetAircons(airconUnits, airconLatest, airconControlEnabled && !isOfflineMode),
+    [airconUnits, airconLatest, airconControlEnabled, isOfflineMode]
+  );
   const widgetSnapshot: WidgetSnapshot = useMemo(
     () => ({
       roomTemperature: defaultWidgetSensor?.temperature ?? null,
@@ -1132,6 +1137,7 @@ export function MyRoomDashboard() {
       todayKwh,
       todayCostYen,
       remoteButtons: widgetRemoteButtons,
+      aircons: widgetAircons,
     }),
     [
       defaultWidgetSensor,
@@ -1141,6 +1147,7 @@ export function MyRoomDashboard() {
       todayKwh,
       todayCostYen,
       widgetRemoteButtons,
+      widgetAircons,
     ]
   );
 

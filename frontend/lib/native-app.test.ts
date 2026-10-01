@@ -132,6 +132,7 @@ describe("syncWidgetSnapshot", () => {
     todayKwh: 9.4,
     todayCostYen: 312,
     remoteButtons: [{ id: "b1", label: "照明オン", groupName: "リビング" }],
+    aircons: [],
   };
 
   it("アプリの外では何もせず false を返す", () => {

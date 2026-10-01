@@ -416,6 +416,28 @@ JWT・固定トークンをウィジェットへ渡す案は採っていない�
   プロセスで動くため、アプリ側でもコンパイルが要る）。変更は両方揃える
 - Swift は subpc でビルドできない。Mac mini と実機で、コールドスタート・起動済み・未ログイン・機内モードを確かめること
 
+### 電気・エアコンの操作ウィジェット（Small・Medium・#649）
+
+`kurashio` ウィジェットとは別に、操作専用の2つ（`KurashioRemoteWidget`・`KurashioAirconWidget`）を
+ウィジェットギャラリーから置ける。設定項目は持たず、プロバイダは `ControlTimelineProvider` を共有する。
+
+- **電気の操作**: Smallは先頭2件、Mediumは先頭6件（ダッシュボードで表示中のボタン）。押下は #546 と同じ
+  `PressRemoteButtonIntent`
+- **エアコンの操作**: Smallは1台、Mediumは2台。電源の「オン」「オフ」と設定温度の「−」「＋」（0.5℃）。
+  `PressAirconIntent`（`acId` と `action` = `power_on` / `power_off` / `temp_up` / `temp_down`）
+- 送り方は電気の操作と同じ（ウィジェットは認証を持たず、アプリが前面に出て Web のセッションが
+  `POST /api/aircon/units/{ac_id}/control` を送る）。押下の保留（`WidgetPressStore.Pending`）に
+  `acId`・`action` を足しただけで、保留の受け渡し・最大1回・60秒の期限は共通
+- **温度の＋−は、押した時点で `GET /api/aircon/units/{ac_id}/state` を読み直して計算する。** ウィジェットの
+  表示値はダッシュボードを開いたときのもので古いことがあるため、表示値からの差分は送らない
+- **電源は状態に頼らず「オン」「オフ」の2ボタン**にしている（表示が古いと入切が逆になるため）
+- スナップショットの `aircons` は、操作できる構成のときだけ入る。**状態（設定温度・室温）が入るのは
+  ダッシュボードが持っている表示中の1台だけ**で、他の台は「—」（他の台のために取得を増やしていない）
+- Webの反映は `frontend/lib/widget-aircon.ts`（スナップショットの組み立て・操作の型）と
+  `components/native-widget-press-receiver.tsx`（送信）。`WebViewModel` は結果の ack ですべてのウィジェットを再読み込みする
+- Swift は subpc でビルドできない。Mac mini・実機で、ウィジェットギャラリーに2つが並ぶこと、
+  押下でアプリが開いてトーストが出ること、結果の印が約30秒出ることを確かめる
+
 ### App Group の登録が必要（初回だけ）
 
 **Widgetが動くには、Apple Developer PortalでのApp Group（`group.com.gucchii.kurashio`）登録と、
