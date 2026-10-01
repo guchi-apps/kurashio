@@ -128,6 +128,18 @@ describe("EnvironmentChart の凡例", () => {
     expect(html).toContain("非表示の項目を表示（1）");
   });
 
+  it("全行を非表示にしてもリンクは残り、戻せる（#638）", () => {
+    const html = render(new Set(), {
+      [deviceMetricVisibilityKey(1, "temperature")]: false,
+      [deviceMetricVisibilityKey(2, "temperature")]: false,
+      [deviceMetricVisibilityKey(AIRCON_CHART_DEVICE_ID, "temperature")]: false,
+      [outdoorMetricVisibilityKey("temperature")]: false,
+      airconTarget: false,
+    });
+    expect(legendNames(html)).toHaveLength(0);
+    expect(html).toContain("非表示の項目を表示（");
+  });
+
   it("非表示の行が無ければリンクを出さない（#638）", () => {
     expect(render()).not.toContain("非表示の項目を表示");
   });
