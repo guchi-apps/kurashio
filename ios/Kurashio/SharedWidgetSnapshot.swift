@@ -40,6 +40,18 @@ enum SharedWidgetSnapshot {
         var groupName: String
     }
 
+    /// エアコンの操作ウィジェットに並べる1台ぶん（Web側の `WidgetAircon`）。
+    /// 状態はダッシュボードが持っている台（表示中の1台）だけ入り、他の台は nil。操作は状態に頼らず、
+    /// 押した時点でWeb側が現在値を読み直して送る
+    struct Aircon: Codable, Hashable {
+        var id: Int
+        var name: String
+        var power: String?
+        var mode: String?
+        var roomTemperature: Double?
+        var targetTemperature: Double?
+    }
+
     struct Snapshot: Codable {
         /// センサーを選んでいないときに出す室温・湿度（Web側の `pickDefaultWidgetSensor()`）
         var roomTemperature: Double?
@@ -62,6 +74,8 @@ enum SharedWidgetSnapshot {
         var energyDate: String?
         /// 電気の操作ボタン（ダッシュボードで非表示にしたものを除く）。#546 より前のWeb版からは届かない
         var remoteButtons: [RemoteButton]?
+        /// エアコンの操作対象（操作できない構成・非表示のときは空）。#649 より前のWeb版からは届かない
+        var aircons: [Aircon]?
     }
 
     /// ウィジェットに出す室温・湿度。`name` は選んだ（または既定の）センサーの名前で、
@@ -149,7 +163,8 @@ enum SharedWidgetSnapshot {
             yesterdayKwh: double(raw["yesterdayKwh"]),
             monthKwh: double(raw["monthKwh"]),
             energyDate: raw["energyDate"] as? String,
-            remoteButtons: (raw["remoteButtons"] as? [[String: Any]])?.compactMap(remoteButton)
+            remoteButtons: (raw["remoteButtons"] as? [[String: Any]])?.compactMap(remoteButton),
+            aircons: (raw["aircons"] as? [[String: Any]])?.compactMap(aircon)
         )
         guard let defaults else { return }
         do {
@@ -179,6 +194,18 @@ enum SharedWidgetSnapshot {
             id: id,
             label: (raw["label"] as? String) ?? id,
             groupName: (raw["groupName"] as? String) ?? ""
+        )
+    }
+
+    private static func aircon(_ raw: [String: Any]) -> Aircon? {
+        guard let id = double(raw["id"]).map({ Int($0.rounded()) }) else { return nil }
+        return Aircon(
+            id: id,
+            name: (raw["name"] as? String) ?? "エアコン \(id)",
+            power: raw["power"] as? String,
+            mode: raw["mode"] as? String,
+            roomTemperature: double(raw["roomTemperature"]),
+            targetTemperature: double(raw["targetTemperature"])
         )
     }
 
@@ -219,10 +246,15 @@ enum WidgetPressStore {
     static let resultLifetime: TimeInterval = 30
 
     /// `key` は押下ごとに変わる（Webが二重送信を避けるのに使う）
+    ///
+    /// エアコンの操作（#649）のときは `acId` と `action`（`power_on` / `power_off` / `temp_up` / `temp_down`）が入り、
+    /// `buttonId` は結果の照合用に `aircon:<acId>:<action>` とする。電気の操作では2つとも nil
     struct Pending: Codable {
         var key: String
         var buttonId: String
         var pressedAt: Date
+        var acId: Int? = nil
+        var action: String? = nil
     }
 
     enum Status: String, Codable {
@@ -241,8 +273,8 @@ enum WidgetPressStore {
         UserDefaults(suiteName: "group.com.gucchii.kurashio")
     }
 
-    static func setPending(buttonId: String, now: Date = Date()) {
-        let pending = Pending(key: UUID().uuidString, buttonId: buttonId, pressedAt: now)
+    static func setPending(buttonId: String, acId: Int? = nil, action: String? = nil, now: Date = Date()) {
+        let pending = Pending(key: UUID().uuidString, buttonId: buttonId, pressedAt: now, acId: acId, action: action)
         guard let data = try? JSONEncoder().encode(pending) else { return }
         defaults?.set(data, forKey: pendingKey)
     }

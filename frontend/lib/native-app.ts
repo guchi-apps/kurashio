@@ -7,6 +7,7 @@
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { supabaseConfig } from "@/lib/supabase-client";
+import type { WidgetAircon } from "@/lib/widget-aircon";
 import type { WidgetRemoteButton } from "@/lib/widget-remote-buttons";
 import type { WidgetSensor } from "@/lib/widget-sensors";
 
@@ -167,6 +168,8 @@ export interface WidgetSnapshot {
   energyDate: string | null;
   /** Largeに並べる電気の操作ボタン（#546）。押した結果は `reportWidgetPressResult()` で返す */
   remoteButtons: WidgetRemoteButton[];
+  /** エアコンの操作ウィジェットに並べる台（#649）。操作できない構成では空 */
+  aircons: WidgetAircon[];
 }
 
 /**
@@ -203,6 +206,9 @@ export const NATIVE_WIDGET_PRESS_AVAILABLE_EVENT = "myroom-native-widget-press-a
 export interface WidgetPress {
   key: string;
   buttonId: string;
+  /** エアコンの操作（#649）のときだけ入る。電気の操作では無い */
+  acId?: number;
+  action?: string;
 }
 
 export type WidgetPressStatus = "sent" | "failed" | "unknown";

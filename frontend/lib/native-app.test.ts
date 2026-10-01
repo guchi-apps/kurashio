@@ -135,6 +135,7 @@ describe("syncWidgetSnapshot", () => {
     monthKwh: 142,
     energyDate: "2026-10-01",
     remoteButtons: [{ id: "b1", label: "照明オン", groupName: "リビング" }],
+    aircons: [],
   };
 
   it("アプリの外では何もせず false を返す", () => {
