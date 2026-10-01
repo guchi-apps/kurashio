@@ -103,6 +103,9 @@ struct KurashioTimelineProvider: AppIntentTimelineProvider {
             garbageDaysUntil: 1,
             todayKwh: 9.4,
             todayCostYen: 312,
+            yesterdayKwh: 8.6,
+            monthKwh: 142,
+            energyDate: nil,
             remoteButtons: [
                 .init(id: "a", label: "照明オン", groupName: "リビング"),
                 .init(id: "b", label: "照明オフ", groupName: "リビング"),

@@ -131,6 +131,9 @@ describe("syncWidgetSnapshot", () => {
     garbageDaysUntil: 1,
     todayKwh: 9.4,
     todayCostYen: 312,
+    yesterdayKwh: 8.6,
+    monthKwh: 142,
+    energyDate: "2026-10-01",
     remoteButtons: [{ id: "b1", label: "照明オン", groupName: "リビング" }],
   };
 
