@@ -1,7 +1,8 @@
 import type { ChartMetric, ChartViewRange, HistoryPoint, TimeRange } from "@/lib/types";
 
+/** 屋外の線・タブを持たない指標。屋外の気圧は表示しない（#637） */
 function isIndoorOnlyMetric(metric: ChartMetric): boolean {
-  return metric === "co2" || metric === "illuminance";
+  return metric === "co2" || metric === "illuminance" || metric === "pressure";
 }
 import {
   CHART_METRICS,
@@ -630,8 +631,7 @@ export function hasOutdoorMetricData(
   historyData: HistoryPoint[],
   metric: ChartMetric
 ): boolean {
-  // 屋外の気圧は表示しない（#637）
-  if (isIndoorOnlyMetric(metric) || metric === "pressure") return false;
+  if (isIndoorOnlyMetric(metric)) return false;
   const key = `outdoor_${metric}` as keyof HistoryPoint;
   return historyData.some((point) => {
     const value = point[key];
