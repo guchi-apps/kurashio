@@ -82,7 +82,7 @@ Deploy to Production 成功
 
 | 段階（ジョブ） | 何をする | 失敗したら |
 |---|---|---|
-| 判定 | 最後に配布し終えたコミット（タグ `ios-testflight/<ビルド番号>`）との差分を見る。**対象は `ios/Kurashio/`・`ios/KurashioWidget/`・`ios/Kurashio.xcodeproj/` のみ**（README・`ios/scripts/`・版番号の行だけの差分は不要）。印が無ければ初回として要配布 | main に無いコミット・判定エラー。要らなければ「スキップ（Webのみ）」と理由が run のサマリーに出る |
+| 判定 | 最後に配布し終えたコミット（タグ `ios-testflight/<ビルド番号>`）との差分を見る。**対象は `ios/Kurashio/`・`ios/KurashioWidget/`・`ios/KurashioWatch/`・`ios/KurashioWatchWidget/`・`ios/Kurashio.xcodeproj/` のみ**（README・`ios/scripts/`・版番号の行だけの差分は不要）。印が無ければ初回として要配布 | main に無いコミット・判定エラー。要らなければ「スキップ（Webのみ）」と理由が run のサマリーに出る |
 | 署名・ビルド・アップロード | macOS runner でクラウド署名（App Store Connect APIキー）→ アーカイブ → IPA → `altool` でアップロード。ビルド番号はアプリ本体・Widget とも同じ値 | 署名（プロビジョニング）・アーカイブ・アップロードのどのステップで落ちたかがログで分かる |
 | ビルド処理待ち・内部グループ配布 | Apple の処理（最大40分）を待ち、内部グループへ割り当て、利用可能になるまで確認。最後に印を付ける | 処理失敗・輸出コンプライアンス・グループ未設定など。**印は付かない** |
 
@@ -461,6 +461,39 @@ JWT・固定トークンをウィジェットへ渡す案は採っていない�
   `components/native-widget-press-receiver.tsx`（送信）。`WebViewModel` は結果の ack ですべてのウィジェットを再読み込みする
 - Swift は subpc でビルドできない。Mac mini・実機で、ウィジェットギャラリーに2つが並ぶこと、
   押下でアプリが開いてトーストが出ること、結果の印が約30秒出ることを確かめる
+
+## Apple Watch（`KurashioWatch`・`KurashioWatchWidget`・#655）
+
+iPhoneのkurashioと対になるWatchアプリと、文字盤のコンプリケーション。**温度・湿度・CO2濃度を見るだけ**で、
+操作はできない。subpc には Xcode が無いので、**Swift・pbxproj のビルドは Mac mini で初めて確かめる**。
+
+- **値の流れ**: ダッシュボード → `widgetSnapshot`（既存のブリッジ）→ `WebViewModel` が `SharedWidgetSnapshot` を保存すると同時に
+  `WatchSync.shared.send(snapshot:)` で**センサーの部分だけ**を `updateApplicationContext` で送る → Watchアプリ
+  （`WatchConnection`）が受け取って App Group へ書き、`WidgetCenter.reloadAllTimelines()` → コンプリケーションが読む。
+  **Watch側は通信も認証も持たない**（JWTは渡さない。iPhoneウィジェットと同じ理由・上の「表示用データだけをApp Group経由で共有する」）
+- **更新はダッシュボードを開いたときだけ**（iPhoneウィジェットと同じ制約）。Watch単体では更新されない
+- **ログアウト**（`widgetSnapshotCleared`）で空の context（`watchSnapshotCleared`）を送り、Watch側は保存した値を捨ててコンプリケーションを
+  再読み込みする。センサーが1台も無い（すべて非表示）ときも同じ
+- **`WatchSnapshot.swift` は `ios/Kurashio/`・`ios/KurashioWatch/`・`ios/KurashioWatchWidget/` の3か所に同じ内容を置く**
+  （同期グループが1ファイル1 target のため）。`check-consistency.mjs` が照合する。Watch用の型だけを持ち、
+  `SharedWidgetSnapshot` は複製しない
+- **CO2の段階の判定はWeb側の `getCo2Level()` だけが持つ。** Swiftは届いた `co2Level` に色を当てるだけで、ppmのしきい値を書かない
+- 画面: デジタルクラウンで1台ずつ切り替え、右上のボタンから一覧。コンプリケーションは円形（温度・湿度・CO2のどれか）・長方形・1行。
+  センサーと円形に出す値は文字盤の編集で選ぶ（`SelectWatchSensorIntent`）
+- **target の構成**: `KurashioWatch`（watchOS 11・`com.gucchii.kurashio.watchkitapp`）が `KurashioWatchWidgetExtension`
+  （`...watchkitapp.KurashioWatchWidget`）を埋め込み、`Kurashio` が `KurashioWatch` を `Embed Watch Content` で埋め込む。
+  `ios-testflight.yml` の archive（scheme `Kurashio`）は依存から Watch も一緒にビルドする（ワークフローは変更していない）
+- **配布判定・PRレビューの対象に `ios/KurashioWatch/`・`ios/KurashioWatchWidget/` を含めている**（`ios-changes.mjs`・
+  `claude-review-develop.yml`・`ios-rebuild-notice.yml`）。新しいフォルダを足したら3か所すべてへ足す
+
+### Watch のための初回設定（手作業）
+
+**Watch の2 target は iPhone ウィジェットと同じ App Group `group.com.gucchii.kurashio` を使う。** 新しい App ID
+（`com.gucchii.kurashio.watchkitapp`・`...watchkitapp.KurashioWatchWidget`）の登録と、その2つへの App Group の紐付けは
+Developer Portal で行う。`-allowProvisioningUpdates` の自動署名が App ID を自動登録できるかは、APIキーの権限（App管理）では
+確かめられていない。**Mac mini での初回ビルドと TestFlight 配布で、App ID・App Group が自動登録されるかを確かめ、
+だめなら手作業で登録する**（手順は起票済みの手作業Issueを参照）。コード側の `entitlements` は
+`KurashioWatch/KurashioWatch.entitlements`・`KurashioWatchWidget/KurashioWatchWidget.entitlements` に入れてある。
 
 ### App Group の登録が必要（初回だけ）
 

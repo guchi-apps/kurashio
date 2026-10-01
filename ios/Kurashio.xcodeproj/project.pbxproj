@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		75B20D2DA11DECF2EF66AFA7 /* KurashioWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 0786C9B99F5F10A963F3C85F /* KurashioWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		77A2BF9F874CDBDB24A04BB1 /* KurashioWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 962149968FB3FAC0B434C42A /* KurashioWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		63B3A4548E8411279F72B7DE /* KurashioWatchWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 9255CA6C09874A20B8349153 /* KurashioWatchWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -17,6 +19,20 @@
 			proxyType = 1;
 			remoteGlobalIDString = 4FFCADDFE12A84120132C906;
 			remoteInfo = KurashioWidgetExtension;
+		};
+		69D4B69A0202BE62EBA37C31 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4B52A1E93061842200F8C8D5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8ECF0AD2D73066833C461275;
+			remoteInfo = KurashioWatch;
+		};
+		A3E90839E1E3D78F06D49F8E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4B52A1E93061842200F8C8D5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 61508D9C35E8730DFE09F9E8;
+			remoteInfo = KurashioWatchWidgetExtension;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -32,11 +48,35 @@
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5CBFF58D18104B4242F019FF /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				77A2BF9F874CDBDB24A04BB1 /* KurashioWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3FCB4B7706B72A9CF5A8B2DE /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				63B3A4548E8411279F72B7DE /* KurashioWatchWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		4B52A1F13061842200F8C8D5 /* Kurashio.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kurashio.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0786C9B99F5F10A963F3C85F /* KurashioWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KurashioWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		962149968FB3FAC0B434C42A /* KurashioWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = KurashioWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9255CA6C09874A20B8349153 /* KurashioWatchWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = KurashioWatchWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -53,6 +93,13 @@
 				Info.plist,
 			);
 			target = 4FFCADDFE12A84120132C906 /* KurashioWidgetExtension */;
+		};
+		79E4C84AF400A6BAD9170792 /* Exceptions for "KurashioWatchWidget" folder in "KurashioWatchWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 61508D9C35E8730DFE09F9E8 /* KurashioWatchWidgetExtension */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -73,6 +120,19 @@
 			path = KurashioWidget;
 			sourceTree = "<group>";
 		};
+		0D76B3F7E89B94B8E78BFBBC /* KurashioWatch */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = KurashioWatch;
+			sourceTree = "<group>";
+		};
+		EB13FCCD4DBFF2468453EBAD /* KurashioWatchWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				79E4C84AF400A6BAD9170792 /* Exceptions for "KurashioWatchWidget" folder in "KurashioWatchWidgetExtension" target */,
+			);
+			path = KurashioWatchWidget;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -86,6 +146,16 @@
 			files = (
 			);
 		};
+		ECC6C8AC8424E24E3CE2B556 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		9C801204FA663D49B5530731 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -94,6 +164,8 @@
 			children = (
 				4B52A1F33061842200F8C8D5 /* Kurashio */,
 				EABB005DEF35F3465E8D8B37 /* KurashioWidget */,
+				0D76B3F7E89B94B8E78BFBBC /* KurashioWatch */,
+				EB13FCCD4DBFF2468453EBAD /* KurashioWatchWidget */,
 				4B52A1F23061842200F8C8D5 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -103,6 +175,8 @@
 			children = (
 				4B52A1F13061842200F8C8D5 /* Kurashio.app */,
 				0786C9B99F5F10A963F3C85F /* KurashioWidgetExtension.appex */,
+				962149968FB3FAC0B434C42A /* KurashioWatch.app */,
+				9255CA6C09874A20B8349153 /* KurashioWatchWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -118,11 +192,13 @@
 				4B52A1EE3061842200F8C8D5 /* Frameworks */,
 				4B52A1EF3061842200F8C8D5 /* Resources */,
 				8AFE7B53F7DD3C161CA2DECD /* Embed Foundation Extensions */,
+				5CBFF58D18104B4242F019FF /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				7D512CA997F8000B555D02A2 /* PBXTargetDependency */,
+				E267063C20AFE6F565E96779 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				4B52A1F33061842200F8C8D5 /* Kurashio */,
@@ -152,6 +228,48 @@
 			productReference = 0786C9B99F5F10A963F3C85F /* KurashioWidgetExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		8ECF0AD2D73066833C461275 /* KurashioWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1DDB37E7975464E858E1F5AD /* Build configuration list for PBXNativeTarget "KurashioWatch" */;
+			buildPhases = (
+				8CDDC94524C4605AD54B4481 /* Sources */,
+				ECC6C8AC8424E24E3CE2B556 /* Frameworks */,
+				4159B4B1BE1B766A8BA8098B /* Resources */,
+				3FCB4B7706B72A9CF5A8B2DE /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				442354082CA1E8F4429E8E3F /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				0D76B3F7E89B94B8E78BFBBC /* KurashioWatch */,
+			);
+			name = KurashioWatch;
+			productName = KurashioWatch;
+			productReference = 962149968FB3FAC0B434C42A /* KurashioWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+		61508D9C35E8730DFE09F9E8 /* KurashioWatchWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F6293FFEB763174FBA02A08D /* Build configuration list for PBXNativeTarget "KurashioWatchWidgetExtension" */;
+			buildPhases = (
+				915B769759A5238464886943 /* Sources */,
+				9C801204FA663D49B5530731 /* Frameworks */,
+				6AACF6E4E862B82356CADFDA /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				EB13FCCD4DBFF2468453EBAD /* KurashioWatchWidget */,
+			);
+			name = KurashioWatchWidgetExtension;
+			productName = KurashioWatchWidgetExtension;
+			productReference = 9255CA6C09874A20B8349153 /* KurashioWatchWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -166,6 +284,12 @@
 						CreatedOnToolsVersion = 27.0;
 					};
 					4FFCADDFE12A84120132C906 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					8ECF0AD2D73066833C461275 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					61508D9C35E8730DFE09F9E8 = {
 						CreatedOnToolsVersion = 27.0;
 					};
 				};
@@ -186,6 +310,8 @@
 			targets = (
 				4B52A1F03061842200F8C8D5 /* Kurashio */,
 				4FFCADDFE12A84120132C906 /* KurashioWidgetExtension */,
+				8ECF0AD2D73066833C461275 /* KurashioWatch */,
+				61508D9C35E8730DFE09F9E8 /* KurashioWatchWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -197,6 +323,16 @@
 			);
 		};
 		2C457186C3BD642E942AF235 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		4159B4B1BE1B766A8BA8098B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		6AACF6E4E862B82356CADFDA /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
@@ -214,6 +350,16 @@
 			files = (
 			);
 		};
+		8CDDC94524C4605AD54B4481 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		915B769759A5238464886943 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -221,6 +367,16 @@
 			isa = PBXTargetDependency;
 			target = 4FFCADDFE12A84120132C906 /* KurashioWidgetExtension */;
 			targetProxy = B15E9D4BFDF0869269468A9B /* PBXContainerItemProxy */;
+		};
+		E267063C20AFE6F565E96779 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8ECF0AD2D73066833C461275 /* KurashioWatch */;
+			targetProxy = 69D4B69A0202BE62EBA37C31 /* PBXContainerItemProxy */;
+		};
+		442354082CA1E8F4429E8E3F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 61508D9C35E8730DFE09F9E8 /* KurashioWatchWidgetExtension */;
+			targetProxy = A3E90839E1E3D78F06D49F8E /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -478,6 +634,122 @@
 			};
 			name = Release;
 		};
+		88E03D2788FDBAB8D0283A39 /* Debug configuration for PBXNativeTarget "KurashioWatch" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = KurashioWatch/KurashioWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6AA3WFTR94;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = kurashio;
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.gucchii.kurashio;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 4.32.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		410566F41CA81037D7A6A348 /* Release configuration for PBXNativeTarget "KurashioWatch" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = KurashioWatch/KurashioWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6AA3WFTR94;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = kurashio;
+				INFOPLIST_KEY_WKApplication = YES;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.gucchii.kurashio;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 4.32.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
+		A060F46A9C559023EAEB1036 /* Debug configuration for PBXNativeTarget "KurashioWatchWidgetExtension" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = KurashioWatchWidget/KurashioWatchWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6AA3WFTR94;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = KurashioWatchWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = kurashio;
+				INFOPLIST_KEY_WKWidgetAppBundleIdentifier = com.gucchii.kurashio.watchkitapp;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 4.32.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio.watchkitapp.KurashioWatchWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		E518592DE64A0C2BC0DEDC58 /* Release configuration for PBXNativeTarget "KurashioWatchWidgetExtension" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = KurashioWatchWidget/KurashioWatchWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6AA3WFTR94;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = KurashioWatchWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = kurashio;
+				INFOPLIST_KEY_WKWidgetAppBundleIdentifier = com.gucchii.kurashio.watchkitapp;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 4.32.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.kurashio.watchkitapp.KurashioWatchWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -502,6 +774,22 @@
 			buildConfigurations = (
 				166328FEE0C84C5FDC93FC7A /* Debug configuration for PBXNativeTarget "KurashioWidgetExtension" */,
 				ED8E3231BFFDC6F550AF6890 /* Release configuration for PBXNativeTarget "KurashioWidgetExtension" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		1DDB37E7975464E858E1F5AD /* Build configuration list for PBXNativeTarget "KurashioWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				88E03D2788FDBAB8D0283A39 /* Debug configuration for PBXNativeTarget "KurashioWatch" */,
+				410566F41CA81037D7A6A348 /* Release configuration for PBXNativeTarget "KurashioWatch" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		F6293FFEB763174FBA02A08D /* Build configuration list for PBXNativeTarget "KurashioWatchWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A060F46A9C559023EAEB1036 /* Debug configuration for PBXNativeTarget "KurashioWatchWidgetExtension" */,
+				E518592DE64A0C2BC0DEDC58 /* Release configuration for PBXNativeTarget "KurashioWatchWidgetExtension" */,
 			);
 			defaultConfigurationName = Release;
 		};

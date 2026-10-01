@@ -59,7 +59,7 @@ jobs:
         /package\.json$ :: ルート以外の依存関係の変更 (frontend/package.json など。dependency-checkはルートしか見ない)
         ^backend/(auth|internal_auth|shared_token)\.py$|^frontend/lib/(auth|use-auth)\.ts$ :: 認証・認可の変更 (backend/auth.py, internal_auth.py, shared_token.py, frontend/lib/auth.ts, use-auth.ts)
         (^|/)(init_db|migrate_db)\.py$ :: DBスキーマ・マイグレーションの変更 (init_db.py, migrate_db.py)
-        ^ios/(Kurashio|KurashioWidget|Kurashio\.xcodeproj)/ :: iOSアプリの変更 (ios/Kurashio/**, ios/KurashioWidget/**, ios/Kurashio.xcodeproj/**)
+        ^ios/(Kurashio|KurashioWidget|KurashioWatch|KurashioWatchWidget|Kurashio\.xcodeproj)/ :: iOSアプリの変更 (ios/Kurashio/**, ios/KurashioWidget/**, ios/KurashioWatch/**, ios/KurashioWatchWidget/**, ios/Kurashio.xcodeproj/**)
       # 閾値は既定（10ファイル/500行）から下げる（#622）。直近16件中9件がskipだったため。
       review-file-threshold: "5"
       review-line-threshold: "200"

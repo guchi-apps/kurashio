@@ -30,7 +30,7 @@ jobs:
         run: |
           base="origin/${{ github.base_ref }}"
           # 判定は ios/scripts/ios-changes.mjs（TestFlight配布 ios-testflight.yml と同じ関数）に揃える。
-          # 配布物（Kurashio/・KurashioWidget/・xcodeproj）の変更だけを数え、README・scripts・
+          # 配布物（Kurashio/・KurashioWidget/・KurashioWatch/・KurashioWatchWidget/・xcodeproj）の変更だけを数え、README・scripts・
           # 版番号の行だけの差分は除く
           shell_changes=$(node ios/scripts/ios-changes.mjs --base "$base" --head HEAD --json \
             | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).changedFiles.length")

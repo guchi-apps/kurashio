@@ -157,7 +157,7 @@ Supabase は共有プロジェクトで、`signOut()` を引数なしで呼ぶ�
 **iOS に関わる変更をしたときの判別・入れ直しの手順は `ios/README.md` の「iOS に関わる変更をしたときの手順」が正**（#568）。
 要点だけ: 入れ直しが要るのは `ios/` の実質的な変更のみ（`frontend/`・`backend/` は何もしなくてよい）、入れ直しは
 **Web側が main へデプロイされた後に `main` から**、`ios/scripts/remote-install.sh`（subpc から）で1コマンド。
-CI の `frontend` ジョブが `ios/scripts/check-consistency.mjs` を毎回実行し、共有 Swift（`SharedWidgetSnapshot.swift` の2か所）・
+CI の `frontend` ジョブが `ios/scripts/check-consistency.mjs` を毎回実行し、共有 Swift（`SharedWidgetSnapshot.swift` の2か所・`WatchSnapshot.swift` の3か所）・
 `MARKETING_VERSION`・ログイン戻り先スキーム・ブリッジ名・pbxproj のIDのずれを止める。**照合する値を増やすときはこのスクリプトへ足す**。
 develop→main のPRには `.github/workflows/ios-rebuild-notice.yml` が「入れ直しが必要」を自動でコメントする（`MARKETING_VERSION` の行だけの差分は除外）。
 
@@ -165,7 +165,7 @@ develop→main のPRには `.github/workflows/ios-rebuild-notice.yml` が「入�
 `ios-testflight-trigger.yml`（`workflow_run`＝develop 版YAMLで動くので薄い起動役だけ）が本体を
 **`workflow_dispatch`（main 版）で起動**する。判定・配布・失敗時の再実行・初期設定は `ios/README.md`
 「TestFlight への自動配布」が正。要点だけ: 判定は `ios/scripts/ios-changes.mjs`（配布物は
-`ios/Kurashio/`・`ios/KurashioWidget/`・`ios/Kurashio.xcodeproj/` のみ。README・`ios/scripts/`・版番号の行は除く）で、
+`ios/Kurashio/`・`ios/KurashioWidget/`・`ios/KurashioWatch/`・`ios/KurashioWatchWidget/`・`ios/Kurashio.xcodeproj/` のみ。README・`ios/scripts/`・版番号の行は除く）で、
 `ios-rebuild-notice.yml` も同じ関数を呼ぶ（**判定を2か所に書かない**）。**印（タグ `ios-testflight/<番号>`）は
 内部グループへの配布が済んだあとにだけ付ける。** 途中で失敗しても印が進まないので変更を取りこぼさない。
 IPA は公開リポジトリの artifact に載せない（署名・アップロードは同じジョブ）。TestFlight 版は
