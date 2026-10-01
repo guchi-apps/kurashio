@@ -37,6 +37,15 @@ conntrack の ESTABLISHED に一致しない。サブPCのように ufw が `den
 同じサブネットを1台ずつ当たり直す（`--scan` で範囲を指定できる）。収集本体は最初から
 ユニキャストなので、この状態でも読み取りには影響しない。
 
+プラグの追加は自動で反映する（#660）
+------------------------------------
+**`TAPO_HOSTS` は任意。** 収集のたびに LAN 上の Tapo 機器を探し（結果は
+`collectors/.tapo-hosts.json` に `HOSTS_CACHE_TTL_SECONDS` だけ覚える）、計測できる機器を
+自動で読む。Tapo アプリで足したプラグは、次の定期実行から消費電力に出る。
+`TAPO_HOSTS` に書いた行は「名前の固定」と「探索で見つからない機器の指定」に使い、
+同じ IP は書いた側を優先する。今すぐ反映したいときは `--rediscover`
+（キャッシュを捨てて探し直す）。キャッシュ内の機器に繋がらなかったときも探し直す。
+
 過去ぶんはプラグ本体から取る
 --------------------------
 **P110 系は日別の使用量をプラグ自身が覚えている。** `get_energy_data`（`interval=1440`）で
@@ -50,6 +59,7 @@ conntrack の ESTABLISHED に一致しない。サブPCのように ufw が `den
 使い方:
   collectors/.venv-tapo/bin/python collectors/tapo_to_myroom.py
   collectors/.venv-tapo/bin/python collectors/tapo_to_myroom.py --days 31
+  collectors/.venv-tapo/bin/python collectors/tapo_to_myroom.py --rediscover
   collectors/.venv-tapo/bin/python collectors/tapo_to_myroom.py --list-devices
   collectors/.venv-tapo/bin/python collectors/tapo_to_myroom.py --list-devices --scan 192.168.2.0/24
   collectors/.venv-tapo/bin/python collectors/tapo_to_myroom.py --dry-run -v
@@ -65,6 +75,8 @@ import json
 import logging
 import os
 import socket
+import tempfile
+import time
 import urllib.error
 import urllib.request
 import os.path
@@ -113,6 +125,13 @@ MAX_DAYS = 92
 
 #: `get_energy_data` の `interval`（分）。1440 = 1日ごと。
 DAILY_INTERVAL_MINUTES = 1440
+
+
+#: 探索結果（IP と名前）を覚えておく秒数。5分ごとの実行で毎回 /24 を走査しないため。
+HOSTS_CACHE_TTL_SECONDS = 3600
+
+#: 探索結果の置き場。`collectors/.env` と同じ場所（.gitignore 済み）
+HOSTS_CACHE_FILENAME = ".tapo-hosts.json"
 
 
 class ConfigError(Exception):
@@ -191,21 +210,19 @@ def parse_hosts(raw: str) -> List[Tuple[str, Optional[str]]]:
 def load_config(require_hosts: bool = True) -> Dict[str, Any]:
     """設定を環境変数から組み立てる。
 
-    **`--list-devices` のときは `TAPO_HOSTS` を必須にしない。** あれは「まだ IP が
-    分からない」初回設定のための機能で、そこで `TAPO_HOSTS` を要求すると、
-    一番必要な場面で探索まで到達できない。
+    **`TAPO_HOSTS` は任意**（#660）。無ければ探索だけで機器を決める。書いてあるのに
+    壊れているときは、収集では設定ミスとして落とし、`--list-devices`（`require_hosts=False`）
+    では警告だけで探索を続ける（IP を調べる機能なので、そこで止めない）。
     """
     raw_hosts = os.getenv("TAPO_HOSTS", "").strip()
-    if require_hosts:
-        hosts = parse_hosts(_require_env("TAPO_HOSTS"))
-    elif raw_hosts:
+    hosts: List[Tuple[str, Optional[str]]] = []
+    if raw_hosts:
         try:
             hosts = parse_hosts(raw_hosts)
         except ConfigError as exc:
+            if require_hosts:
+                raise
             LOGGER.warning("TAPO_HOSTS を読めませんでした（探索には影響しません）: %s", exc)
-            hosts = []
-    else:
-        hosts = []
 
     return {
         "username": _require_env("TAPO_USERNAME"),
@@ -213,6 +230,59 @@ def load_config(require_hosts: bool = True) -> Dict[str, Any]:
         "hosts": hosts,
         "api_url": os.getenv("MYROOM_ENERGY_API_URL", DEFAULT_API_URL).strip(),
     }
+
+
+def merge_hosts(
+    manual: Sequence[Tuple[str, Optional[str]]],
+    discovered: Sequence[Tuple[str, Optional[str]]],
+) -> List[Tuple[str, Optional[str]]]:
+    """`TAPO_HOSTS`（手書き）と探索結果を1つの並びへ。同じ IP は手書きを優先する。"""
+    merged: List[Tuple[str, Optional[str]]] = list(manual)
+    seen = {host for host, _ in merged}
+    for host, name in discovered:
+        if host in seen:
+            continue
+        seen.add(host)
+        merged.append((host, name))
+    return merged
+
+
+def load_hosts_cache(
+    path: str, now: float, ttl: int = HOSTS_CACHE_TTL_SECONDS
+) -> Tuple[List[Tuple[str, Optional[str]]], bool]:
+    """探索結果のキャッシュを読む。戻り値は (機器の並び, まだ新しいか)。
+
+    壊れている・無いときは `([], False)`。期限切れでも中身は返す（探索が0台だったとき、
+    前回の機器を捨てないため）。
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        saved_at = float(data["saved_at"])
+        hosts = [
+            (str(item["host"]), item.get("name") or None) for item in data["hosts"]
+        ]
+    except (OSError, ValueError, KeyError, TypeError):
+        return [], False
+    return hosts, 0 <= now - saved_at < ttl
+
+
+def save_hosts_cache(
+    path: str, hosts: Sequence[Tuple[str, Optional[str]]], now: float
+) -> None:
+    """一時ファイル＋置き換えで書く（途中で落ちても壊れたJSONを残さない）。"""
+    payload = {
+        "saved_at": now,
+        "hosts": [{"host": host, "name": name} for host, name in hosts],
+    }
+    directory = os.path.dirname(path) or "."
+    try:
+        fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".tapo-hosts-")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+        os.replace(tmp_path, path)
+    except OSError as exc:  # キャッシュが書けなくても収集は続ける
+        LOGGER.warning("探索結果を保存できませんでした: %s", exc)
 
 
 # ---------------------------------------------------------------- 機器の読み取り
@@ -486,7 +556,10 @@ async def read_device(
 
 
 async def collect(
-    config: Dict[str, Any], today: datetime.date, start: datetime.date
+    config: Dict[str, Any],
+    hosts: Sequence[Tuple[str, Optional[str]]],
+    today: datetime.date,
+    start: datetime.date,
 ) -> List[Dict[str, Any]]:
     credentials = Credentials(config["username"], config["password"])
     for device in (await wake_up_devices(credentials)).values():
@@ -495,7 +568,7 @@ async def collect(
     results = await asyncio.gather(
         *(
             read_device(host, name, credentials, today, start)
-            for host, name in config["hosts"]
+            for host, name in hosts
         )
     )
     return [item for item in results if item is not None]
@@ -566,24 +639,85 @@ NOT_FOUND_HINT = """LAN 上に Tapo 機器が見つかりませんでした。�
      （例: --scan 192.168.2.0/23）"""
 
 
+async def find_devices(
+    credentials: Credentials, scan: Optional[str]
+) -> Dict[str, Any]:
+    """LAN 上の Tapo 機器を探す。ブロードキャストが空ならユニキャスト走査へ落とす。
+
+    ブロードキャストの応答はファイアウォールに落とされることがある（#199）。
+    `--scan` の指定が不正なら `ConfigError`。
+    """
+    found = await wake_up_devices(credentials)
+    if found:
+        return found
+
+    LOGGER.info(
+        "ブロードキャストでは見つかりませんでした。"
+        "ユニキャストで探し直します（応答がファイアウォールに落とされている可能性）。"
+    )
+    network = parse_scan_target(scan) if scan else local_subnet()
+    if network is None:
+        return {}
+    return await scan_subnet(network, credentials)
+
+
+async def discover_hosts(
+    credentials: Credentials, scan: Optional[str] = None
+) -> List[Tuple[str, Optional[str]]]:
+    """探索して、エネルギー計測できる機器を (IP, alias) で返す（#660）。"""
+    found = await find_devices(credentials, scan)
+    hosts: List[Tuple[str, Optional[str]]] = []
+    for host, device in found.items():
+        try:
+            await asyncio.wait_for(device.update(), timeout=CONNECT_TIMEOUT)
+            energy = _read_energy(device)
+            if energy["kwh_today"] is None and energy["power_w"] is None:
+                LOGGER.info("%s は計測に対応していないので対象外にします", host)
+                continue
+            hosts.append((host, getattr(device, "alias", None) or None))
+        except Exception as exc:  # noqa: BLE001 - 1台の不調で探索全体を止めない
+            LOGGER.warning("%s を確認できませんでした: %s", host, exc)
+        finally:
+            await close_device(device)
+    return hosts
+
+
+async def resolve_hosts(
+    config: Dict[str, Any],
+    cache_path: str,
+    rediscover: bool,
+    now: Optional[float] = None,
+) -> Tuple[List[Tuple[str, Optional[str]]], bool]:
+    """読む機器を決める。戻り値は (機器の並び, 今回探索したか)。"""
+    now = time.time() if now is None else now
+    cached, fresh = load_hosts_cache(cache_path, now)
+    discovered = False
+    if rediscover or not fresh:
+        credentials = Credentials(config["username"], config["password"])
+        try:
+            found = await discover_hosts(credentials)
+        except ConfigError as exc:
+            LOGGER.warning("探索できませんでした: %s", exc)
+            found = []
+        discovered = True
+        if found:
+            cached = found
+            save_hosts_cache(cache_path, cached, now)
+        else:
+            LOGGER.warning("探索で機器が見つかりませんでした（前回の結果があればそれを使います）")
+            if not cached:
+                # 0台のまま毎回（5分ごと）走査し直さないよう、空でも探索した時刻を残す
+                save_hosts_cache(cache_path, [], now)
+    return merge_hosts(config["hosts"], cached), discovered
+
+
 async def run_list_devices(config: Dict[str, Any], scan: Optional[str]) -> int:
     credentials = Credentials(config["username"], config["password"])
-    found = await wake_up_devices(credentials)
-
-    if not found:
-        # ブロードキャストの応答はファイアウォールに落とされることがある（#199）。
-        # ユニキャストなら通るので、同じサブネットを1台ずつ当たり直す。
-        LOGGER.info(
-            "ブロードキャストでは見つかりませんでした。"
-            "ユニキャストで探し直します（応答がファイアウォールに落とされている可能性）。"
-        )
-        try:
-            network = parse_scan_target(scan) if scan else local_subnet()
-        except ConfigError as exc:
-            LOGGER.error("%s", exc)
-            return 2
-        if network is not None:
-            found = await scan_subnet(network, credentials)
+    try:
+        found = await find_devices(credentials, scan)
+    except ConfigError as exc:
+        LOGGER.error("%s", exc)
+        return 2
 
     if not found:
         print(NOT_FOUND_HINT)
@@ -607,11 +741,28 @@ async def run_list_devices(config: Dict[str, Any], scan: Optional[str]) -> int:
     return 0
 
 
-async def run_collect(config: Dict[str, Any], dry_run: bool, days: int) -> int:
+async def run_collect(
+    config: Dict[str, Any], dry_run: bool, days: int, rediscover: bool = False
+) -> int:
     today = datetime.datetime.now(JST).date()
     start = window_start(today, days)
+    cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), HOSTS_CACHE_FILENAME)
 
-    readings = await collect(config, today, start)
+    hosts, discovered = await resolve_hosts(config, cache_path, rediscover)
+    if not hosts:
+        LOGGER.error("読み取る機器がありません（探索でも TAPO_HOSTS でも見つかりませんでした）")
+        return 1
+
+    readings = await collect(config, hosts, today, start)
+    read_hosts = {item["host"] for item in readings}
+    manual_hosts = {host for host, _ in config["hosts"]}
+    stale = [h for h, _ in hosts if h not in read_hosts and h not in manual_hosts]
+    if stale and not discovered:
+        # 探索で得た IP に繋がらない（DHCP で変わった・撤去した）可能性。探し直して1回だけやり直す。
+        # 手書きの機器が落ちているだけでは探し直さない（5分ごとに走査してしまうため）
+        LOGGER.info("読めない機器があったので探し直します")
+        hosts, _ = await resolve_hosts(config, cache_path, True)
+        readings = await collect(config, hosts, today, start)
     if not readings:
         LOGGER.error("どのプラグからも読み取れませんでした")
         return 1
@@ -647,7 +798,7 @@ async def run_collect(config: Dict[str, Any], dry_run: bool, days: int) -> int:
 
     LOGGER.info("送信しました: %s", result)
     # 全台読めたときだけ 0。1台でも落ちていれば 1 にして systemd のログに残す
-    return 0 if len(readings) == len(config["hosts"]) else 1
+    return 0 if len(readings) == len(hosts) else 1
 
 
 def main() -> int:
@@ -676,6 +827,11 @@ def main() -> int:
             f"当日を含めて何日ぶん送り直すか（既定 {DEFAULT_DAYS}・最大 {MAX_DAYS}）。"
             "過去1か月ぶんの取り込みは --days 31 を1度だけ流す"
         ),
+    )
+    parser.add_argument(
+        "--rediscover",
+        action="store_true",
+        help="保存済みの探索結果を捨てて、LAN の Tapo 機器を今すぐ探し直す（プラグを足したとき）",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="読み取るだけで POST しない"
@@ -722,7 +878,7 @@ def main() -> int:
 
     if args.list_devices:
         return asyncio.run(run_list_devices(config, args.scan))
-    return asyncio.run(run_collect(config, args.dry_run, args.days))
+    return asyncio.run(run_collect(config, args.dry_run, args.days, args.rediscover))
 
 
 if __name__ == "__main__":
