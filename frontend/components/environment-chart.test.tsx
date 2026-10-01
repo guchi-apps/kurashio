@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { EnvironmentChart } from "@/components/environment-chart";
-import { buildDefaultChartLineVisibility } from "@/lib/chart-line-visibility";
+import {
+  buildDefaultChartLineVisibility,
+  outdoorMetricVisibilityKey,
+  deviceMetricVisibilityKey,
+} from "@/lib/chart-line-visibility";
 import {
   normalizeDisplayOrder,
   outdoorOrderKey,
@@ -54,17 +58,25 @@ function legendNames(html: string): string[] {
   return [...html.matchAll(/aria-label="([^"]*)の表示切替"/g)].map((match) => match[1]);
 }
 
-function render(hiddenKeys: Set<string> = new Set()) {
+function render(
+  hiddenKeys: Set<string> = new Set(),
+  lineOverrides: Record<string, boolean> = {}
+) {
   const legendOrder = filterDisplayOrderByVisibility(
     normalizeDisplayOrder(null, SENSOR_DEVICE_IDS, TWO_LOCATIONS),
     hiddenKeys
   );
-  const lineVisibility = applyHiddenDevicesToLineVisibility(
-    buildDefaultChartLineVisibility(SENSOR_DEVICE_IDS),
-    hiddenKeys,
-    SENSOR_DEVICE_IDS,
-    outdoorOrderKey(TWO_LOCATIONS.primaryId)
-  );
+  // 屋外の線は既定で非表示のため、凡例の並びを見るテストでは表示に上書きする（#638）
+  const lineVisibility = {
+    ...applyHiddenDevicesToLineVisibility(
+      buildDefaultChartLineVisibility(SENSOR_DEVICE_IDS),
+      hiddenKeys,
+      SENSOR_DEVICE_IDS,
+      outdoorOrderKey(TWO_LOCATIONS.primaryId)
+    ),
+    [outdoorMetricVisibilityKey("temperature")]: true,
+    ...lineOverrides,
+  };
 
   return renderToStaticMarkup(
     <EnvironmentChart
@@ -106,6 +118,30 @@ describe("EnvironmentChart の凡例", () => {
     const names = legendNames(render(new Set([AIRCON_ROOM_HIDDEN_KEY])));
     expect(names).not.toContain("エアコン");
     expect(names).toContain("エアコン（設定温度）");
+  });
+
+  it("非表示にした行は初期状態の凡例に出さず、件数つきのリンクだけを出す（#638）", () => {
+    const html = render(new Set(), {
+      [deviceMetricVisibilityKey(2, "temperature")]: false,
+    });
+    expect(legendNames(html)).not.toContain("寝室");
+    expect(html).toContain("非表示の項目を表示（1）");
+  });
+
+  it("全行を非表示にしてもリンクは残り、戻せる（#638）", () => {
+    const html = render(new Set(), {
+      [deviceMetricVisibilityKey(1, "temperature")]: false,
+      [deviceMetricVisibilityKey(2, "temperature")]: false,
+      [deviceMetricVisibilityKey(AIRCON_CHART_DEVICE_ID, "temperature")]: false,
+      [outdoorMetricVisibilityKey("temperature")]: false,
+      airconTarget: false,
+    });
+    expect(legendNames(html)).toHaveLength(0);
+    expect(html).toContain("非表示の項目を表示（");
+  });
+
+  it("非表示の行が無ければリンクを出さない（#638）", () => {
+    expect(render()).not.toContain("非表示の項目を表示");
   });
 });
 
