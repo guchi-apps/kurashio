@@ -293,6 +293,21 @@ extension WebViewModel: WKScriptMessageHandler {
             reloadWidgetTimelines()
             // Watchに残る別アカウントの値も消す（#655）
             WatchSync.shared.clear()
+        case "deviceTokenReady":
+            // Webが「端末用トークン（#683）を持っているか」を聞いてくる。無ければWebが発行して渡す
+            notifyDeviceTokenState()
+        case "deviceToken":
+            // ウィジェット・Apple Watch が、アプリを閉じている間も `GET /api/device/sensors` を読むためのトークン。
+            // 読み取り専用で、JWTではない（`DeviceSensors.saveToken` は `kdt_` 以外を保存しない）
+            guard let token = body["token"] as? String, DeviceSensors.isValid(token: token) else { return }
+            DeviceSensors.saveToken(token)
+            WatchSync.shared.setToken(token)
+            reloadWidgetTimelines()
+        case "deviceTokenCleared":
+            // ログアウト。端末・Watchの保存を消す（ウィジェットは次の再評価で保存済みの値も消える）
+            DeviceSensors.clearToken()
+            WatchSync.shared.setToken(nil)
+            reloadWidgetTimelines()
         case "widgetReady":
             deliverPendingWidgetPress()
         case "widgetPressResult":
@@ -306,6 +321,21 @@ extension WebViewModel: WKScriptMessageHandler {
         default:
             break
         }
+    }
+}
+
+// MARK: - 端末用トークン（#683）
+
+extension WebViewModel {
+    /// Webへ、トークンの有無を返す（`myroom-native-device-token-state`）。持っていなければWebが発行して渡す。
+    /// 端末（ウィジェット・Watch）が401を受けて捨てたときも、次にWebが聞いた時点で発行し直しになる
+    fileprivate func notifyDeviceTokenState() {
+        let hasToken = DeviceSensors.loadToken() != nil
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('myroom-native-device-token-state', { detail: { hasToken: \(hasToken) } }))"
+        )
+        // iPhoneが持っているトークンを、まだ受け取っていないWatchへも渡す（Watchアプリを後から入れた場合など）
+        WatchSync.shared.setToken(DeviceSensors.loadToken())
     }
 }
 
