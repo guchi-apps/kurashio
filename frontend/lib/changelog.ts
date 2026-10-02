@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.35.0",
+    date: "2026-10-03",
+    changes: [
+      "iPhoneのロック画面に、kurashioの室温と湿度を表示するウィジェットを置けるようになりました。円形・長方形・時計の上（インライン）の3種類から選べます。",
+    ],
+  },
+  {
     version: "4.34.0",
     date: "2026-10-02",
     changes: [

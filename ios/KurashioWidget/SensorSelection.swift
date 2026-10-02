@@ -9,7 +9,7 @@ import WidgetKit
 /// 選ばない（既定）ときは、Web側が決めたセンサー（並び順で最初の受信中のもの）を出す。
 struct SelectSensorIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource { "表示するセンサー" }
-    static var description: IntentDescription { "室温・湿度・CO2を表示するセンサーを選びます。2つ目のセンサーはSmall・Mediumで、3つ目・4つ目はMediumだけで使え、選ぶと最大4台を並べて表示します（Largeでは無視されます）。" }
+    static var description: IntentDescription { "室温・湿度・CO2を表示するセンサーを選びます。2つ目のセンサーはSmall・Mediumで、3つ目・4つ目はMediumだけで使え、選ぶと最大4台を並べて表示します（Largeでは無視されます）。ロック画面では1つ目のセンサーだけを使います。" }
 
     /// nil は「自動」（ダッシュボードの並び順で最初の受信中のセンサー）
     @Parameter(title: "センサー")
