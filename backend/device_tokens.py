@@ -54,7 +54,6 @@ def _normalize(raw: Any) -> List[Dict[str, Any]]:
                     "hash": item["hash"],
                     "label": str(item.get("label") or "")[:40],
                     "created_at": str(item.get("created_at") or ""),
-                    "last_used_at": item.get("last_used_at"),
                 }
             )
     return result[-MAX_TOKENS:]
@@ -123,18 +122,27 @@ def _update(
             raise
 
 
-def issue_token(label: str, db: Optional[Session] = None) -> Dict[str, str]:
-    """新しいトークンを発行する。平文が取れるのはこの戻り値だけ。"""
+def issue_token(label: str, db: Optional[Session] = None) -> Dict[str, Any]:
+    """新しいトークンを発行する。平文が取れるのはこの戻り値だけ。
+
+    `MAX_TOKENS` を超えると古いトークンが失効する。失効したIDは `revoked_ids` で返す。
+    """
     token = TOKEN_PREFIX + secrets.token_urlsafe(32)
     entry = {
         "id": secrets.token_hex(4),
         "hash": _hash(token),
         "label": label.strip()[:40],
         "created_at": datetime.datetime.now(JST).isoformat(timespec="seconds"),
-        "last_used_at": None,
     }
-    _update(db, lambda tokens: tokens.append(entry))
-    return {"id": entry["id"], "token": token}
+    evicted: List[str] = []
+
+    def mutate(tokens: List[Dict[str, Any]]) -> None:
+        tokens.append(entry)
+        # 上限を超えた分は `_normalize` が古い順に捨てる。捨てられるIDをここで控える
+        evicted.extend(item["id"] for item in tokens[:-MAX_TOKENS])
+
+    _update(db, mutate)
+    return {"id": entry["id"], "token": token, "revoked_ids": evicted}
 
 
 def revoke_token(token_id: str, db: Optional[Session] = None) -> bool:
@@ -153,13 +161,13 @@ def revoke_token(token_id: str, db: Optional[Session] = None) -> bool:
 def list_tokens(db: Optional[Session] = None) -> List[Dict[str, Any]]:
     """一覧（ハッシュは返さない）。"""
     return [
-        {k: item[k] for k in ("id", "label", "created_at", "last_used_at")}
+        {k: item[k] for k in ("id", "label", "created_at")}
         for item in _read(db)
     ]
 
 
 def verify_token(token: Optional[str], db: Optional[Session] = None) -> bool:
-    """トークンが有効か。定数時間で比べる。使用時刻は書かない（読み取りのたびに書き込まない）。"""
+    """トークンが有効か。定数時間で比べる。使用時刻は持たない（読み取りのたびに書き込まない）。"""
     if not token or not token.startswith(TOKEN_PREFIX):
         return False
     digest = _hash(token)

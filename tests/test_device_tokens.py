@@ -66,3 +66,17 @@ def test_co2_thresholds_match_frontend():
     assert [_co2_level(v) for v in (None, 999, 1000, 1499, 1500)] == [
         None, "good", "elevated", "elevated", "high"
     ]
+
+
+def test_issue_reports_evicted_tokens_and_list_has_no_last_used(authed_client):
+    from backend.device_tokens import MAX_TOKENS
+
+    first = _issue(authed_client)
+    assert first["revoked_ids"] == []
+    for _ in range(MAX_TOKENS - 1):
+        assert _issue(authed_client)["revoked_ids"] == []
+    overflow = _issue(authed_client)
+    assert overflow["revoked_ids"] == [first["id"]]
+    listing = authed_client.get("/api/device-tokens").json()["tokens"]
+    assert len(listing) == MAX_TOKENS
+    assert all("last_used_at" not in t for t in listing)
