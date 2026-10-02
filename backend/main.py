@@ -1,4 +1,4 @@
-from fastapi import BackgroundTasks, FastAPI, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, Header, FastAPI, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import asyncio
@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import datetime
 import random
 from dotenv import load_dotenv
-from . import database, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, ui_settings
+from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, ui_settings
 from .auth import get_current_user
 from .internal_auth import require_internal_control_token, require_internal_token
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -914,6 +914,81 @@ def get_sensors_status(
         "threshold_minutes": sensor_monitor.stale_threshold_minutes(),
         "healthy": len(stale_devices) == 0,
         "devices": statuses,
+    }
+
+
+#: CO2の段階のしきい値（ppm）。**フロントの `lib/device-metrics.ts` の `CO2_ELEVATED_PPM` /
+#: `CO2_HIGH_PPM` と同じ値**で、`tests/test_device_tokens.py` がソースを読んで食い違いを落とす（#681）
+CO2_ELEVATED_PPM = 1000
+CO2_HIGH_PPM = 1500
+
+
+def _co2_level(ppm: Optional[float]) -> Optional[str]:
+    if ppm is None:
+        return None
+    return "high" if ppm >= CO2_HIGH_PPM else "elevated" if ppm >= CO2_ELEVATED_PPM else "good"
+
+
+class DeviceTokenCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str = ""
+
+
+def require_device_token(authorization: Optional[str] = Header(default=None)) -> None:
+    """端末用の読み取りトークン（`device_tokens`）。ユーザーJWT・内部APIキーでは通らない。"""
+    scheme, _, value = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not device_tokens.verify_token(value.strip()):
+        raise HTTPException(status_code=401, detail="Invalid device token")
+
+
+@app.post("/api/device-tokens")
+def create_device_token(
+    body: DeviceTokenCreate,
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    """端末用トークンを発行する（ユーザーJWT）。平文はこの応答でしか返らない。"""
+    return device_tokens.issue_token(body.label, db)
+
+
+@app.delete("/api/device-tokens/{token_id}")
+def revoke_device_token(
+    token_id: str,
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    if not device_tokens.revoke_token(token_id, db):
+        raise HTTPException(status_code=404, detail="Token not found")
+    return {"status": "ok"}
+
+
+@app.get("/api/device-tokens")
+def list_device_tokens(
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    return {"tokens": device_tokens.list_tokens(db)}
+
+
+@app.get("/api/device/sensors")
+def get_device_sensors(
+    db: Session = Depends(database.get_db),
+    _: None = Depends(require_device_token),
+):
+    """Apple Watch・iPhoneウィジェットが、アプリを閉じている間も値を読む読み取り専用の口。
+
+    端末用トークン（`device_tokens`）だけで通る。**書き込み・設定の口はここに足さないこと。**
+    CO2の段階（`co2Level`）はここで判定して返し、Swiftにしきい値を持たせない。
+    """
+    now = datetime.datetime.now(JST)
+    sensors = [
+        {**sensor, "co2Level": _co2_level(sensor.get("co2"))}
+        for sensor in _build_room_state_sensors(db)
+    ]
+    return {
+        "fetchedAt": now.isoformat(),
+        "staleThresholdMinutes": sensor_monitor.stale_threshold_minutes(),
+        "sensors": sensors,
     }
 
 
