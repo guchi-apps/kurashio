@@ -989,9 +989,9 @@ ALTER 権限がない場合は、スクリプトが表示する SQL を管理者
 | `vapid-private-key` | PWAプッシュ通知（Web Push）用のVAPID秘密鍵（`VAPID_PRIVATE_KEY` として同期）。**PEM ではなく URL-safe base64 の 1 行（43 文字）** |
 | `vapid-public-key` | PWAプッシュ通知用のVAPID公開鍵（`VAPID_PUBLIC_KEY` として同期。URL-safe base64 の 1 行・87 文字） |
 | `vapid-subject` | PWAプッシュ通知用のVAPID subject（`VAPID_SUBJECT` として同期。例: `mailto:you@example.com`） |
-| `apns-auth-key` | iOSアプリ（`ios/`）向けAPNs通知（#527）用のAuth Key（`.p8`）。**PEMをそのまま入れず、ファイルの中身を1行のbase64にしてから**入れる（`base64 -i AuthKey_XXXX.p8 \| tr -d '\n'`）。`APNS_AUTH_KEY` として同期 |
-| `apns-key-id` | 上記Auth KeyのKey ID（Apple Developer Portal → Certificates, Identifiers & Profiles → Keys）。`APNS_KEY_ID` として同期 |
-| `apns-team-id` | Apple Developer ProgramのTeam ID。`ios/README.md` の署名チーム（`6AA3WFTR94`・`DEVELOPMENT_TEAM`）と同じ値。`APNS_TEAM_ID` として同期 |
+| `apns-auth-key`（item は `apps/AppStoreConnect`） | iOSアプリ（`ios/`）向けAPNs通知（#527）用のAuth Key（`.p8`）。**PEMをそのまま入れず、ファイルの中身を1行のbase64にしてから**入れる（`base64 -i AuthKey_XXXX.p8 \| tr -d '\n'`）。`APNS_AUTH_KEY` として同期 |
+| `apns-key-id`（item は `apps/AppStoreConnect`） | 上記Auth KeyのKey ID（Apple Developer Portal → Certificates, Identifiers & Profiles → Keys）。`APNS_KEY_ID` として同期 |
+| `apns-team-id`（item は `apps/AppStoreConnect`） | Apple Developer ProgramのTeam ID。`ios/README.md` の署名チーム（`6AA3WFTR94`・`DEVELOPMENT_TEAM`）と同じ値。`APNS_TEAM_ID` として同期 |
 | `apns-bundle-id` | iOSアプリのBundle ID（`com.gucchii.kurashio`）。`APNS_BUNDLE_ID` として同期 |
 | `apns-environment` | `sandbox` または `production`。`APNS_ENVIRONMENT` として同期。**環境が未判定のトークンを最初に試す側**で、端末ごとの送信先はバックエンドが `BadDeviceToken` で自動判定して記録する（#593。開発ビルド=sandbox・TestFlight版=production の両方へ届く）。通常は`sandbox`のままでよい（プッシュ通知には有料のApple Developer Programでの署名が必要。無料の個人チームでは署名できない・`ios/README.md`参照） |
 
@@ -1025,7 +1025,7 @@ cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/myroom --k
 
 1. Apple Developer Portal → Certificates, Identifiers & Profiles → Keys で、Apple Push Notifications service (APNs) にチェックを入れたKeyを作成し、`.p8` ファイルをダウンロードする（**ダウンロードは1回きり**）。合わせてKey IDを控える
 2. `base64 -i AuthKey_XXXXXXXXXX.p8 | tr -d '\n' > ~/.cache/myroom-apns/apns-auth-key && chmod 600 ~/.cache/myroom-apns/apns-auth-key`
-3. `provision-secret.sh`（上記VAPIDと同じ手順・`--from-stdin`＋ファイルからのリダイレクト）で `APNS_AUTH_KEY` / `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` / `APNS_ENVIRONMENT`（既定 `sandbox`）を登録する
+3. 1Password の `apps/AppStoreConnect`（ASCキーと同じアプリ共通のアイテム・#669）に `apns-auth-key` / `apns-key-id` / `apns-team-id` を登録する。`APNS_BUNDLE_ID` / `APNS_ENVIRONMENT`（既定 `sandbox`）はこのアプリ固有なので `MyRoom` に置く。`provision-secret.sh`（上記VAPIDと同じ手順・`--from-stdin`＋ファイルからのリダイレクト）は `MyRoom` 側の項目用で、`AppStoreConnect` 側の項目は1Passwordで直接登録し、`scripts/sync-github-secrets.sh`（または `sync-secrets.yml`）で GitHub へ同期する
 
 **アイテム `Notify`**（セキュアノート等・organization 共通。このリポジトリからは同期しない）
 

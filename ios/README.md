@@ -291,8 +291,8 @@ Web版のプッシュ通知の設定とは独立**で、同じiPhoneでPWA（Saf
    （1回きり）。Key IDを控える
 3. Xcode → Signing & Capabilities で Push Notifications が表示されていることを確かめる
    （`Kurashio.entitlements` に `aps-environment` を含めてあるので、capability を足し直す必要はない）
-4. サーバー側の値（`APNS_AUTH_KEY`・`APNS_KEY_ID`・`APNS_TEAM_ID`・`APNS_BUNDLE_ID`・
-   `APNS_ENVIRONMENT`）の登録手順はリポジトリルートの`README.md`「本番環境へのデプロイ」を参照
+4. サーバー側の値（`APNS_AUTH_KEY`・`APNS_KEY_ID`・`APNS_TEAM_ID`は`apps/AppStoreConnect`、
+   `APNS_BUNDLE_ID`・`APNS_ENVIRONMENT`は`apps/MyRoom`。#669）の登録手順はリポジトリルートの`README.md`「本番環境へのデプロイ」を参照
 
 #### 署名は Apple Developer Program が前提（#560）
 
