@@ -28,7 +28,7 @@ struct WatchTimelineProvider: AppIntentTimelineProvider {
         WatchEntry(
             date: Date(),
             sensor: WatchSnapshot.Sensor(
-                id: 0, name: "リビング", temperature: 24.6, humidity: 52, co2: 720, co2Level: "good", stale: false
+                id: 0, name: "リビング", temperature: 24.6, humidity: 52, co2: 720, co2Level: "good", stale: false, measuredAt: "2026-10-02T12:34:00"
             ),
             metric: .temperature
         )
@@ -101,7 +101,7 @@ struct WatchComplicationView: View {
     private var rectangular: some View {
         VStack(alignment: .leading, spacing: 1) {
             if let sensor = entry.sensor {
-                Text(sensor.stale ? "\(sensor.name)・受信停止" : sensor.name)
+                Text(rectangularTitle(sensor))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -121,6 +121,13 @@ struct WatchComplicationView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 1行目。名前に値の時刻を同居させて、行数は増やさない（#677）。受信停止のときは受信停止を優先する
+    private func rectangularTitle(_ sensor: WatchSnapshot.Sensor) -> String {
+        if sensor.stale { return "\(sensor.name)・受信停止" }
+        if let clock = sensor.measuredClock { return "\(sensor.name) \(clock)" }
+        return sensor.name
     }
 
     private var inline: some View {

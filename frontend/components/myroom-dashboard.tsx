@@ -392,6 +392,7 @@ export function MyRoomDashboard() {
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
   const [sensorStatuses, setSensorStatuses] = useState<SensorDeviceStatus[]>([]);
+  const [staleThresholdMinutes, setStaleThresholdMinutes] = useState<number | null>(null);
   const [garbageSchedule, setGarbageSchedule] = useState<GarbageSchedule | null>(null);
   const [garbageError, setGarbageError] = useState(false);
   const [cleaningSchedule, setCleaningSchedule] = useState<CleaningSchedule | null>(null);
@@ -844,6 +845,7 @@ export function MyRoomDashboard() {
         setAirconLoadStatus(data.airconLoadStatus);
         if (sensorsStatus) {
           setSensorStatuses(sensorsStatus.devices);
+          setStaleThresholdMinutes(sensorsStatus.threshold_minutes);
           setStaleAlertDismissed(false);
         }
         // 取得できなかったときは直前の内容を残したまま、エラー表示だけを出す
@@ -1142,6 +1144,7 @@ export function MyRoomDashboard() {
       roomHumidity: defaultWidgetSensor?.humidity ?? null,
       defaultSensorId: defaultWidgetSensor?.id ?? null,
       sensors: widgetSensors,
+      staleAfterMinutes: staleThresholdMinutes,
       garbageLabel,
       garbageDaysUntil,
       garbageUpcoming,
@@ -1157,6 +1160,7 @@ export function MyRoomDashboard() {
     [
       defaultWidgetSensor,
       widgetSensors,
+      staleThresholdMinutes,
       garbageLabel,
       garbageDaysUntil,
       garbageUpcoming,
