@@ -44,3 +44,5 @@ ios/**/*.xcuserstate
 ios/DerivedData/
 ios/build/
 .DS_Store
+data/device_tokens.json
+data/device_tokens.json.lock
