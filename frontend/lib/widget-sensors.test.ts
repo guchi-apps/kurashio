@@ -31,14 +31,22 @@ describe("buildWidgetSensors", () => {
       [2]
     );
     expect(sensors).toEqual([
-      { id: 3, name: "リビング", temperature: 28.5, humidity: 64, co2: 1500, co2Level: "high", stale: false },
-      { id: 2, name: "寝室", temperature: 26.6, humidity: 61, co2: null, co2Level: null, stale: true },
+      { id: 3, name: "リビング", temperature: 28.5, humidity: 64, co2: 1500, co2Level: "high", stale: false, measuredAt: null },
+      { id: 2, name: "寝室", temperature: 26.6, humidity: 61, co2: null, co2Level: null, stale: true, measuredAt: null },
     ]);
+  });
+
+  it("値の時刻（datetime）をそのまま measuredAt に渡す（#677）", () => {
+    const [sensor] = build(
+      [{ type: "device", deviceId: 3 }],
+      { 3: { temperature: 25, datetime: "2026-10-02T12:34:56" } }
+    );
+    expect(sensor.measuredAt).toBe("2026-10-02T12:34:56");
   });
 
   it("値が届いていないセンサーも選択肢には残す（値は null）", () => {
     expect(build([{ type: "device", deviceId: 4 }], {})).toEqual([
-      { id: 4, name: "屋外", temperature: null, humidity: null, co2: null, co2Level: null, stale: false },
+      { id: 4, name: "屋外", temperature: null, humidity: null, co2: null, co2Level: null, stale: false, measuredAt: null },
     ]);
   });
 });

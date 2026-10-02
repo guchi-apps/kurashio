@@ -33,6 +33,32 @@ export function collectProblems(files) {
     );
   }
 
+  // 1c. 端末用トークンで自分でセンサーを取りにいく部品（DeviceSensors.swift）は4つのフォルダに同じ内容を置く（#683）。
+  //     取得先は AppConfig.baseURL と同じホストでなければ、トークンを別のサーバーへ送ってしまう
+  if (files.deviceSensors) {
+    const copies = Object.values(files.deviceSensors);
+    if (copies.some((c) => c !== copies[0])) {
+      problems.push(
+        "ios/Kurashio/・ios/KurashioWidget/・ios/KurashioWatch/・ios/KurashioWatchWidget/ の DeviceSensors.swift の内容が違います（4つを揃えること）"
+      );
+    }
+    const endpoint = copies[0]?.match(/endpoint\s*=\s*URL\(string:\s*"([^"]+)"\)/);
+    const base = files.appConfig.match(/baseURL\s*=\s*URL\(string:\s*"([^"]+)"\)/);
+    if (!endpoint || !base) {
+      problems.push("DeviceSensors.endpoint または AppConfig.baseURL が読み取れません（書き方を変えたならこのスクリプトも直す）");
+    } else if (new URL(endpoint[1]).origin !== new URL(base[1]).origin) {
+      problems.push(
+        `DeviceSensors.endpoint (${endpoint[1]}) が AppConfig.baseURL (${base[1]}) と別のサーバーです（端末用トークンを送る先が食い違う）`
+      );
+    }
+    // Web が送るブリッジのメッセージ名を Swift が受けているか
+    for (const type of ["deviceTokenReady", "deviceToken", "deviceTokenCleared"]) {
+      if (!files.nativeApp.includes(`"${type}"`) || !files.webViewModel?.includes(`"${type}"`)) {
+        problems.push(`ブリッジのメッセージ "${type}" が Web（native-app.ts）と Swift（WebViewModel.swift）の両方にありません`);
+      }
+    }
+  }
+
   // 2. MARKETING_VERSION は frontend/package.json の version と一致（#535）
   const { version } = JSON.parse(files.packageJson);
   const versions = [...files.pbxproj.matchAll(/MARKETING_VERSION = ([^;]+);/g)].map(
@@ -129,6 +155,13 @@ function main() {
     watchSnapshotApp: read("ios", "Kurashio", "WatchSnapshot.swift"),
     watchApp: read("ios", "KurashioWatch", "WatchSnapshot.swift"),
     watchWidget: read("ios", "KurashioWatchWidget", "WatchSnapshot.swift"),
+    deviceSensors: {
+      app: read("ios", "Kurashio", "DeviceSensors.swift"),
+      widget: read("ios", "KurashioWidget", "DeviceSensors.swift"),
+      watch: read("ios", "KurashioWatch", "DeviceSensors.swift"),
+      watchWidget: read("ios", "KurashioWatchWidget", "DeviceSensors.swift"),
+    },
+    webViewModel: read("ios", "Kurashio", "WebViewModel.swift"),
     packageJson: read("frontend", "package.json"),
     pbxproj: read("ios", "Kurashio.xcodeproj", "project.pbxproj"),
     nativeApp: read("frontend", "lib", "native-app.ts"),

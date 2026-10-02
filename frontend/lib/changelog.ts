@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.36.1",
+    date: "2026-10-03",
+    changes: [
+      "Apple Watchのセンサー画面に、値を測った時刻（「12:34 時点」）と「n分前」の経過時間が表示されるようになりました。開いたままでも経過時間が進み、受信が止まって古くなった値は黄色で分かります。センサー一覧にも各センサーの時刻が出ます。また、ウィジェットとApple Watchはアプリを開いていなくても、最新のセンサー値を自動で取得できるようになりました。",
+    ],
+  },
+  {
     version: "4.35.0",
     date: "2026-10-03",
     changes: [

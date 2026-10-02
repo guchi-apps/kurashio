@@ -209,6 +209,44 @@ enum SharedWidgetSnapshot {
         defaults?.removeObject(forKey: key)
     }
 
+    // MARK: - アプリを閉じている間の更新（#683）
+
+    /// 端末用トークンで取ったセンサーの値を、保存済みの一覧へ重ねる。**一覧にあるセンサーだけ**を更新し、
+    /// 増やさない（表示するセンサーの選択・並びはWebが正）。取れなかったセンサーは前の値のまま
+    static func merged(_ snapshot: Snapshot, with response: DeviceSensors.Response) -> Snapshot {
+        var result = snapshot
+        let fetched = Dictionary(response.sensors.map { ($0.deviceId, $0) }, uniquingKeysWith: { _, last in last })
+        result.sensors = snapshot.sensors?.map { sensor in
+            guard let latest = fetched[sensor.id] else { return sensor }
+            var updated = sensor
+            updated.name = latest.name
+            updated.temperature = latest.temperature
+            updated.humidity = latest.humidity
+            updated.co2 = latest.co2
+            updated.co2Level = latest.co2Level
+            updated.stale = latest.stale
+            return updated
+        }
+        // `sensors` を持たない古いスナップショットのための室温・湿度も、既定のセンサーに合わせる
+        if let id = snapshot.defaultSensorId, let latest = fetched[id] {
+            result.roomTemperature = latest.temperature
+            result.roomHumidity = latest.humidity
+        }
+        return result
+    }
+
+    /// ウィジェットのTimelineから呼ぶ。トークンがあり、直近に取っていなければ取り直して保存し、
+    /// 最新のスナップショットを返す。取れなかったとき・間隔内のときは保存済みの値をそのまま返す
+    static func refreshed() async -> Snapshot? {
+        guard let stored = load() else { return nil }
+        guard let response = await DeviceSensors.fetchIfDue() else { return stored }
+        let updated = merged(stored, with: response)
+        if let defaults, let data = try? JSONEncoder().encode(updated) {
+            defaults.set(data, forKey: key)
+        }
+        return updated
+    }
+
     private static func remoteButton(_ raw: [String: Any]) -> RemoteButton? {
         guard let id = raw["id"] as? String, !id.isEmpty else { return nil }
         return RemoteButton(

@@ -18,14 +18,32 @@ final class WatchConnection: NSObject, ObservableObject, WCSessionDelegate {
     private func apply(_ context: [String: Any]) {
         if context[WatchSnapshot.clearedKey] != nil {
             WatchSnapshot.clear()
+            DeviceSensors.clearToken()
             payload = nil
-        } else if let data = context[WatchSnapshot.contextKey] as? Data,
-                  let received = WatchSnapshot.decode(data) {
-            WatchSnapshot.save(received)
-            payload = received
         } else {
-            return
+            // 端末用トークン（#683）。context は最新の1件なので、無ければ捨てられたということ
+            if let token = context[WatchSnapshot.deviceTokenKey] as? String {
+                DeviceSensors.saveToken(token)
+            } else {
+                DeviceSensors.clearToken()
+            }
+            if let data = context[WatchSnapshot.contextKey] as? Data,
+               let received = WatchSnapshot.decode(data) {
+                WatchSnapshot.save(received)
+                payload = received
+            }
         }
+        WidgetCenter.shared.reloadAllTimelines()
+        // 渡された値は古いことがあるので、トークンがあればすぐ取り直す
+        Task { await refreshFromServer() }
+    }
+
+    /// 端末用トークン（#683）でサーバーから取り直し、画面とコンプリケーションへ反映する。
+    /// トークンが無い・直近に取った・取れなかったときは何も変えない
+    @MainActor
+    func refreshFromServer() async {
+        guard let updated = await WatchSnapshot.refreshed(), updated != payload else { return }
+        payload = updated
         WidgetCenter.shared.reloadAllTimelines()
     }
 

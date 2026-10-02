@@ -11,7 +11,7 @@ struct ContentView: View {
             if let payload = connection.payload, !payload.sensors.isEmpty {
                 TabView(selection: $selection) {
                     ForEach(payload.sensors) { sensor in
-                        SensorPage(sensor: sensor)
+                        SensorPage(sensor: sensor, staleAfterMinutes: payload.staleAfterMinutes)
                             .tag(Optional(sensor.id))
                     }
                 }
@@ -45,15 +45,23 @@ struct ContentView: View {
 /// センサー1台の画面。温度を最も大きく、湿度とCO2を下に出す
 struct SensorPage: View {
     let sensor: WatchSnapshot.Sensor
+    let staleAfterMinutes: Int?
 
     var body: some View {
+        // 開いたままでも「n分前」が進み、基準を超えたら古い値の見た目へ切り替わる（#677）
+        TimelineView(.everyMinute) { context in
+            page(isOld: sensor.isOld(at: context.date, staleAfterMinutes: staleAfterMinutes), now: context.date)
+        }
+    }
+
+    private func page(isOld: Bool, now: Date) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text(sensor.name)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                if sensor.stale {
+                if isOld {
                     Text("受信停止")
                         .font(.caption2)
                         .foregroundStyle(.yellow)
@@ -79,10 +87,29 @@ struct SensorPage: View {
                     Text("ppm").font(.caption2).foregroundStyle(.secondary)
                 }
             }
+            timestamp(isOld: isOld, now: now)
         }
-        .opacity(sensor.stale ? 0.6 : 1)
+        .opacity(isOld ? 0.6 : 1)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 4)
+    }
+
+    /// 画面の下端。「12:34 時点」と「2分前」。時刻が届いていない（古いアプリから）ときは何も出さない
+    @ViewBuilder
+    private func timestamp(isOld: Bool, now: Date) -> some View {
+        if let clock = sensor.measuredClock {
+            HStack {
+                Text("\(clock) 時点")
+                Spacer(minLength: 0)
+                if let age = sensor.ageMinutes(at: now) {
+                    Text(WatchFormat.age(minutes: age))
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(isOld ? Color.yellow : Color.secondary)
+            .lineLimit(1)
+            .monospacedDigit()
+        }
     }
 }
 
@@ -118,7 +145,17 @@ struct SensorListView: View {
                 onSelect(sensor.id)
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(sensor.name).font(.footnote).lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(sensor.name).font(.footnote).lineLimit(1)
+                        Spacer(minLength: 0)
+                        // 一覧は狭いので時刻だけ。基準を超えた値は黄色（一覧は再描画しないので受信時点の判定）
+                        if let clock = sensor.measuredClock {
+                            Text(clock)
+                                .font(.caption2)
+                                .monospacedDigit()
+                                .foregroundStyle(sensor.isOld(at: Date(), staleAfterMinutes: payload.staleAfterMinutes) ? Color.yellow : Color.secondary)
+                        }
+                    }
                     HStack(spacing: 8) {
                         Text(WatchFormat.temperature(sensor.temperature))
                         Text(WatchFormat.humidity(sensor.humidity))
@@ -151,6 +188,16 @@ enum WatchFormat {
     static func temperature(_ value: Double?) -> String { value.map { String(format: "%.1f℃", $0) } ?? "—" }
     static func humidity(_ value: Double?) -> String { value.map { "\(Int($0.rounded()))%" } ?? "—" }
     static func co2(_ value: Double?) -> String { value.map { "\(Int($0.rounded()))" } ?? "—" }
+
+    /// 経過分を「2分前」「1時間前」「2日前」にする。1分未満は「たった今」
+    static func age(minutes: Int) -> String {
+        switch minutes {
+        case ..<1: return "たった今"
+        case 1..<60: return "\(minutes)分前"
+        case 60..<(60 * 24): return "\(minutes / 60)時間前"
+        default: return "\(minutes / (60 * 24))日前"
+        }
+    }
 }
 
 /// CO2の目安の色と文言。段階の判定はWeb側（`getCo2Level()`）が済ませて `co2Level` で届く。

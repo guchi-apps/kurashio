@@ -154,6 +154,7 @@ import {
 } from "@/lib/device-inheritance";
 import { AuthError, signOutThisApp } from "@/lib/auth";
 import { initializeNativeNotifications } from "@/lib/native-notifications";
+import { initializeNativeDeviceToken } from "@/lib/native-device-token";
 import { resolveAuthGate, useAuthState } from "@/lib/use-auth";
 import { APP_VERSION } from "@/lib/app-version";
 import { formatUpdatedAt } from "@/lib/format-updated-at";
@@ -392,6 +393,7 @@ export function MyRoomDashboard() {
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   const [notificationSettingsOpen, setNotificationSettingsOpen] = useState(false);
   const [sensorStatuses, setSensorStatuses] = useState<SensorDeviceStatus[]>([]);
+  const [staleThresholdMinutes, setStaleThresholdMinutes] = useState<number | null>(null);
   const [garbageSchedule, setGarbageSchedule] = useState<GarbageSchedule | null>(null);
   const [garbageError, setGarbageError] = useState(false);
   const [cleaningSchedule, setCleaningSchedule] = useState<CleaningSchedule | null>(null);
@@ -844,6 +846,7 @@ export function MyRoomDashboard() {
         setAirconLoadStatus(data.airconLoadStatus);
         if (sensorsStatus) {
           setSensorStatuses(sensorsStatus.devices);
+          setStaleThresholdMinutes(sensorsStatus.threshold_minutes);
           setStaleAlertDismissed(false);
         }
         // 取得できなかったときは直前の内容を残したまま、エラー表示だけを出す
@@ -983,6 +986,13 @@ export function MyRoomDashboard() {
     // 端末のトークンをバックエンドの登録と同期し続ける（通知設定シートを開いていなくてもよい）
     if (!isAuthenticated) return;
     return initializeNativeNotifications();
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    // ウィジェット・Apple Watch が、アプリを閉じている間も値を取るための読み取りトークン（#683）。
+    // アプリが持っていなければ発行して渡す（持っていれば何もしない）
+    if (!isAuthenticated) return;
+    return initializeNativeDeviceToken();
   }, [isAuthenticated]);
 
   const handleLogout = () => {
@@ -1142,6 +1152,7 @@ export function MyRoomDashboard() {
       roomHumidity: defaultWidgetSensor?.humidity ?? null,
       defaultSensorId: defaultWidgetSensor?.id ?? null,
       sensors: widgetSensors,
+      staleAfterMinutes: staleThresholdMinutes,
       garbageLabel,
       garbageDaysUntil,
       garbageUpcoming,
@@ -1157,6 +1168,7 @@ export function MyRoomDashboard() {
     [
       defaultWidgetSensor,
       widgetSensors,
+      staleThresholdMinutes,
       garbageLabel,
       garbageDaysUntil,
       garbageUpcoming,

@@ -63,13 +63,15 @@ struct KurashioTimelineProvider: AppIntentTimelineProvider {
     }
 
     func timeline(for configuration: SelectSensorIntent, in context: Context) async -> Timeline<KurashioEntry> {
-        // データの更新はネットワークではなくApp Group越しの書き込みで届く。Widget自身は
-        // 積極的にリロードを要求せず、`WebViewModel.reloadWidgetTimelines()` が
-        // ダッシュボードの表示のたびに明示的に再評価させる
+        // アプリを閉じている間も、端末用トークン（#683）があれば約15分ごとにセンサーの値を取り直す。
+        // 実際の実行間隔はOS任せ。トークンが無いとき（未ログイン・ログアウト後）は従来どおり自分では要求せず、
+        // `WebViewModel.reloadWidgetTimelines()` がダッシュボードの表示のたびに再評価させる
         let now = Date()
+        _ = await SharedWidgetSnapshot.refreshed()
+        let policy: TimelineReloadPolicy = DeviceSensors.nextRefreshDate(from: now).map { .after($0) } ?? .never
         let current = entry(for: configuration, now: now)
         guard let result = current.pressResult else {
-            return Timeline(entries: [current], policy: .never)
+            return Timeline(entries: [current], policy: policy)
         }
         // 押した結果は一定時間だけ出して消す（状態は持たない・#106）。消すエントリを先に積んでおく
         var cleared = current
@@ -77,7 +79,7 @@ struct KurashioTimelineProvider: AppIntentTimelineProvider {
         let expiry = result.at.addingTimeInterval(WidgetPressStore.resultLifetime)
         return Timeline(
             entries: [current, KurashioEntry(date: expiry, snapshot: cleared.snapshot, sensorId: cleared.sensorId, secondSensorId: cleared.secondSensorId, thirdSensorId: cleared.thirdSensorId, fourthSensorId: cleared.fourthSensorId)],
-            policy: .never
+            policy: policy
         )
     }
 

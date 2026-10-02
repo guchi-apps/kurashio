@@ -126,7 +126,8 @@ describe("syncWidgetSnapshot", () => {
     roomTemperature: 24.6,
     roomHumidity: 58,
     defaultSensorId: 3,
-    sensors: [{ id: 3, name: "リビング", temperature: 24.6, humidity: 58, co2: null, co2Level: null, stale: false }],
+    sensors: [{ id: 3, name: "リビング", temperature: 24.6, humidity: 58, co2: null, co2Level: null, stale: false, measuredAt: null }],
+    staleAfterMinutes: 15,
     garbageLabel: "燃えるゴミ",
     garbageDaysUntil: 1,
     garbageUpcoming: [

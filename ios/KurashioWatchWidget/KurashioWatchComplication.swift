@@ -28,7 +28,7 @@ struct WatchTimelineProvider: AppIntentTimelineProvider {
         WatchEntry(
             date: Date(),
             sensor: WatchSnapshot.Sensor(
-                id: 0, name: "リビング", temperature: 24.6, humidity: 52, co2: 720, co2Level: "good", stale: false
+                id: 0, name: "リビング", temperature: 24.6, humidity: 52, co2: 720, co2Level: "good", stale: false, measuredAt: "2026-10-02T12:34:00"
             ),
             metric: .temperature
         )
@@ -39,8 +39,12 @@ struct WatchTimelineProvider: AppIntentTimelineProvider {
     }
 
     func timeline(for configuration: SelectWatchSensorIntent, in context: Context) async -> Timeline<WatchEntry> {
-        // 更新はiPhoneからの受信（Watchアプリが `reloadAllTimelines()` を呼ぶ）で届く。自分では要求しない
-        Timeline(entries: [entry(for: configuration)], policy: .never)
+        // 更新はiPhoneからの受信（Watchアプリが `reloadAllTimelines()` を呼ぶ）に加え、端末用トークン（#683）が
+        // あれば約15分ごとに自分で取り直す（実際の実行間隔はOS任せ）。トークンが無いときは自分では要求しない
+        let now = Date()
+        _ = await WatchSnapshot.refreshed()
+        let policy: TimelineReloadPolicy = DeviceSensors.nextRefreshDate(from: now).map { .after($0) } ?? .never
+        return Timeline(entries: [entry(for: configuration)], policy: policy)
     }
 
     /// 文字盤の編集で最初に並ぶ候補。watchOS の `AppIntentTimelineProvider` は既定の実装が無く必須。
@@ -101,7 +105,7 @@ struct WatchComplicationView: View {
     private var rectangular: some View {
         VStack(alignment: .leading, spacing: 1) {
             if let sensor = entry.sensor {
-                Text(sensor.stale ? "\(sensor.name)・受信停止" : sensor.name)
+                Text(rectangularTitle(sensor))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -121,6 +125,13 @@ struct WatchComplicationView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 1行目。名前に値の時刻を同居させて、行数は増やさない（#677）。受信停止のときは受信停止を優先する
+    private func rectangularTitle(_ sensor: WatchSnapshot.Sensor) -> String {
+        if sensor.stale { return "\(sensor.name)・受信停止" }
+        if let clock = sensor.measuredClock { return "\(sensor.name) \(clock)" }
+        return sensor.name
     }
 
     private var inline: some View {
