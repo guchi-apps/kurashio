@@ -17,6 +17,11 @@ export interface WidgetSensor {
   co2Level: Co2Level | null;
   /** 受信が止まっている（値は最後に受信した時点のもの） */
   stale: boolean;
+  /**
+   * 値を測った時刻（`LatestData.datetime` をそのまま。JSTの文字列）。Apple Watch が「いつの値か」を出す（#677）。
+   * 端末の時計では解釈し直さず、Swift側で文字列から切り出す。届いていなければ null
+   */
+  measuredAt: string | null;
 }
 
 /**
@@ -50,6 +55,7 @@ export function buildWidgetSensors(
         co2,
         co2Level: co2 == null ? null : getCo2Level(co2).level,
         stale: isStale(item.deviceId),
+        measuredAt: latest?.datetime ?? null,
       },
     ];
   });

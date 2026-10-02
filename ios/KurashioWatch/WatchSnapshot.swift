@@ -33,6 +33,9 @@ enum WatchSnapshot {
         var co2Level: String?
         /// 受信が止まっている（値は最後に受信した時点のもの）
         var stale: Bool
+        /// 値を測った時刻（JSTの文字列。Web側の `LatestData.datetime`）。端末の時計では解釈し直さず、
+        /// 「HH:mm」は文字列から切り出す（`measuredClock`）。古いアプリから届いた値には無い
+        var measuredAt: String?
     }
 
     struct Payload: Codable, Equatable {
@@ -40,6 +43,9 @@ enum WatchSnapshot {
         var defaultSensorId: Int?
         /// ダッシュボードの並び順
         var sensors: [Sensor]
+        /// 受信停止とみなす分数（Web側が `GET /api/sensors/status` から渡す）。開いたまま古くなった値を
+        /// 黄色にする基準で、**Swiftは独自のしきい値を持たない**。届いていなければ nil（`stale` だけに従う）
+        var staleAfterMinutes: Int?
     }
 
     /// 選んだセンサー。選んでいない・一覧から消えたときは既定のセンサー、それも無ければ先頭へ倒す
@@ -56,7 +62,8 @@ enum WatchSnapshot {
         guard !sensors.isEmpty else { return nil }
         return Payload(
             defaultSensorId: double(raw["defaultSensorId"]).map { Int($0.rounded()) },
-            sensors: sensors
+            sensors: sensors,
+            staleAfterMinutes: double(raw["staleAfterMinutes"]).map { Int($0.rounded()) }
         )
     }
 
@@ -114,7 +121,8 @@ enum WatchSnapshot {
             humidity: double(raw["humidity"]),
             co2: double(raw["co2"]),
             co2Level: raw["co2Level"] as? String,
-            stale: (raw["stale"] as? Bool) ?? false
+            stale: (raw["stale"] as? Bool) ?? false,
+            measuredAt: raw["measuredAt"] as? String
         )
     }
 
@@ -123,4 +131,43 @@ enum WatchSnapshot {
         let result = number.doubleValue
         return result.isFinite ? result : nil
     }
+}
+
+// MARK: - 値の時刻（#677）
+
+extension WatchSnapshot.Sensor {
+    /// 「12:34」。`measuredAt`（JSTの文字列）の時分をそのまま切り出す。端末のタイムゾーンでは解釈し直さない
+    var measuredClock: String? {
+        guard let text = Self.wallClock(measuredAt) else { return nil }
+        return String(text.dropFirst(11).prefix(5))
+    }
+
+    /// 値を測ってからの経過分。`measuredAt` が読めないとき・未来のときは nil
+    func ageMinutes(at now: Date) -> Int? {
+        guard let text = Self.wallClock(measuredAt), let measured = Self.formatter.date(from: text) else { return nil }
+        let seconds = now.timeIntervalSince(measured)
+        return seconds < 0 ? nil : Int(seconds / 60)
+    }
+
+    /// 受信停止の印か、基準（`staleAfterMinutes`）を超えて古い。基準が届いていなければ `stale` だけに従う
+    func isOld(at now: Date, staleAfterMinutes: Int?) -> Bool {
+        if stale { return true }
+        guard let limit = staleAfterMinutes, let age = ageMinutes(at: now) else { return false }
+        return age > limit
+    }
+
+    /// "2026-10-02T12:34:56" の形（19文字）へ揃える。小数秒・オフセットは落とす（サーバーはJSTで返す）
+    private static func wallClock(_ value: String?) -> String? {
+        guard let value, value.count >= 19 else { return nil }
+        let text = String(value.prefix(19)).replacingOccurrences(of: " ", with: "T")
+        return text.dropFirst(10).first == "T" ? text : nil
+    }
+
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Tokyo")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return formatter
+    }()
 }

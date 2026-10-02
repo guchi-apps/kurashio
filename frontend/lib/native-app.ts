@@ -155,6 +155,11 @@ export interface WidgetSnapshot {
   defaultSensorId: number | null;
   /** 「ウィジェットを編集」で選べるセンサーの一覧（#560・`buildWidgetSensors()`） */
   sensors: WidgetSensor[];
+  /**
+   * 受信停止とみなす分数（`GET /api/sensors/status` の `threshold_minutes`）。Apple Watch が、開いたまま
+   * 古くなった値を黄色にする基準（#677）。基準をSwiftに持たせないため送る。未取得なら null
+   */
+  staleAfterMinutes: number | null;
   /** 次に収集される品目名（複数なら「・」区切り）。予定が無ければ null */
   garbageLabel: string | null;
   /** 上記の収集日までの日数（0=今日、1=明日）。`garbageLabel` が null なら意味を持たない */

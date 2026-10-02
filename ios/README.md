@@ -472,6 +472,13 @@ iPhoneのkurashioと対になるWatchアプリと、文字盤のコンプリケ�
   （`WatchConnection`）が受け取って App Group へ書き、`WidgetCenter.reloadAllTimelines()` → コンプリケーションが読む。
   **Watch側は通信も認証も持たない**（JWTは渡さない。iPhoneウィジェットと同じ理由・上の「表示用データだけをApp Group経由で共有する」）
 - **更新はダッシュボードを開いたときだけ**（iPhoneウィジェットと同じ制約）。Watch単体では更新されない
+  アプリを閉じている間の自動更新は未対応（Watch が直接取得するには認証の持たせ方を決める必要があり、別Issueで扱う。#677）
+- **「いつの値か」を出す**（#677）。値の時刻は Web の `LatestData.datetime`（`measuredAt`・JSTの文字列）を
+  `sensors[]` に載せて運び、Swift は文字列から「HH:mm」を切り出す（端末のタイムゾーンで解釈し直さない）。
+  センサー画面の下端は「12:34 時点・2分前」（`TimelineView(.everyMinute)` で開いたまま進む）、一覧は行の右端に時刻、
+  長方形コンプリケーションは1行目の名前に時刻を同居（行は増やさない）。**古さの基準は Swift に持たない**——Web が
+  `staleAfterMinutes`（`GET /api/sensors/status` の `threshold_minutes`）を送り、`stale || 経過 > 基準` で黄色・薄表示にする。
+  `measuredAt` が無い（古いアプリ）ときは時刻の表示を出さない
 - **ログアウト**（`widgetSnapshotCleared`）で空の context（`watchSnapshotCleared`）を送り、Watch側は保存した値を捨ててコンプリケーションを
   再読み込みする。センサーが1台も無い（すべて非表示）ときも同じ
 - **`WatchSnapshot.swift` は `ios/Kurashio/`・`ios/KurashioWatch/`・`ios/KurashioWatchWidget/` の3か所に同じ内容を置く**
