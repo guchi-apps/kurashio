@@ -413,6 +413,19 @@ Xcode16のファイルシステム同期グループ（`PBXFileSystemSynchronize
 `ios/Kurashio/SharedWidgetSnapshot.swift` と `ios/KurashioWidget/SharedWidgetSnapshot.swift` の
 両方を揃えること。
 
+### ロック画面の室温（`accessoryCircular`・`accessoryRectangular`・`accessoryInline`・#676）
+
+`KurashioWidget` に3つのファミリを足しただけで、別のウィジェットではない（センサー選択・データ・更新の仕組みはホーム画面と同じ）。
+`KurashioWidgetView.swift` の `LockScreenView` が描く。
+
+- **ロック画面は単色（vibrant）で描かれる**ので色は使わない。受信停止は「・受信停止」「停止」の文字で示す
+- **センサーは1つ目（「センサー」）だけを使う。** ロック画面の編集画面にも2つ目以降の欄が並ぶ（`parameterSummary` での出し分けは、
+  Xcode が無い環境でビルドを確かめられないため見送り。説明文で案内している）
+- 更新はダッシュボードを開いたときだけ（ホーム画面ウィジェットと同じ）
+
+実機での確認: ロック画面を長押し → カスタマイズ → ウィジェットを追加 → kurashio から円形・長方形・時計の上（インライン）を置き、
+値が表示されること、「ウィジェットを編集」にセンサー欄が出ること、ダッシュボードを開いたあとに値が更新されることを見る。
+
 ### 電気の操作ボタン（Large・#546）
 
 **ウィジェットは送信しない。認証を持たないので、アプリ（WKWebView）のログイン済みセッションで送る。**

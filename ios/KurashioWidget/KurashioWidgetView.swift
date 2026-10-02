@@ -7,7 +7,9 @@ struct KurashioWidgetView: View {
     let entry: KurashioEntry
 
     var body: some View {
-        if let snapshot = entry.snapshot, let reading = entry.roomReading {
+        if Self.isLockScreen(family) {
+            LockScreenView(family: family, reading: entry.roomReading)
+        } else if let snapshot = entry.snapshot, let reading = entry.roomReading {
             if family == .systemLarge {
                 LargeContentView(snapshot: snapshot, reading: reading, pressResult: entry.pressResult)
             } else if family == .systemMedium {
@@ -22,6 +24,89 @@ struct KurashioWidgetView: View {
         } else {
             MessageView(text: "アプリでダッシュボードを開いてください")
         }
+    }
+}
+
+extension KurashioWidgetView {
+    static func isLockScreen(_ family: WidgetFamily) -> Bool {
+        switch family {
+        case .accessoryCircular, .accessoryRectangular, .accessoryInline: return true
+        default: return false
+        }
+    }
+}
+
+/// ロック画面（#676）。単色（vibrant）で描かれるので色は使わず、受信停止も文字で示す。
+/// センサーは1つ目（「センサー」）だけを使う。
+private struct LockScreenView: View {
+    let family: WidgetFamily
+    let reading: SharedWidgetSnapshot.RoomReading?
+
+    var body: some View {
+        Group {
+            switch family {
+            case .accessoryCircular: circular
+            case .accessoryRectangular: rectangular
+            default: inline
+            }
+        }
+        .containerBackground(.fill.tertiary, for: .widget)
+    }
+
+    private var temperature: String {
+        reading?.temperature.map { String(format: "%.1f℃", $0) } ?? "—"
+    }
+
+    private var humidity: String {
+        reading?.humidity.map { "湿度 \(Int($0))%" } ?? "湿度 —"
+    }
+
+    private var circular: some View {
+        ZStack {
+            AccessoryWidgetBackground()
+            if let reading {
+                VStack(spacing: 0) {
+                    Text(reading.temperature.map { String(format: "%.1f°", $0) } ?? "—")
+                        .font(.system(.body, design: .rounded, weight: .semibold))
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
+                    Text(reading.stale ? "停止" : "室温")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Image(systemName: "iphone.and.arrow.forward")
+            }
+        }
+    }
+
+    private var rectangular: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            if let reading {
+                let place = reading.name ?? "いまの室温"
+                Text(reading.stale ? "\(place)・受信停止" : place)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(temperature)
+                    .font(.system(.title3, design: .rounded, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(humidity)
+                    .font(.caption)
+                    .lineLimit(1)
+            } else {
+                Text("アプリでダッシュボードを開いてください")
+                    .font(.caption2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var inline: Text {
+        guard let reading else { return Text("kurashio") }
+        let stale = reading.stale ? "（受信停止）" : ""
+        return Text("室温 \(temperature) · \(humidity)\(stale)")
     }
 }
 
