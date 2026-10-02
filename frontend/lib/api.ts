@@ -43,6 +43,7 @@ import type {
   FilamentSpoolPatch,
 } from "@/lib/filament";
 import type { GarbageSchedule } from "@/lib/garbage";
+import type { TapoCandidates } from "@/lib/tapo-candidates";
 import type {
   RemoteButtons,
   RemoteCatalog,
@@ -581,6 +582,18 @@ export async function notifyLogin(): Promise<void> {
 
 export async function fetchGarbageSchedule(): Promise<GarbageSchedule> {
   return fetchJson<GarbageSchedule>("/api/garbage");
+}
+
+/** 取得元の名前シートの「Tapoの候補」（#692） */
+export async function fetchTapoCandidates(): Promise<TapoCandidates> {
+  return fetchJson<TapoCandidates>("/api/energy/tapo-candidates");
+}
+
+/** 「候補を更新」。探索はサブPCが次の定期実行で行うので、応答は待ち状態（`pending`）になる */
+export async function refreshTapoCandidates(): Promise<TapoCandidates> {
+  return fetchJson<TapoCandidates>("/api/energy/tapo-candidates/refresh", {
+    method: "POST",
+  });
 }
 
 /**
