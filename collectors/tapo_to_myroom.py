@@ -661,25 +661,95 @@ async def find_devices(
     return await scan_subnet(network, credentials)
 
 
-async def discover_hosts(
+async def discover_candidates(
     credentials: Credentials, scan: Optional[str] = None
-) -> List[Tuple[str, Optional[str]]]:
-    """探索して、エネルギー計測できる機器を (IP, alias) で返す（#660）。"""
+) -> List[Dict[str, Any]]:
+    """探索して、見つかった Tapo 機器を全部返す（#692）。計測できない機器も含める。
+
+    画面の「Tapoの候補」に出すため。`measurable` が偽の機器（P100 など）は読み取り対象にしない。
+    """
     found = await find_devices(credentials, scan)
-    hosts: List[Tuple[str, Optional[str]]] = []
+    candidates: List[Dict[str, Any]] = []
     for host, device in found.items():
         try:
             await asyncio.wait_for(device.update(), timeout=CONNECT_TIMEOUT)
             energy = _read_energy(device)
-            if energy["kwh_today"] is None and energy["power_w"] is None:
+            measurable = not (energy["kwh_today"] is None and energy["power_w"] is None)
+            if not measurable:
                 LOGGER.info("%s は計測に対応していないので対象外にします", host)
-                continue
-            hosts.append((host, getattr(device, "alias", None) or None))
+            candidates.append(
+                {
+                    "host": host,
+                    "name": getattr(device, "alias", None) or None,
+                    "model": getattr(device, "model", None),
+                    "measurable": measurable,
+                }
+            )
         except Exception as exc:  # noqa: BLE001 - 1台の不調で探索全体を止めない
             LOGGER.warning("%s を確認できませんでした: %s", host, exc)
         finally:
             await close_device(device)
-    return hosts
+    return candidates
+
+
+def measurable_hosts(
+    candidates: Sequence[Dict[str, Any]],
+) -> List[Tuple[str, Optional[str]]]:
+    return [(c["host"], c["name"]) for c in candidates if c["measurable"]]
+
+
+async def discover_hosts(
+    credentials: Credentials, scan: Optional[str] = None
+) -> List[Tuple[str, Optional[str]]]:
+    """探索して、エネルギー計測できる機器を (IP, alias) で返す（#660）。"""
+    return measurable_hosts(await discover_candidates(credentials, scan))
+
+
+def candidates_url(api_url: str) -> str:
+    """候補の受け口。`/api/energy` の下にある（#692）。"""
+    return api_url.rstrip("/") + "/tapo-candidates"
+
+
+def fetch_refresh_pending(api_url: str) -> bool:
+    """画面から「候補を更新」が押されて、まだ応えていないか。
+
+    読めなければ False（定期実行そのものは止めない）。
+    """
+    try:
+        with urllib.request.urlopen(
+            candidates_url(api_url) + "/request", timeout=POST_TIMEOUT
+        ) as response:
+            return bool(json.loads(response.read().decode("utf-8")).get("pending"))
+    except Exception as exc:  # noqa: BLE001 - 依頼を読めなくても収集は続ける
+        LOGGER.warning("更新依頼を確認できませんでした: %s", exc)
+        return False
+
+
+async def answer_refresh_request(
+    config: Dict[str, Any], cache_path: str, now: Optional[float] = None
+) -> None:
+    """更新依頼に応える。探索し直して候補を送り、探索結果のキャッシュも新しくする。
+
+    **0台でも送る。** 送らないと画面が「更新中」のまま待ち続ける。0台のときはキャッシュを
+    上書きしない（前回の機器を捨てない）。
+    """
+    now = time.time() if now is None else now
+    credentials = Credentials(config["username"], config["password"])
+    try:
+        candidates = await discover_candidates(credentials)
+    except ConfigError as exc:
+        LOGGER.warning("探索できませんでした: %s", exc)
+        candidates = []
+
+    hosts = measurable_hosts(candidates)
+    if hosts:
+        save_hosts_cache(cache_path, hosts, now)
+    try:
+        post_payload(candidates_url(config["api_url"]), {"devices": candidates})
+    except Exception as exc:  # noqa: BLE001 - 次の定期実行でまだ依頼が残っていれば再送する
+        LOGGER.error("候補の送信に失敗しました: %s", exc)
+        return
+    LOGGER.info("候補を送りました（%d 台・うち計測できる機器 %d 台）", len(candidates), len(hosts))
 
 
 async def resolve_hosts(
@@ -747,6 +817,10 @@ async def run_collect(
     today = datetime.datetime.now(JST).date()
     start = window_start(today, days)
     cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), HOSTS_CACHE_FILENAME)
+
+    if not dry_run and fetch_refresh_pending(config["api_url"]):
+        # 探索結果をキャッシュへ書くので、直後の resolve_hosts は探し直さずにそれを使う
+        await answer_refresh_request(config, cache_path)
 
     hosts, discovered = await resolve_hosts(config, cache_path, rediscover)
     if not hosts:

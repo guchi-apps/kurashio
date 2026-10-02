@@ -140,6 +140,13 @@ collectors/.venv-tapo/bin/python collectors/tapo_to_myroom.py --rediscover
 rm -f collectors/.tapo-hosts.json && systemctl --user start myroom-tapo-energy.service
 ```
 
+**画面の「候補を更新」（#692）。** 消費電力の詳細 →「取得元の名前」の「Tapoの候補」欄のボタンを押すと、
+バックエンドに更新依頼（`app_settings` の `tapo_candidates`）が立つ。収集は定期実行のたびに
+`GET /api/energy/tapo-candidates/request` で依頼を見て、あれば探索キャッシュを捨てて探し直し、
+見つかった機器（計測できない P100 なども含む）を `POST /api/energy/tapo-candidates` で送る。
+**反映は次の定期実行（最大5分）。** VPS はプラグの LAN に届かないため、探索はここでしかできない。
+`--dry-run` では依頼を見ない。
+
 - `TAPO_HOSTS` に書いた行は**名前の固定**と**探索で見つからない機器の指定**に使う。同じ IP は書いた側が優先
 - 探索で得た IP に繋がらなかったときは、その回のうちに1度だけ探し直す（IP が変わった場合の追従）
 - 探索はブロードキャスト→0台なら /24 のユニキャスト走査（下の ufw の節）。計測に対応しない機器（電球など）は対象外
