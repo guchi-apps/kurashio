@@ -485,7 +485,7 @@ iPhoneのkurashioと対になるWatchアプリと、文字盤のコンプリケ�
   （`WatchConnection`）が受け取って App Group へ書き、`WidgetCenter.reloadAllTimelines()` → コンプリケーションが読む。
   **Watch側は通信も認証も持たない**（JWTは渡さない。iPhoneウィジェットと同じ理由・上の「表示用データだけをApp Group経由で共有する」）
 - **更新はダッシュボードを開いたときだけ**（iPhoneウィジェットと同じ制約）。Watch単体では更新されない
-  アプリを閉じている間の自動更新は、方式を #681 で決めた（下の「アプリを閉じている間の自動更新（方式・#681）」）。端末側の実装は未着手
+  アプリを閉じている間の自動更新は、トークン方式で実装した（下の「アプリを閉じている間の自動更新（方式・#681）」。#683）
 - **「いつの値か」を出す**（#677）。値の時刻は Web の `LatestData.datetime`（`measuredAt`・JSTの文字列）を
   `sensors[]` に載せて運び、Swift は文字列から「HH:mm」を切り出す（端末のタイムゾーンで解釈し直さない）。
   センサー画面の下端は「12:34 時点・2分前」（`TimelineView(.everyMinute)` で開いたまま進む）、一覧は行の右端に時刻、
@@ -508,8 +508,7 @@ iPhoneのkurashioと対になるWatchアプリと、文字盤のコンプリケ�
 
 ### アプリを閉じている間の自動更新（方式・#681）
 
-Watch・iPhoneウィジェットが、アプリ（WebView）を開いていない間も値を取るための方式。**決定済みで、バックエンドだけ実装済み。**
-Web→ネイティブの受け渡しと Swift（定期取得）は未実装（別Issue）。
+Watch・iPhoneウィジェットが、アプリ（WebView）を開いていない間も値を取るための方式（#681で決定・#683で端末側を実装）。
 
 - **認証は端末ごとの読み取り専用トークン**（`backend/device_tokens.py`）。ログイン済みのWebが `POST /api/device-tokens`
   （ユーザーJWT）で発行し、ブリッジでiPhoneの App Group / Keychain へ渡す。端末は `GET /api/device/sensors` を
@@ -522,6 +521,27 @@ Web→ネイティブの受け渡しと Swift（定期取得）は未実装（�
   なるが、`tests/test_device_tokens.py` が両者の一致を照合する。Swiftはこれまでどおり色を当てるだけ
 - **更新間隔は約15分**（ウィジェットの Timeline policy・Watchのバックグラウンド更新。実際の実行はOS任せ）
 - iPhone の BGAppRefresh は採らない（ログインがWebView内でネイティブから取れないため。トークン方式なら不要になる）
+
+**端末側の実装（#683・Swiftは subpc でビルドできないので Mac mini・実機で確認する）**
+
+- **発行と受け渡し（Web）**: ダッシュボードが開くと `frontend/lib/native-device-token.ts` が `deviceTokenReady` でアプリへ
+  トークンの有無を聞き、無ければ `POST /api/device-tokens` で発行して `deviceToken` で渡す（持っていれば何もしない）。
+  端末が401でトークンを捨てた場合も、次にダッシュボードを開いたときに同じ経路で発行し直す。
+  ログアウト（`signOutThisApp()`）は `DELETE /api/device-tokens/{id}` で失効し、`deviceTokenCleared` で端末の保存を消す（失効に失敗しても端末は消す）
+- **保存（Swift）**: `DeviceSensors.swift`（**4か所に同じ内容**: `Kurashio/`・`KurashioWidget/`・`KurashioWatch/`・`KurashioWatchWidget/`。
+  `check-consistency.mjs` が照合）。iPhoneアプリ・ウィジェットは App Group の UserDefaults、Watchは別端末なので
+  iPhoneが WatchConnectivity の context（`deviceToken`）で送り、Watchアプリが自分の App Group へ保存する。
+  Keychain共有は使わない（読み取り専用トークンで、App Group は既に3 targetで使っており追加の設定が要らないため）。`kdt_` で始まらない値は保存しない
+- **取得**: 取得先は `https://myroom.gucchii.com/api/device/sensors`（`AppConfig.baseURL` と同じ向き先であることを `check-consistency.mjs` が照合）。
+  更新するのは**保存済みの一覧にあるセンサーだけ**（`SharedWidgetSnapshot.merged`・`WatchSnapshot.merged`）。表示するセンサーの選択・並びはWebが正で、
+  ここでは増やさない。CO2の色はサーバーが返す `co2Level` を使う。同じ端末で60秒以内の再取得はしない（種類ごとの Timeline の重複を避ける）
+- **間隔**: ウィジェット（室温）とコンプリケーションは Timeline の `.after(約15分)`、Watchアプリは `.backgroundTask(.appRefresh)` と
+  アプリを開いたとき。トークンが無いときは従来どおり自分では更新を要求しない。実際の実行間隔はOS任せ（Watchは特に予算が少ない）
+- 401（失効）を受けたらその端末のトークンを消す。サーバーのトークン一覧は最大10件で、古いものから捨てられる
+
+**実機で確認すること**: ①Googleログイン後にトークンが発行され、ウィジェット・Watchの値がアプリを閉じたまま15〜30分で更新される
+②ログアウトでウィジェット・Watchの値が消え、以後取得しない ③サーバー側で失効（`DELETE /api/device-tokens/{id}`）したあと、
+アプリを開くと再発行されて更新が戻る ④機内モードで前の値が残る
 
 ### Watch のための初回設定（手作業）
 

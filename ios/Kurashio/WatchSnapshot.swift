@@ -16,6 +16,9 @@ enum WatchSnapshot {
     static let contextKey = "watchSnapshot"
     /// ログアウト時にiPhoneが送る印。Watch側は保存した値を捨てる
     static let clearedKey = "watchSnapshotCleared"
+    /// 端末用トークン（#683）。Watchが自分でセンサーを取りにいくために、iPhoneが一緒に送る。
+    /// 無ければ（トークンを捨てた）Watch側も捨てる
+    static let deviceTokenKey = "deviceToken"
 
     private static let suiteName = "group.com.gucchii.kurashio"
     private static let storeKey = "watchSnapshot"
@@ -95,6 +98,39 @@ enum WatchSnapshot {
 
     static func clear() {
         defaults?.removeObject(forKey: storeKey)
+    }
+
+    // MARK: - アプリを閉じている間の更新（#683）
+
+    /// 端末用トークンで取ったセンサーの値を、保存済みの一覧へ重ねる。**一覧にあるセンサーだけ**を更新し、
+    /// 増やさない（表示するセンサーの選択・並びはWebが正）。受信停止の基準も最新のサーバーの値へ揃える
+    static func merged(_ payload: Payload, with response: DeviceSensors.Response) -> Payload {
+        var result = payload
+        let fetched = Dictionary(response.sensors.map { ($0.deviceId, $0) }, uniquingKeysWith: { _, last in last })
+        result.sensors = payload.sensors.map { sensor in
+            guard let latest = fetched[sensor.id] else { return sensor }
+            var updated = sensor
+            updated.name = latest.name
+            updated.temperature = latest.temperature
+            updated.humidity = latest.humidity
+            updated.co2 = latest.co2
+            updated.co2Level = latest.co2Level
+            updated.stale = latest.stale
+            updated.measuredAt = latest.measuredAt
+            return updated
+        }
+        if let minutes = response.staleThresholdMinutes { result.staleAfterMinutes = minutes }
+        return result
+    }
+
+    /// Watchアプリのバックグラウンド更新・コンプリケーションのTimelineから呼ぶ。トークンがあり、直近に取って
+    /// いなければ取り直して保存し、最新の値を返す。取れなかったとき・間隔内のときは保存済みの値をそのまま返す
+    static func refreshed() async -> Payload? {
+        guard let stored = load() else { return nil }
+        guard let response = await DeviceSensors.fetchIfDue() else { return stored }
+        let updated = merged(stored, with: response)
+        save(updated)
+        return updated
     }
 
     static func encode(_ payload: Payload) -> Data? {

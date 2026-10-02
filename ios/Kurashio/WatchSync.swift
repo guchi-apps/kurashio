@@ -16,6 +16,8 @@ final class WatchSync: NSObject, WCSessionDelegate {
     private var pending: [String: Any]?
     /// 最後に送った中身。変わっていなければ送らない（context は上書きで済むが、無駄な送信を避ける）
     private var lastSent: Data?
+    /// 端末用トークン（#683）。context は「最新の1件だけが届く」ため、送るたびにセンサーの値と一緒に載せ直す
+    private var token: String?
 
     private override init() { super.init() }
 
@@ -36,12 +38,29 @@ final class WatchSync: NSObject, WCSessionDelegate {
         }
         guard let data = WatchSnapshot.encode(payload), data != lastSent else { return }
         lastSent = data
-        deliver([WatchSnapshot.contextKey: data])
+        deliver(context())
+    }
+
+    /// 端末用トークンをWatchへ渡す（nil は破棄）。Watchは別端末でApp Groupを共有しないので、iPhoneが送る
+    func setToken(_ newToken: String?) {
+        guard newToken != token else { return }
+        token = newToken
+        guard lastSent != nil || newToken != nil else { return }
+        deliver(context())
+    }
+
+    /// 送る context。センサーの値（あれば）とトークン（あれば）。どちらも無ければ空
+    private func context() -> [String: Any] {
+        var context: [String: Any] = [:]
+        if let lastSent { context[WatchSnapshot.contextKey] = lastSent }
+        if let token { context[WatchSnapshot.deviceTokenKey] = token }
+        return context
     }
 
     /// ログアウト時。Watch側の保存とコンプリケーションを消させる
     func clear() {
         lastSent = nil
+        token = nil
         deliver([WatchSnapshot.clearedKey: true])
     }
 
@@ -90,8 +109,9 @@ final class WatchSync: NSObject, WCSessionDelegate {
     nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
         // Watchアプリがあとからインストールされたとき、最後の値を送り直す
         Task { @MainActor in
-            if let data = self.lastSent, session.activationState == .activated, session.isWatchAppInstalled {
-                self.push([WatchSnapshot.contextKey: data], on: session)
+            if session.activationState == .activated, session.isWatchAppInstalled {
+                let context = self.context()
+                if !context.isEmpty { self.push(context, on: session) }
             }
         }
     }

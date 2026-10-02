@@ -238,3 +238,41 @@ export function requestWidgetPress(): boolean {
 export function reportWidgetPressResult(key: string, status: WidgetPressStatus): void {
   getBridge()?.postMessage({ type: "widgetPressResult", key, status });
 }
+
+/**
+ * 端末用の読み取りトークン（`POST /api/device-tokens`・#683）の状態。アプリが `deviceTokenReady` への返事と、
+ * 端末が401を受けてトークンを捨てたときに飛ばしてくる。`detail` は {@link NativeDeviceTokenState}
+ */
+export const NATIVE_DEVICE_TOKEN_STATE_EVENT = "myroom-native-device-token-state";
+
+export interface NativeDeviceTokenState {
+  /** アプリがトークンを持っているか。false ならWebが発行して渡す */
+  hasToken: boolean;
+}
+
+/** アプリへ、トークンの有無を問い合わせる（返事は {@link NATIVE_DEVICE_TOKEN_STATE_EVENT}）。アプリの外では何もしない */
+export function requestNativeDeviceTokenState(): boolean {
+  const bridge = getBridge();
+  if (!bridge) return false;
+  bridge.postMessage({ type: "deviceTokenReady" });
+  return true;
+}
+
+/**
+ * 発行したトークンをアプリへ渡す。アプリは App Group へ保存し、Apple Watch へも送る。
+ * ウィジェット・Watch が、アプリを閉じている間も `GET /api/device/sensors` を読むために使う（#683）。
+ */
+export function sendNativeDeviceToken(token: string): boolean {
+  const bridge = getBridge();
+  if (!bridge) return false;
+  bridge.postMessage({ type: "deviceToken", token });
+  return true;
+}
+
+/** アプリが持つトークンを捨てさせる（ログアウト時）。ウィジェット・Watch の保存も消える */
+export function clearNativeDeviceToken(): boolean {
+  const bridge = getBridge();
+  if (!bridge) return false;
+  bridge.postMessage({ type: "deviceTokenCleared" });
+  return true;
+}
