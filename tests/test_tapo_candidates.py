@@ -24,12 +24,15 @@ DEVICE = {"host": "192.168.2.24", "name": "サーキュレーター", "model": "
 
 def test_initial_state_is_empty_and_not_pending():
     state = tapo_candidates.get_state()
-    assert state == {"requested_at": None, "updated_at": None, "devices": [], "pending": False}
+    assert state == {
+        "requested_at": None, "updated_at": None, "devices": [],
+        "pending": False, "timed_out": False,
+    }
 
 
 def test_request_marks_pending_until_devices_arrive():
     assert tapo_candidates.request_refresh(now=at(0))["pending"] is True
-    assert tapo_candidates.get_state()["pending"] is True
+    assert tapo_candidates.get_state(now=at(1))["pending"] is True
 
     state = tapo_candidates.save_devices([DEVICE], now=at(3))
     assert state["pending"] is False
@@ -53,6 +56,26 @@ def test_empty_result_still_finishes_the_request():
     state = tapo_candidates.save_devices([], now=at(1))
     assert state["pending"] is False
     assert state["devices"] == []
+
+
+def test_request_expires_and_can_be_retried_without_losing_previous_devices():
+    tapo_candidates.save_devices([DEVICE], now=at(0))
+    tapo_candidates.request_refresh(now=at(1))
+
+    assert tapo_candidates.get_state(now=at(15))["pending"] is True
+    expired = tapo_candidates.get_state(now=at(16))
+    assert expired["pending"] is False
+    assert expired["timed_out"] is True
+    assert expired["devices"] == [DEVICE]
+
+    retried = tapo_candidates.request_refresh(now=at(17))
+    assert retried["requested_at"] == at(17).isoformat()
+    assert retried["pending"] is True
+    assert retried["timed_out"] is False
+
+    received = tapo_candidates.save_devices([DEVICE], now=at(18))
+    assert received["pending"] is False
+    assert received["timed_out"] is False
 
 
 def test_normalize_drops_bad_rows_and_duplicates():

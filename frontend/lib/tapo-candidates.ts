@@ -15,6 +15,8 @@ export interface TapoCandidates {
   devices: TapoCandidateDevice[];
   /** 更新を依頼して、サブPCから候補が届くのを待っている */
   pending: boolean;
+  /** 依頼にサブPCからの応答がないまま期限切れになった */
+  timed_out: boolean;
 }
 
 export type TapoCandidateStatus = "received" | "waiting" | "unmeasurable";

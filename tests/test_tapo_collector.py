@@ -579,3 +579,19 @@ class TestRefreshRequest:
 
         assert posted == [{"devices": []}]
         assert tapo.load_hosts_cache(path, now=1001.0)[0] == [("a", "冷蔵庫")]
+
+    def test_discovery_failure_still_answers_and_keeps_the_old_cache(self, monkeypatch, tmp_path):
+        posted = []
+
+        async def fail_discovery(credentials, scan=None):
+            raise TimeoutError("discovery timed out")
+
+        monkeypatch.setattr(tapo, "discover_candidates", fail_discovery)
+        monkeypatch.setattr(tapo, "post_payload", lambda url, payload: posted.append(payload))
+        path = str(tmp_path / "c.json")
+        tapo.save_hosts_cache(path, [("a", "冷蔵庫")], 900.0)
+
+        asyncio.run(tapo.answer_refresh_request(self.CONFIG, path, now=1000.0))
+
+        assert posted == [{"devices": []}]
+        assert tapo.load_hosts_cache(path, now=1001.0)[0] == [("a", "冷蔵庫")]
