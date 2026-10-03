@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.37.0",
+    date: "2026-10-03",
+    changes: [
+      "消費電力の「取得元の名前」シートに「Tapoの候補」欄が加わりました。「候補を更新」を押すと、家の中にあるTapoのスマートプラグを探して一覧に表示します。名前を付けたい機器を一覧から選べるようになります。",
+    ],
+  },
+  {
     version: "4.36.1",
     date: "2026-10-03",
     changes: [
