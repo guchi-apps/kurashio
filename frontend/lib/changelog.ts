@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.37.2",
+    date: "2026-10-03",
+    changes: [
+      "消費電力の取得元の名前を付ける画面で、Tapo機器の候補の更新がいつまでも終わらない状態になることがある問題を直しました。探索に失敗した場合でも待機が終わり、画面を操作できるようになります。",
+    ],
+  },
+  {
     version: "4.37.0",
     date: "2026-10-03",
     changes: [
