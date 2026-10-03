@@ -97,6 +97,9 @@ Deploy to Production 成功
   次の判定が「配布済みとの差分」で見るので拾われる（リリースごとの差分ではない）
 - **判定だけ確かめる:** Actions → iOS TestFlight → Run workflow で `dry_run` にチェック。手元なら
   `node ios/scripts/ios-changes.mjs`
+- **更新不要と判定された版を手動で配布する:** `force` にチェックして dispatch（issue-deck のブランチ画面の
+  「手動で配布」が同じ入力で起動する）。判定結果にかかわらず署名・ビルド・配布・印まで進む。`dry_run` が真なら
+  `force` でもビルドしない。main に含まれないコミットは `force` でも配布できない
 
 ### 失敗したとき・やり直すとき
 

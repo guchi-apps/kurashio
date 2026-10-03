@@ -24,6 +24,10 @@ on:
         description: "判定だけ行い、ビルドしない"
         type: boolean
         default: false
+      force:
+        description: "iOS更新不要と判定された版でも配布する（手動配布。dry_run が真ならビルドしない）"
+        type: boolean
+        default: false
 
 concurrency:
   group: ios-testflight
@@ -55,6 +59,8 @@ jobs:
 
       - name: Decide
         id: decide
+        env:
+          FORCE: ${{ inputs.force }}
         run: |
           SHA=$(git rev-parse HEAD)
           git fetch origin main
@@ -69,6 +75,11 @@ jobs:
           NEEDED=$(printf '%s' "$RESULT" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).needed")
           REASON=$(printf '%s' "$RESULT" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).reason")
           FILES=$(printf '%s' "$RESULT" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).changedFiles.map(f => '- \`' + f + '\`').join('\n')")
+          # 手動配布（force）は判定結果にかかわらず配布する。dry_run はこのあと build 側で止まる
+          if [ "$FORCE" = "true" ]; then
+            if [ "$NEEDED" != "true" ]; then REASON="手動配布（force）。判定は「${REASON}」"; else REASON="手動配布（force）。${REASON}"; fi
+            NEEDED=true
+          fi
           {
             echo "needed=$NEEDED"; echo "sha=$SHA"; echo "version=$VERSION"; echo "build=$BUILD"
           } >> "$GITHUB_OUTPUT"
