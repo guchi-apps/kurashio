@@ -72,7 +72,7 @@ interface TapoCandidatesViewProps {
 }
 
 /**
- * 「Tapoの候補」欄（#692）。探索はサブPCが行うので、押してから届くまで最大5分ほどかかる。
+ * 「Tapoの候補」欄（#692）。探索はサブPCが行うので、通常は次の5分ごとの収集で届く。
  * 受け取るまでボタンは「更新中…」にして、前回の一覧はそのまま見せておく。
  */
 export function TapoCandidatesView({
@@ -86,9 +86,11 @@ export function TapoCandidatesView({
   const devices = candidates?.devices ?? [];
   let status = "まだ探していません。「候補を更新」を押すと、サブPCがTapoを探します。";
   if (waiting) {
-    status = `サブPCに探すよう依頼しました。最大5分ほどかかります${
+    status = `サブPCに探すよう依頼しました。通常5分ほど、遅い場合は最大15分待ちます${
       updatedAt ? `（前回: ${updatedAt}）` : ""
     }`;
+  } else if (candidates?.timed_out) {
+    status = "候補の更新が完了しませんでした。サブPCのTapo収集が動いているか、プラグが同じLANに接続されているか確認し、再度「候補を更新」を押してください。";
   } else if (updatedAt) {
     status = `最終更新 ${updatedAt} · ${devices.length}台`;
   }
@@ -139,7 +141,7 @@ export function TapoCandidatesView({
           })}
         </ul>
       )}
-      {!waiting && updatedAt && devices.length === 0 && (
+      {!waiting && !candidates?.timed_out && updatedAt && devices.length === 0 && (
         <p className="text-[11.5px] leading-relaxed text-muted-foreground">
           Tapoが見つかりませんでした。プラグがサブPCと同じLANにあるか、`collectors/.env` の
           TAPO_USERNAME / TAPO_PASSWORD が合っているかを確認してください。

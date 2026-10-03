@@ -103,6 +103,7 @@ describe("TapoCandidatesView（#692）", () => {
     updated_at: "2026-10-02T10:42:00+09:00",
     devices,
     pending: false,
+    timed_out: false,
   };
 
   function view(overrides: Partial<Parameters<typeof TapoCandidatesView>[0]> = {}) {
@@ -131,6 +132,14 @@ describe("TapoCandidatesView（#692）", () => {
     expect(html).toContain("更新中…");
     expect(html).toContain('disabled=""');
     expect(html).toContain("前回: 10:42");
+  });
+
+  it("期限切れなら確認先を示し、再試行できる", () => {
+    const html = view({ candidates: { ...candidates, timed_out: true } });
+    expect(html).toContain("候補の更新が完了しませんでした");
+    expect(html).toContain("サブPCのTapo収集");
+    expect(html).toContain("候補を更新");
+    expect(html).not.toContain('disabled=""');
   });
 
   it("探した結果が0台なら確認すべき点を出す", () => {
