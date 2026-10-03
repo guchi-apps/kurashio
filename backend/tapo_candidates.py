@@ -34,6 +34,8 @@ SETTING_KEY = "tapo_candidates"
 #: 受け付ける候補の最大数。家庭のLANで数十台を超えるのは打ち間違いか不正な送信
 MAX_DEVICES = 64
 MAX_TEXT_LENGTH = 100
+# 5分ごとの収集が1回遅れても待てるよう、依頼は15分で期限切れにする（#701）。
+REFRESH_TIMEOUT = datetime.timedelta(minutes=15)
 
 # 読み込み→加工→書き戻しを囲む。同期ハンドラはスレッドプールで並行に動く
 _lock = threading.Lock()
@@ -129,8 +131,7 @@ def _write(db: Optional[Session], state: Dict[str, Any]) -> None:
     db.commit()
 
 
-def is_pending(state: Dict[str, Any]) -> bool:
-    """依頼があり、まだ候補が届いていない（依頼より新しい `updated_at` が無い）。"""
+def _unanswered(state: Dict[str, Any]) -> bool:
     requested = _parse(state.get("requested_at"))
     if requested is None:
         return False
@@ -138,12 +139,24 @@ def is_pending(state: Dict[str, Any]) -> bool:
     return updated is None or updated < requested
 
 
-def build_response(state: Dict[str, Any]) -> Dict[str, Any]:
-    return {**state, "pending": is_pending(state)}
+def is_pending(state: Dict[str, Any], now: Optional[datetime.datetime] = None) -> bool:
+    """依頼があり、まだ候補が届いていない（依頼より新しい `updated_at` が無い）。"""
+    requested = _parse(state.get("requested_at"))
+    current = now or datetime.datetime.now(JST)
+    return bool(requested and _unanswered(state) and current - requested < REFRESH_TIMEOUT)
 
 
-def get_state(db: Optional[Session] = None) -> Dict[str, Any]:
-    return build_response(_load(db))
+def build_response(
+    state: Dict[str, Any], now: Optional[datetime.datetime] = None
+) -> Dict[str, Any]:
+    pending = is_pending(state, now)
+    return {**state, "pending": pending, "timed_out": _unanswered(state) and not pending}
+
+
+def get_state(
+    db: Optional[Session] = None, now: Optional[datetime.datetime] = None
+) -> Dict[str, Any]:
+    return build_response(_load(db), now)
 
 
 def request_refresh(
@@ -152,10 +165,10 @@ def request_refresh(
     """画面の「候補を更新」。すでに待っている依頼は立て直さない（押し直しで待ちが延びない）。"""
     with _lock:
         state = _load(db)
-        if not is_pending(state):
+        if not is_pending(state, now):
             state = {**state, "requested_at": _now_iso(now)}
             _write(db, state)
-        return build_response(state)
+        return build_response(state, now)
 
 
 def save_devices(
@@ -173,4 +186,4 @@ def save_devices(
             updated = state["requested_at"]
         state = {**state, "updated_at": updated, "devices": devices}
         _write(db, state)
-        return build_response(state)
+        return build_response(state, now)

@@ -737,7 +737,7 @@ async def answer_refresh_request(
     credentials = Credentials(config["username"], config["password"])
     try:
         candidates = await discover_candidates(credentials)
-    except ConfigError as exc:
+    except Exception as exc:  # noqa: BLE001 - 探索失敗でも0台を返して画面の待機を終える
         LOGGER.warning("探索できませんでした: %s", exc)
         candidates = []
 
