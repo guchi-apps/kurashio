@@ -66,7 +66,7 @@ on:
 
 jobs:
   conflict-resolve:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-claude-conflict-resolve.yml@workflows/v43
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-claude-conflict-resolve.yml@workflows/v44
     with:
       # minimalにするとNodeのセットアップ自体が飛ばされ（reusable側のSetup Node.jsが
       # runtime-setup != 'minimal'でガードされている）、node-versionも効かずランナー標準の
@@ -88,7 +88,7 @@ jobs:
       # YAMLの折りたたみ(>-)は改行を半角スペースへ変換し日本語の途中に空白が入るため、1行で書く。
       verify-commands: "`cd frontend && npm ci`で依存を入れたうえで、`npm run typecheck`（型チェック）・`npm run test`・`npm run build`をfrontend/で実行し、問題がないことを確認する（.github/workflows/ci.ymlのfrontendジョブと同じ。リポジトリルートのpackage.jsonは依存を持たないスタブなので、ルートでnpmコマンドを実行しても意味が無い）。Python側（tests/・app/等）のファイルがコンフリクトに含まれていた場合は、あわせてリポジトリルートで`pip install -r requirements-dev.txt`のうえ`DB_MOCK=true pytest tests/ -q`も実行する（ci.ymlのbackendジョブと同じ。DB_MOCK=trueによりDBサーバーの起動は不要）"
       # 上の uses: と同じタグを指定する。
-      prompts-ref: workflows/v43
+      prompts-ref: workflows/v44
     # CLAUDE_CODE_OAUTH_TOKEN・WORKFLOW_PAT・PROGRESS_REPORT_SECRETを呼ばれる側へ渡す。
     secrets: inherit
     permissions:
