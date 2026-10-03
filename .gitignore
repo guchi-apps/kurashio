@@ -21,6 +21,8 @@ data/filament.json.lock
 data/cleaning.json.lock
 data/bambu_state.json
 data/bambu_state.json.lock
+data/tapo_candidates.json
+data/tapo_candidates.json.lock
 __pycache__/
 *.pyc
 venv/

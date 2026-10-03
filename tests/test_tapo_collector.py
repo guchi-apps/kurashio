@@ -516,3 +516,66 @@ class TestResolveHosts:
         asyncio.run(tapo.resolve_hosts(self.CONFIG, path, False, now=1000.0))
         asyncio.run(tapo.resolve_hosts(self.CONFIG, path, False, now=1300.0))
         assert len(calls) == 1
+
+
+class TestRefreshRequest:
+    """画面の「候補を更新」への応え方（#692）。"""
+
+    CONFIG = {
+        "username": "u",
+        "password": "p",
+        "hosts": [],
+        "api_url": "https://example.test/api/energy",
+    }
+
+    @pytest.fixture(autouse=True)
+    def _fake_credentials(self, monkeypatch):
+        monkeypatch.setattr(tapo, "Credentials", lambda *_: object())
+
+    def test_candidates_url_is_under_energy(self):
+        assert (
+            tapo.candidates_url("https://example.test/api/energy/")
+            == "https://example.test/api/energy/tapo-candidates"
+        )
+
+    def test_measurable_hosts_skips_unmeasurable(self):
+        candidates = [
+            {"host": "a", "name": "冷蔵庫", "model": "P110", "measurable": True},
+            {"host": "b", "name": "ライト", "model": "P100", "measurable": False},
+        ]
+        assert tapo.measurable_hosts(candidates) == [("a", "冷蔵庫")]
+
+    def test_answer_posts_all_candidates_and_caches_measurable(self, monkeypatch, tmp_path):
+        candidates = [
+            {"host": "a", "name": "冷蔵庫", "model": "P110", "measurable": True},
+            {"host": "b", "name": "ライト", "model": "P100", "measurable": False},
+        ]
+        posted = []
+
+        async def fake_discover(credentials, scan=None):
+            return candidates
+
+        monkeypatch.setattr(tapo, "discover_candidates", fake_discover)
+        monkeypatch.setattr(tapo, "post_payload", lambda url, payload: posted.append((url, payload)))
+        path = str(tmp_path / "c.json")
+
+        asyncio.run(tapo.answer_refresh_request(self.CONFIG, path, now=1000.0))
+
+        assert posted == [("https://example.test/api/energy/tapo-candidates", {"devices": candidates})]
+        assert tapo.load_hosts_cache(path, now=1001.0) == ([("a", "冷蔵庫")], True)
+
+    def test_zero_devices_still_posts_and_keeps_the_old_cache(self, monkeypatch, tmp_path):
+        posted = []
+
+        async def fake_discover(credentials, scan=None):
+            return []
+
+        monkeypatch.setattr(tapo, "discover_candidates", fake_discover)
+        monkeypatch.setattr(tapo, "post_payload", lambda url, payload: posted.append(payload))
+        path = str(tmp_path / "c.json")
+        tapo.save_hosts_cache(path, [("a", "冷蔵庫")], 900.0)
+
+        asyncio.run(tapo.answer_refresh_request(self.CONFIG, path, now=1000.0))
+
+        assert posted == [{"devices": []}]
+        assert tapo.load_hosts_cache(path, now=1001.0)[0] == [("a", "冷蔵庫")]

@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import datetime
 import random
 from dotenv import load_dotenv
-from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, ui_settings
+from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
 from .auth import get_current_user
 from .internal_auth import require_internal_control_token, require_internal_token
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -2094,6 +2094,49 @@ async def create_daily_energy(
         db.rollback()
         logger.exception("energyの保存に失敗")
         raise HTTPException(status_code=500, detail="internal error") from e
+
+
+class TapoCandidatesPayload(BaseModel):
+    devices: List[Dict[str, Any]] = []
+
+
+@app.get("/api/energy/tapo-candidates")
+def get_tapo_candidates(
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    """取得元の名前シートの「Tapoの候補」（#692）。`pending` は更新依頼を出して候補を待っている状態。"""
+    return tapo_candidates.get_state(db)
+
+
+@app.post("/api/energy/tapo-candidates/refresh")
+def refresh_tapo_candidates(
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    """「候補を更新」。探索はサブPCの収集が次の定期実行で行う（VPSはプラグのLANに届かない）。"""
+    return tapo_candidates.request_refresh(db)
+
+
+@app.get("/api/energy/tapo-candidates/request")
+def get_tapo_candidates_request(db: Session = Depends(database.get_db)):
+    """収集が更新依頼の有無を見る口。**認証なし**（`/api/energy` の収集経路と同じ扱い・#249）。"""
+    return {"pending": tapo_candidates.get_state(db)["pending"]}
+
+
+@app.post("/api/energy/tapo-candidates")
+def create_tapo_candidates(
+    payload: TapoCandidatesPayload,
+    db: Session = Depends(database.get_db),
+):
+    """収集が探した候補を受け取る。**認証なし**（`/api/energy` と同じ・#249）。書けるのは候補一覧だけ。"""
+    try:
+        state = tapo_candidates.save_devices(payload.devices, db)
+    except Exception as e:
+        db.rollback()
+        logger.exception("tapo候補の保存に失敗")
+        raise HTTPException(status_code=500, detail="internal error") from e
+    return {"status": "ok", "devices": len(state["devices"])}
 
 
 @app.get("/api/energy/summary")

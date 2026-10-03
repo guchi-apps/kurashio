@@ -1,7 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { RotateCcw, X, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
+import { RefreshCw, RotateCcw, X, Zap } from "lucide-react";
+import { fetchTapoCandidates, refreshTapoCandidates } from "@/lib/api";
+import {
+  TAPO_CANDIDATES_POLL_MS,
+  TAPO_CANDIDATE_STATUS_LABEL,
+  candidateStatus,
+  formatCandidateTime,
+  type TapoCandidateStatus,
+  type TapoCandidates,
+} from "@/lib/tapo-candidates";
 import { useUnsavedEdits } from "@/lib/unsaved-edits";
 import type { EnergySourceRow } from "@/lib/types";
 
@@ -46,6 +55,101 @@ export function buildEnergyNameUpdate(
   return names;
 }
 
+
+const STATUS_CLASS: Record<TapoCandidateStatus, string> = {
+  received: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+  waiting: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+  unmeasurable: "bg-muted text-muted-foreground",
+};
+
+interface TapoCandidatesViewProps {
+  candidates: TapoCandidates | null;
+  sources: readonly EnergySourceRow[];
+  /** 更新ボタンを押してから、結果を受け取るまで */
+  waiting: boolean;
+  error: string;
+  onRefresh: () => void;
+}
+
+/**
+ * 「Tapoの候補」欄（#692）。探索はサブPCが行うので、押してから届くまで最大5分ほどかかる。
+ * 受け取るまでボタンは「更新中…」にして、前回の一覧はそのまま見せておく。
+ */
+export function TapoCandidatesView({
+  candidates,
+  sources,
+  waiting,
+  error,
+  onRefresh,
+}: TapoCandidatesViewProps) {
+  const updatedAt = formatCandidateTime(candidates?.updated_at ?? null);
+  const devices = candidates?.devices ?? [];
+  let status = "まだ探していません。「候補を更新」を押すと、サブPCがTapoを探します。";
+  if (waiting) {
+    status = `サブPCに探すよう依頼しました。最大5分ほどかかります${
+      updatedAt ? `（前回: ${updatedAt}）` : ""
+    }`;
+  } else if (updatedAt) {
+    status = `最終更新 ${updatedAt} · ${devices.length}台`;
+  }
+
+  return (
+    <div className="flex flex-col gap-2.5 rounded-2xl border bg-muted/30 p-3">
+      <div className="flex items-center justify-between gap-2.5">
+        <span className="text-[13.5px] font-bold">Tapoの候補</span>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={waiting}
+          className="flex h-[34px] items-center gap-1.5 rounded-full border bg-card px-3 text-[13px] font-bold transition-colors hover:bg-accent disabled:text-muted-foreground"
+        >
+          <RefreshCw
+            className={`size-[15px] ${waiting ? "animate-spin motion-reduce:animate-none" : ""}`}
+            strokeWidth={2.2}
+          />
+          {waiting ? "更新中…" : "候補を更新"}
+        </button>
+      </div>
+      <p className="text-[11.5px] text-muted-foreground" aria-live="polite">
+        {status}
+      </p>
+      {devices.length > 0 && (
+        <ul className="flex flex-col">
+          {devices.map((device) => {
+            const state = candidateStatus(device, sources);
+            return (
+              <li
+                key={device.host}
+                className="flex items-center gap-2.5 border-t py-2 first:border-t-0"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13.5px] font-bold">{device.name}</p>
+                  <p className="text-[11.5px] tabular-nums text-muted-foreground">
+                    {device.host}
+                    {device.model ? ` · ${device.model}` : ""}
+                  </p>
+                </div>
+                <span
+                  className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-bold ${STATUS_CLASS[state]}`}
+                >
+                  {TAPO_CANDIDATE_STATUS_LABEL[state]}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {!waiting && updatedAt && devices.length === 0 && (
+        <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+          Tapoが見つかりませんでした。プラグがサブPCと同じLANにあるか、`collectors/.env` の
+          TAPO_USERNAME / TAPO_PASSWORD が合っているかを確認してください。
+        </p>
+      )}
+      {error && <p className="text-[12px] text-destructive">{error}</p>}
+    </div>
+  );
+}
+
 /**
  * 消費電力の取得元（スマートプラグ）に付ける名前を決めるシート（#335）。
  *
@@ -67,9 +171,56 @@ export function EnergySourceNameSheet({
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [candidates, setCandidates] = useState<TapoCandidates | null>(null);
+  const [candidatesError, setCandidatesError] = useState("");
   // 「保存する」を押すまでサーバーには書かない。開いている間は自動更新の
   // リロードを止め、書きかけの入力を捨てないようにする（#277）
   useUnsavedEdits();
+
+  const pending = candidates?.pending ?? false;
+
+  // 開いたときに最後の候補を読む
+  useEffect(() => {
+    let cancelled = false;
+    fetchTapoCandidates()
+      .then((next) => {
+        if (!cancelled) setCandidates(next);
+      })
+      .catch(() => {
+        if (!cancelled) setCandidatesError("候補を読み込めませんでした");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 更新を待っている間だけ、間隔を空けて取り直す。届けば `pending` が落ちて止まる
+  useEffect(() => {
+    if (!pending) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetchTapoCandidates()
+        .then((next) => {
+          if (!cancelled) setCandidates(next);
+        })
+        .catch(() => {
+          if (!cancelled) setCandidatesError("候補を読み込めませんでした");
+        });
+    }, TAPO_CANDIDATES_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [pending, candidates]);
+
+  const handleRefresh = async () => {
+    setCandidatesError("");
+    try {
+      setCandidates(await refreshTapoCandidates());
+    } catch (err) {
+      setCandidatesError(err instanceof Error ? err.message : "更新を依頼できませんでした");
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -112,8 +263,16 @@ export function EnergySourceNameSheet({
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto overscroll-contain px-5 py-4">
+          <TapoCandidatesView
+            candidates={candidates}
+            sources={sources}
+            waiting={pending}
+            error={candidatesError}
+            onRefresh={() => void handleRefresh()}
+          />
+
           {sources.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
+            <p className="py-6 text-center text-sm text-muted-foreground">
               名前を変えられるスマートプラグがありません。使用量を受け取ると、ここに並びます。
             </p>
           ) : (
