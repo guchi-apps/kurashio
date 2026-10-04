@@ -42,9 +42,10 @@ conntrack の ESTABLISHED に一致しない。サブPCのように ufw が `den
 **`TAPO_HOSTS` は任意。** 収集のたびに LAN 上の Tapo 機器を探し（結果は
 `collectors/.tapo-hosts.json` に `HOSTS_CACHE_TTL_SECONDS` だけ覚える）、計測できる機器を
 自動で読む。Tapo アプリで足したプラグは、次の定期実行から消費電力に出る。
-`TAPO_HOSTS` に書いた行は「名前の固定」と「探索で見つからない機器の指定」に使い、
-同じ IP は書いた側を優先する。今すぐ反映したいときは `--rediscover`
-（キャッシュを捨てて探し直す）。キャッシュ内の機器に繋がらなかったときも探し直す。
+`TAPO_HOSTS` に書いた行は「名前の固定」と「探索で見つからない機器の指定」に使う。
+同じ名前の機器を探索で見つけたときは、DHCP で変わった IP を探索結果へ置き換える。
+到達不能な手書き IP があっても警告を残して探索を続け、ほかの機器の送信を止めない。
+今すぐ反映したいときは `--rediscover`（キャッシュを捨てて探し直す）。
 
 過去ぶんはプラグ本体から取る
 --------------------------
@@ -236,8 +237,26 @@ def merge_hosts(
     manual: Sequence[Tuple[str, Optional[str]]],
     discovered: Sequence[Tuple[str, Optional[str]]],
 ) -> List[Tuple[str, Optional[str]]]:
-    """`TAPO_HOSTS`（手書き）と探索結果を1つの並びへ。同じ IP は手書きを優先する。"""
-    merged: List[Tuple[str, Optional[str]]] = list(manual)
+    """`TAPO_HOSTS`（手書き）と探索結果を1つの並びへ。
+
+    手書きの表示名と探索した alias が一致すれば、表示名を保ったまま探索側の
+    IP を使う。DHCP により IP が変わっても、表示名を `daily_energy.source` として
+    継続させるためである。名前で一致しない手書き IP は、探索で見つからない機器を
+    読むために残す。
+    """
+    discovered_name_counts: Dict[str, int] = {}
+    for _, name in discovered:
+        if name is not None:
+            discovered_name_counts[name] = discovered_name_counts.get(name, 0) + 1
+    discovered_by_name = {
+        name: host
+        for host, name in discovered
+        if name is not None and discovered_name_counts[name] == 1
+    }
+    merged = [
+        (discovered_by_name.get(name, host), name)
+        for host, name in manual
+    ]
     seen = {host for host, _ in merged}
     for host, name in discovered:
         if host in seen:
@@ -830,10 +849,16 @@ async def run_collect(
     readings = await collect(config, hosts, today, start)
     read_hosts = {item["host"] for item in readings}
     manual_hosts = {host for host, _ in config["hosts"]}
-    stale = [h for h, _ in hosts if h not in read_hosts and h not in manual_hosts]
-    if stale and not discovered:
-        # 探索で得た IP に繋がらない（DHCP で変わった・撤去した）可能性。探し直して1回だけやり直す。
-        # 手書きの機器が落ちているだけでは探し直さない（5分ごとに走査してしまうため）
+    unread_hosts = [h for h, _ in hosts if h not in read_hosts]
+    for host in unread_hosts:
+        if host in manual_hosts:
+            LOGGER.warning(
+                "TAPO_HOSTS の %s を読み取れませんでした。IP が古い可能性があります",
+                host,
+            )
+    if unread_hosts and not discovered:
+        # DHCP 変更・撤去で既存の IP に繋がらない可能性。手書きの IP も含めて
+        # 探し直し、同名なら merge_hosts() が新しい IP へ置き換える。
         LOGGER.info("読めない機器があったので探し直します")
         hosts, _ = await resolve_hosts(config, cache_path, True)
         readings = await collect(config, hosts, today, start)
@@ -871,8 +896,9 @@ async def run_collect(
         return 1
 
     LOGGER.info("送信しました: %s", result)
-    # 全台読めたときだけ 0。1台でも落ちていれば 1 にして systemd のログに残す
-    return 0 if len(readings) == len(hosts) else 1
+    # 一部の旧 IP が読めなくても、取得できたレコードの送信に成功していれば
+    # systemd の service 全体は成功にする。未取得の機器は上の WARNING で追跡できる。
+    return 0
 
 
 def main() -> int:
