@@ -740,8 +740,9 @@ POST し直している（`daily_energy` は同じ `(date, source)` を上書き
 
 **`daily_energy` の主キーは `(date, source)` で、`source` そのものが表示名の出どころ**
 （`tapo:冷蔵庫` → `冷蔵庫`）。スマートプラグの名前はTapoアプリで付けたものが
-`collectors/tapo_to_myroom.py` の `device.alias` 経由でここに入っている
-（`TAPO_HOSTS` に `192.168.2.21=冷蔵庫` と書くとそちらが優先される）。
+`collectors/tapo_to_myroom.py` の `device.alias` 経由でここに入っている。
+`TAPO_HOSTS` に `192.168.2.21=冷蔵庫` と書いた場合も、Tapo 側の alias が同じなら
+探索結果の新しい IP を使い、表示名は `冷蔵庫` のまま保つ。
 **名前を変えたいときに `source` を書き換えないこと**——`(date, source)` が別物になり、
 過去の使用量・時間ごとの記録（`energy_readings`）と切れる。
 

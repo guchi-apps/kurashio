@@ -429,6 +429,31 @@ class TestMergeHosts:
     def test_manual_only_device_is_kept(self):
         assert tapo.merge_hosts([("192.168.2.9", None)], []) == [("192.168.2.9", None)]
 
+    def test_manual_name_uses_discovered_ip_after_dhcp_change(self):
+        merged = tapo.merge_hosts(
+            [("192.168.2.21", "冷蔵庫")],
+            [("192.168.2.30", "冷蔵庫")],
+        )
+        assert merged == [("192.168.2.30", "冷蔵庫")]
+
+    def test_manual_name_does_not_replace_different_discovered_device(self):
+        merged = tapo.merge_hosts(
+            [("192.168.2.21", "冷蔵庫")],
+            [("192.168.2.30", "テレビ")],
+        )
+        assert merged == [("192.168.2.21", "冷蔵庫"), ("192.168.2.30", "テレビ")]
+
+    def test_duplicate_discovered_name_does_not_replace_manual_ip(self):
+        merged = tapo.merge_hosts(
+            [("192.168.2.21", "冷蔵庫")],
+            [("192.168.2.30", "冷蔵庫"), ("192.168.2.31", "冷蔵庫")],
+        )
+        assert merged == [
+            ("192.168.2.21", "冷蔵庫"),
+            ("192.168.2.30", "冷蔵庫"),
+            ("192.168.2.31", "冷蔵庫"),
+        ]
+
 
 class TestHostsCache:
     def test_round_trip_and_fresh(self, tmp_path):
@@ -516,6 +541,66 @@ class TestResolveHosts:
         asyncio.run(tapo.resolve_hosts(self.CONFIG, path, False, now=1000.0))
         asyncio.run(tapo.resolve_hosts(self.CONFIG, path, False, now=1300.0))
         assert len(calls) == 1
+
+
+class TestRunCollect:
+    CONFIG = {
+        "username": "u",
+        "password": "p",
+        "hosts": [("192.168.2.21", "冷蔵庫")],
+        "api_url": "https://example.test/api/energy",
+    }
+
+    @staticmethod
+    def _reading(host="192.168.2.30"):
+        return {
+            "host": host,
+            "name": "新しいプラグ",
+            "kwh_today": 1.2,
+            "power_w": 42.0,
+            "history": [],
+        }
+
+    def test_partial_failure_with_successful_post_exits_zero(self, monkeypatch, caplog):
+        async def fake_resolve(*_args, **_kwargs):
+            return [("192.168.2.21", "冷蔵庫"), ("192.168.2.30", None)], True
+
+        async def fake_collect(*_args, **_kwargs):
+            return [self._reading()]
+
+        posted = []
+        monkeypatch.setattr(tapo, "resolve_hosts", fake_resolve)
+        monkeypatch.setattr(tapo, "collect", fake_collect)
+        monkeypatch.setattr(tapo, "post_payload", lambda url, payload: posted.append((url, payload)))
+
+        assert asyncio.run(tapo.run_collect(self.CONFIG, dry_run=False, days=1)) == 0
+        assert posted[0][0] == self.CONFIG["api_url"]
+        assert "TAPO_HOSTS の 192.168.2.21 を読み取れませんでした" in caplog.text
+
+    def test_all_devices_unreadable_exits_nonzero(self, monkeypatch):
+        async def fake_resolve(*_args, **_kwargs):
+            return [("192.168.2.21", "冷蔵庫")], True
+
+        async def fake_collect(*_args, **_kwargs):
+            return []
+
+        monkeypatch.setattr(tapo, "resolve_hosts", fake_resolve)
+        monkeypatch.setattr(tapo, "collect", fake_collect)
+
+        assert asyncio.run(tapo.run_collect(self.CONFIG, dry_run=False, days=1)) == 1
+
+    def test_post_failure_exits_nonzero(self, monkeypatch):
+        async def fake_resolve(*_args, **_kwargs):
+            return [("192.168.2.30", None)], True
+
+        async def fake_collect(*_args, **_kwargs):
+            return [self._reading()]
+
+        monkeypatch.setattr(tapo, "resolve_hosts", fake_resolve)
+        monkeypatch.setattr(tapo, "collect", fake_collect)
+        monkeypatch.setattr(tapo, "post_payload", lambda *_args: (_ for _ in ()).throw(OSError("offline")))
+
+        assert asyncio.run(tapo.run_collect(self.CONFIG, dry_run=False, days=1)) == 1
 
 
 class TestRefreshRequest:
