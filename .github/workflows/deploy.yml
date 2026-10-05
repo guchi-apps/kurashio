@@ -81,6 +81,7 @@ jobs:
       ALLOWED_GOOGLE_EMAILS: ${{ secrets.ALLOWED_GOOGLE_EMAILS }}
       CLEANING_NOTION_DATA_SOURCE_ID: ${{ secrets.CLEANING_NOTION_DATA_SOURCE_ID }}
       CLEANING_NOTION_TOKEN: ${{ secrets.CLEANING_NOTION_TOKEN }}
+      COLLECTOR_API_KEY: ${{ secrets.COLLECTOR_API_KEY }}
       DB_NAME: ${{ secrets.DB_NAME }}
       GARBAGE_NOTION_DATA_SOURCE_ID: ${{ secrets.GARBAGE_NOTION_DATA_SOURCE_ID }}
       GARBAGE_NOTION_TOKEN: ${{ secrets.GARBAGE_NOTION_TOKEN }}
@@ -203,6 +204,9 @@ jobs:
           DB_HOST: ${{ env.DB_HOST }}
           DB_PORT: ${{ env.DB_PORT }}
           DB_NAME: ${{ env.DB_NAME }}
+          # サブPCの収集が消費電力の再取得（#711）の依頼取得・完了報告に使う専用トークン（#714）。
+          # 空でもデプロイは通り、その2口が常に503を返すだけ（無認証へは落ちない）。
+          COLLECTOR_API_KEY: ${{ env.COLLECTOR_API_KEY }}
           # マイグレーション専用ユーザー（DDL権限あり）。アプリ用ユーザーはCRUD権限しか
           # 持たず、テーブルを追加するマイグレーションが CREATE command denied で落ちる（#193）。
           DB_ADMIN_USER: ${{ env.DB_ADMIN_USER }}
@@ -237,6 +241,7 @@ jobs:
           DB_HOST_B64=$(b64 "$DB_HOST")
           DB_PORT_B64=$(b64 "$DB_PORT")
           DB_NAME_B64=$(b64 "$DB_NAME")
+          COLLECTOR_API_KEY_B64=$(b64 "$COLLECTOR_API_KEY")
           DB_MOCK_B64=$(b64 "false")
           DB_ADMIN_USER_B64=$(b64 "$DB_ADMIN_USER")
           DB_ADMIN_PASSWORD_B64=$(b64 "$DB_ADMIN_PASSWORD")
@@ -284,6 +289,7 @@ jobs:
             sync_env_var DB_HOST '${DB_HOST_B64}'
             sync_env_var DB_PORT '${DB_PORT_B64}'
             sync_env_var DB_NAME '${DB_NAME_B64}'
+            sync_env_var COLLECTOR_API_KEY '${COLLECTOR_API_KEY_B64}'
             sync_env_var DB_MOCK '${DB_MOCK_B64}'
 
             bash deployment/ensure_venv.sh

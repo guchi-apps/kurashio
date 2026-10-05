@@ -637,11 +637,14 @@ def build_payload(
     return {"records": records}
 
 
-def post_payload(api_url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def post_payload(
+    api_url: str, payload: Dict[str, Any], bearer: Optional[str] = None
+) -> Dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        api_url, data=body, headers={"Content-Type": "application/json"}, method="POST"
-    )
+    headers = {"Content-Type": "application/json"}
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    request = urllib.request.Request(api_url, data=body, headers=headers, method="POST")
     with urllib.request.urlopen(request, timeout=POST_TIMEOUT) as response:
         return json.loads(response.read().decode("utf-8"))
 
@@ -744,16 +747,28 @@ def refetch_url(api_url: str) -> str:
     return api_url.rstrip("/") + "/refetch"
 
 
+def collector_api_key() -> Optional[str]:
+    """再取得の2口へ送る収集専用トークン（`COLLECTOR_API_KEY`・#714）。未設定なら None。"""
+    return os.getenv("COLLECTOR_API_KEY", "").strip() or None
+
+
 def fetch_refetch_request(api_url: str) -> Optional[Dict[str, Any]]:
     """画面から「指定日以降を再取得」が依頼されていれば、その内容を返す。
 
     読めなければ None（定期実行そのものは止めない）。
     """
+    key = collector_api_key()
+    if not key:
+        # 無認証では送らない（サーバーは 503/401 で断る）。通常の収集は続ける
+        LOGGER.warning("COLLECTOR_API_KEY が未設定のため、再取得の依頼は確認しません")
+        return None
     try:
         query = urllib.parse.urlencode({"kind": REFETCH_KIND})
-        with urllib.request.urlopen(
-            f"{refetch_url(api_url)}/request?{query}", timeout=POST_TIMEOUT
-        ) as response:
+        req = urllib.request.Request(
+            f"{refetch_url(api_url)}/request?{query}",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        with urllib.request.urlopen(req, timeout=POST_TIMEOUT) as response:
             data = json.loads(response.read().decode("utf-8"))
     except Exception as exc:  # noqa: BLE001 - 依頼を読めなくても通常の収集は続ける
         LOGGER.warning("再取得の依頼を確認できませんでした: %s", exc)
@@ -775,6 +790,7 @@ def report_refetch_done(api_url: str, requested_at: str) -> None:
         post_payload(
             f"{refetch_url(api_url)}/done",
             {"kind": REFETCH_KIND, "requested_at": requested_at},
+            bearer=collector_api_key(),
         )
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning("再取得の完了を報告できませんでした: %s", exc)

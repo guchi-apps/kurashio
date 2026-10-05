@@ -371,6 +371,26 @@ curl -s -H "Authorization: Bearer $INTERNAL_API_KEY" http://localhost:8000/api/i
 - 遡れる日数: Tapo は92日（プラグの日別履歴）、エアコンは31日（1日1リクエスト・2秒間隔）
 - 取得に失敗したら（Tapo は1台でも読めなかったときも）完了を報告しない。次の実行でまた依頼が見えるので、期限内なら自動で再試行される
 
+### 収集専用トークン（`COLLECTOR_API_KEY`・#714）
+
+`GET /api/energy/refetch/request` と `POST /api/energy/refetch/done` は、`Authorization: Bearer` に
+この値が合うときだけ通る（`/api/energy` 本体などの既存の収集は今までどおり無認証）。
+取得だけでも `requested_at` が分かり完了報告を偽造できるため、**2口とも**認証する。
+
+- **API範囲**: この2口だけ。`INTERNAL_API_KEY`（読み取り）・`INTERNAL_CONTROL_API_KEY`（操作）では通らず、
+  このトークンでそれらの口も通らない
+- **発行（初回）**: リポジトリの `provision-secret.sh --key COLLECTOR_API_KEY --generate hex32` で
+  1Password（`op://apps/MyRoom/collector-api-key`）とGitHub secretへ入れる。デプロイがVPSの `.env` へ同期する
+- **配布**: サブPCの `collectors/.env`（Tapo は `tapo.env`）へ `COLLECTOR_API_KEY=<値>` を書く
+  （値は `op read op://apps/MyRoom/collector-api-key`。リポジトリ・ログ・Issueには書かない）
+- **更新・失効**: 1Passwordの値を差し替え → GitHubへ同期 → デプロイ → サブPCの `.env` を更新、の順。
+  漏れたと疑うときは同じ手順で差し替えれば古い値は即401になる（再取得の2口以外は影響しない）
+- **反映順と切り戻し**: ①VPSへ先にデプロイ（キー未設定のうちは2口が503＝通常収集は無関係に続く）
+  → ②サブPCの `.env` へ値を置く → ③次の定期実行から再取得が使える。戻すときはサブPCの値を消すだけで
+  収集は通常どおり（再取得だけ「COLLECTOR_API_KEY が未設定」のWARNINGで止まる）
+- **追跡**: 収集のログに「COLLECTOR_API_KEY が未設定のため、再取得の依頼は確認しません」「再取得の依頼を
+  確認できませんでした: HTTP Error 401/503」が出る。401は値の不一致、503はVPS側が未設定
+
 ## 定期実行
 
 ユニットは [`systemd/`](systemd/) にある。`aide` と同じく

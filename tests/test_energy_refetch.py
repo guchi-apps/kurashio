@@ -97,3 +97,87 @@ def test_accepts_naive_jst_now_like_main_get_now_jst():
     state = er.request_refetch(SINCE, now=naive)
     assert state["pending"] is True
     assert er.get_request_for("tapo", now=naive + datetime.timedelta(minutes=1))["pending"] is True
+
+
+# --------------------------- 収集向けの2口の認証（#714）
+
+
+@pytest.fixture
+def api(client, authed_client, monkeypatch):
+    """依頼を1件立てたうえで、未認証の収集クライアントとログイン済みクライアントを返す。"""
+    import backend.main as main
+
+    monkeypatch.setattr(main, "get_now_jst", lambda: at(0))
+    requested_at = authed_client.post(
+        "/api/energy/refetch", json={"since": SINCE.isoformat()}
+    ).json()["requested_at"]
+    return client, requested_at
+
+
+def _state(client_):
+    return client_.get("/api/energy/refetch").json()["sources"]["tapo"]["status"]
+
+
+def _done_body(requested_at):
+    return {"kind": "tapo", "requested_at": requested_at}
+
+
+def test_collector_endpoints_reject_missing_and_wrong_token(api, collector_api_key, authed_client):
+    client_, requested_at = api
+    for headers in ({}, {"Authorization": "Bearer wrong"}, {"Authorization": f"Token {collector_api_key}"}):
+        assert client_.get("/api/energy/refetch/request?kind=tapo", headers=headers).status_code == 401
+        res = client_.post("/api/energy/refetch/done", json=_done_body(requested_at), headers=headers)
+        assert res.status_code == 401
+    assert _state(authed_client) == "waiting"
+
+
+def test_collector_endpoints_fail_closed_when_key_unset(api, no_collector_api_key, authed_client):
+    client_, requested_at = api
+    headers = {"Authorization": "Bearer anything"}
+    assert client_.get("/api/energy/refetch/request?kind=tapo", headers=headers).status_code == 503
+    assert (
+        client_.post("/api/energy/refetch/done", json=_done_body(requested_at), headers=headers).status_code
+        == 503
+    )
+    # 空のトークンでも通らない
+    assert client_.get("/api/energy/refetch/request?kind=tapo", headers={"Authorization": "Bearer "}).status_code == 503
+    assert _state(authed_client) == "waiting"
+
+
+def test_other_internal_keys_do_not_open_collector_endpoints(
+    api, collector_api_key, internal_api_key, internal_control_api_key, authed_client
+):
+    client_, requested_at = api
+    for key in (internal_api_key, internal_control_api_key):
+        headers = {"Authorization": f"Bearer {key}"}
+        assert client_.get("/api/energy/refetch/request?kind=tapo", headers=headers).status_code == 401
+        assert (
+            client_.post("/api/energy/refetch/done", json=_done_body(requested_at), headers=headers).status_code
+            == 401
+        )
+    assert _state(authed_client) == "waiting"
+
+
+def test_collector_can_fetch_and_complete_with_token(api, collector_api_key, authed_client):
+    client_, requested_at = api
+    headers = {"Authorization": f"Bearer {collector_api_key}"}
+    request = client_.get("/api/energy/refetch/request?kind=tapo", headers=headers).json()
+    assert request["pending"] is True and request["requested_at"] == requested_at
+    res = client_.post("/api/energy/refetch/done", json=_done_body(requested_at), headers=headers)
+    assert res.status_code == 200
+    assert _state(authed_client) == "done"
+
+
+def test_stale_requested_at_does_not_complete_new_request(api, collector_api_key, authed_client, monkeypatch):
+    import backend.main as main
+
+    client_, old = api
+    headers = {"Authorization": f"Bearer {collector_api_key}"}
+    # 依頼を完了させてから新しい依頼を立て、古い requested_at で完了を報告する
+    client_.post("/api/energy/refetch/done", json=_done_body(old), headers=headers)
+    client_.post("/api/energy/refetch/done", json={"kind": "aircon", "requested_at": old}, headers=headers)
+    monkeypatch.setattr(main, "get_now_jst", lambda: at(100))
+    new = authed_client.post("/api/energy/refetch", json={"since": SINCE.isoformat()}).json()["requested_at"]
+    assert new != old
+    client_.post("/api/energy/refetch/done", json=_done_body(old), headers=headers)
+    assert _state(authed_client) == "waiting"

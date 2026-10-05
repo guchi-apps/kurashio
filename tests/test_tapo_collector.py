@@ -695,3 +695,36 @@ class TestRefetch:
 
     def test_request_url_sits_under_api_energy(self):
         assert tapo.refetch_url("https://x/api/energy") == "https://x/api/energy/refetch"
+
+    def test_request_without_key_is_not_sent(self, monkeypatch):
+        """COLLECTOR_API_KEY が無いときは無認証で送らず、依頼なしとして扱う（#714）。"""
+        monkeypatch.delenv("COLLECTOR_API_KEY", raising=False)
+
+        def boom(*a, **k):
+            raise AssertionError("must not call the API")
+
+        monkeypatch.setattr(tapo.urllib.request, "urlopen", boom)
+        assert tapo.fetch_refetch_request("https://x/api/energy") is None
+
+    def test_request_and_done_carry_bearer(self, monkeypatch):
+        monkeypatch.setenv("COLLECTOR_API_KEY", "k-1")
+        seen = []
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b'{"pending": true, "since": "2026-10-01", "requested_at": "r"}'
+
+        def fake_urlopen(req, timeout=None):
+            seen.append((req.full_url, req.get_header("Authorization")))
+            return Resp()
+
+        monkeypatch.setattr(tapo.urllib.request, "urlopen", fake_urlopen)
+        assert tapo.fetch_refetch_request("https://x/api/energy")["requested_at"] == "r"
+        tapo.report_refetch_done("https://x/api/energy", "r")
+        assert [auth for _, auth in seen] == ["Bearer k-1", "Bearer k-1"]

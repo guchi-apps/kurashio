@@ -13,7 +13,7 @@ import random
 from dotenv import load_dotenv
 from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
 from .auth import get_current_user
-from .internal_auth import require_internal_control_token, require_internal_token
+from .internal_auth import require_collector_token, require_internal_control_token, require_internal_token
 from pydantic import BaseModel, ConfigDict, model_validator
 
 load_dotenv()
@@ -2177,8 +2177,12 @@ def request_energy_refetch(
 def get_energy_refetch_request(
     kind: str = Query(...),
     db: Session = Depends(database.get_db),
+    _: None = Depends(require_collector_token),
 ):
-    """収集が自分の再取得依頼を見る口。**認証なし**（`/api/energy` の収集経路と同じ扱い・#249）。"""
+    """収集が自分の再取得依頼を見る口。収集専用トークン（`COLLECTOR_API_KEY`）の Bearer だけが通る（#714）。
+
+    `/api/energy` 本体は #249 のまま無認証。ここだけ認証するのは、`requested_at` を読めると
+    完了報告を偽造できるため。"""
     return energy_refetch.get_request_for(kind, db, get_now_jst())
 
 
@@ -2186,8 +2190,9 @@ def get_energy_refetch_request(
 def post_energy_refetch_done(
     payload: EnergyRefetchDonePayload,
     db: Session = Depends(database.get_db),
+    _: None = Depends(require_collector_token),
 ):
-    """収集の完了報告。**認証なし**（#249と同じ）。書けるのは完了印だけで、依頼は立てられない。"""
+    """収集の完了報告。収集専用トークンの Bearer だけが通る（#714）。書けるのは完了印だけで、依頼は立てられない。"""
     try:
         return energy_refetch.mark_done(payload.kind, payload.requested_at, db, get_now_jst())
     except energy_refetch.RefetchError as e:
