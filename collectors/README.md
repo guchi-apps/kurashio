@@ -406,7 +406,7 @@ collectors/deploy/collectors-deploy.sh status   # 状態（--json も可。異�
 
 `deploy` がすること: ローカル変更・main 以外のブランチ・fast-forward 不可なら**何も変えず失敗**
 → `git merge --ff-only` → 専用 venv の依存を更新（requirements が変わったときと venv が無いとき。
-失敗したら元のコミットへ戻す）→ `collectors/systemd/` の unit を `~/.config/systemd/user/` へ同期
+失敗したら更新対象venvをバックアップから復元し、元のコミットへ戻す）→ `collectors/systemd/` の unit を `~/.config/systemd/user/` へ同期
 → 変わった collector だけ再起動（常駐は変更時のみ、timer は unit 変更時のみ）→ 変えた oneshot を
 1回実行し、常駐が起動しているかを確認。結果は `~/.local/state/myroom-collectors/deploy.json`。
 
@@ -419,3 +419,17 @@ collectors/deploy/collectors-deploy.sh status   # 状態（--json も可。異�
   常駐が止まっている・oneshot が2回以上連続失敗／26時間成功していない
 - 配布は **リリースタグ単位**。`DEPLOY_REF=v4.37.3 collectors/deploy/collectors-deploy.sh` で特定のタグも指せる
   （前に進める場合のみ。戻すのは手作業）
+
+### 更新失敗からの再試行
+
+- 更新を始める前に差分の基点を `~/.local/state/myroom-collectors/pending-base` へ保存する。
+  更新後の確認に失敗した場合は残し、同じコミットでも次回はcollectorを再起動・再検証する。
+  全件成功して状態を記録できたときだけ削除する。unit配置・daemon-reload・timer起動の失敗も成功扱いにしない。
+- pip実行前に変更対象venvを `dependency-backup/` へ保存する。後続の依存更新が失敗した場合は、
+  先に更新したvenvも含め元の内容へ戻す。新規venvだったものは削除する。復元失敗時はバックアップを保持して停止する。
+- 依存更新中の強制終了等で `dependency-backup/` が残った場合も、次回の自動更新は停止する。
+  デプロイtimerを止め、`dependency-backup/commit` と `paths` を確認し、対象collectorを停止してから
+  バックアップを元のパスへ復元しコードを記録コミットへ戻す。ローカル変更は破棄しない。
+  コードと依存の整合を確認してからバックアップを片付け、再実行する。未復旧のままバックアップだけ削除しない。
+- 隔離テスト: `python3 tests/test_collectors_deploy.py`。一時リポジトリ・偽systemctl/pipを使い、
+  依存の部分更新失敗、同一コミットでの再検証、途中終了の停止を検証する。実機には接続しない。

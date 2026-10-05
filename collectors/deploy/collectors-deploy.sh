@@ -18,6 +18,8 @@ REPO="${MYROOM_REPO:-$HOME/apps/myroom}"
 STATE_DIR="${MYROOM_COLLECTORS_STATE:-$HOME/.local/state/myroom-collectors}"
 UNIT_DIR="$HOME/.config/systemd/user"
 STATUS_FILE="$STATE_DIR/deploy.json"
+PENDING_FILE="$STATE_DIR/pending-base"
+BACKUP_DIR="$STATE_DIR/dependency-backup"
 # origin/main より何リリース遅れたら異常とみなすか（status）
 MAX_BEHIND_RELEASES="${MAX_BEHIND_RELEASES:-0}"
 # デプロイの最終成功からこの秒数を超えたら異常（status。timer が止まっていないか）
@@ -58,11 +60,28 @@ unit_requirements() {
   [ -n "$venv" ] && echo "collectors/requirements-${venv#.venv-}.txt"
 }
 
+# pip が途中まで変更した場合も、更新前の環境そのものを戻す。
+# 途中終了時はバックアップを残し、次回は自動更新せず復旧を要求する。
+rollback_dependencies() {
+  local path key
+  while IFS= read -r path; do
+    key=${path##*/}
+    rm -rf -- "$path" || return 1
+    if [ -d "$BACKUP_DIR/$key" ]; then
+      cp -a -- "$BACKUP_DIR/$key" "$path" || return 1
+    fi
+  done < "$BACKUP_DIR/paths"
+  git reset --hard --quiet "$prev" || return 1
+  rm -rf -- "$BACKUP_DIR"
+}
+
 deploy() {
   command -v jq >/dev/null || { log "jq が必要です"; exit 1; }
   mkdir -p "$STATE_DIR"
   exec 9>"$STATE_DIR/deploy.lock"
   flock -n 9 || { log "別のデプロイが実行中"; exit 0; }
+
+  [ ! -e "$BACKUP_DIR" ] || fail "依存更新の復旧が未完了。バックアップを保持して停止: $BACKUP_DIR"
 
   cd "$REPO" || fail "リポジトリが見つからない: $REPO"
   branch=$(git rev-parse --abbrev-ref HEAD)
@@ -75,6 +94,15 @@ deploy() {
   [ -n "$target_tag" ] || fail "origin/main に含まれるリリースタグが無い"
   target=$(git rev-parse "$target_tag^{commit}") || fail "タグを解決できない: $target_tag"
   prev=$(git rev-parse HEAD)
+  git merge-base --is-ancestor "$target" origin/main || fail "対象はorigin/mainに含まれていない"
+  baseline=$prev
+  retry_pending=0
+  if [ -f "$PENDING_FILE" ]; then
+    retry_pending=1
+    baseline=$(cat "$PENDING_FILE")
+    git merge-base --is-ancestor "$baseline" "$target" || fail "未完了デプロイの基点を確認できない"
+  fi
+  printf '%s\n' "$baseline" > "$PENDING_FILE.tmp" && mv "$PENDING_FILE.tmp" "$PENDING_FILE" || fail "再試行状態を保存できない"
 
   if [ "$prev" != "$target" ]; then
     git merge-base --is-ancestor "$prev" "$target" || fail "fast-forward できない（$prev → $target_tag）。手で確認が必要"
@@ -84,7 +112,7 @@ deploy() {
     log "最新のリリース $target_tag のまま"
   fi
 
-  changed=$(git diff --name-only "$prev" "$target" -- collectors/ 2>/dev/null)
+  changed=$(git diff --name-only "$baseline" "$target" -- collectors/ 2>/dev/null)
 
   # --- 依存（専用 venv）。失敗したら元のコミットへ戻す ---
   declare -A restart_units=()
@@ -98,13 +126,28 @@ deploy() {
       grep -qxF "$req" <<<"$changed" && need_deps=1
     fi
     if [ "$need_deps" = 1 ]; then
+      if [ ! -d "$BACKUP_DIR" ]; then
+        mkdir -p "$BACKUP_DIR" || fail "依存バックアップを作成できない"
+        printf '%s\n' "$prev" > "$BACKUP_DIR/commit"
+        touch "$BACKUP_DIR/paths"
+      fi
+      # 同じvenvを複数unitで共有しても、最初の状態だけを保存する。
+      if ! grep -qxF "$venv_dir" "$BACKUP_DIR/paths"; then
+        if [ -e "$venv_dir" ]; then
+          cp -a -- "$venv_dir" "$BACKUP_DIR/${venv_dir##*/}" || {
+            rollback_dependencies || fail "依存バックアップ失敗・復旧も失敗。$BACKUP_DIR を保持"
+            fail "依存バックアップに失敗。更新前へ復旧済み"
+          }
+        fi
+        printf '%s\n' "$venv_dir" >> "$BACKUP_DIR/paths" || fail "依存バックアップ一覧を保存できない"
+      fi
       log "依存を更新: $req"
       if { [ -x "$venv_dir/bin/python" ] || python3 -m venv "$venv_dir"; } \
         && "$venv_dir/bin/pip" install --quiet -r "$req"; then
         :
       else
-        git reset --hard --quiet "$prev"
-        fail "依存の更新に失敗（$req）。${prev:0:7} に戻した"
+        rollback_dependencies || fail "依存更新と復旧に失敗。$BACKUP_DIR を保持して停止"
+        fail "依存の更新に失敗（$req）。コードと更新対象venvを${prev:0:7}の状態へ戻した"
       fi
       restart_units[$name]=1
     fi
@@ -113,31 +156,35 @@ deploy() {
     # unit が変わった
     grep -qE "^collectors/systemd/$name\.(service|timer)$" <<<"$changed" && restart_units[$name]=1
   done
+  # 依存更新が全件成功した時点でコードと依存は同じ版になっている。
+  rm -rf -- "$BACKUP_DIR" || fail "依存バックアップを片付けられない"
   # 共有モジュール（どの unit の ExecStart にも無い collectors/*.py）が変わったら全部
   shared=$(grep -E '^collectors/[A-Za-z0-9_]+\.py$' <<<"$changed" | while read -r f; do
     grep -qlF "$f" collectors/systemd/*.service 2>/dev/null || echo "$f"; done)
-  if [ -n "$shared" ]; then
+  if [ -n "$shared" ] || [ "$retry_pending" = 1 ]; then
     for unit in collectors/systemd/*.service; do restart_units[$(basename "$unit" .service)]=1; done
   fi
 
   # --- unit の同期 ---
   mkdir -p "$UNIT_DIR"
-  unit_changed=0
   for f in collectors/systemd/*.service collectors/systemd/*.timer; do
     dest="$UNIT_DIR/$(basename "$f")"
     if ! cmp -s "$f" "$dest"; then
-      cp "$f" "$dest"; unit_changed=1; log "unit を配置: $(basename "$f")"
+      cp "$f" "$dest" || fail "unitの配置に失敗: $f"
+      log "unit を配置: $(basename "$f")"
       restart_units[$(basename "${f%.*}")]=1
     fi
   done
-  [ "$unit_changed" = 1 ] && systemctl --user daemon-reload
+  systemctl --user daemon-reload || fail "daemon-reloadに失敗"
 
   # --- 有効化と再起動（常駐は変わったものだけ、timer は変わった unit の timer だけ） ---
   problems=()
   for f in collectors/systemd/*.timer; do
     t=$(basename "$f")
-    systemctl --user is-enabled --quiet "$t" 2>/dev/null || systemctl --user enable --now "$t" 2>/dev/null
-    [ -n "${restart_units[${t%.timer}]:-}" ] && systemctl --user restart "$t"
+    systemctl --user is-enabled --quiet "$t" 2>/dev/null || systemctl --user enable --now "$t" 2>/dev/null || problems+=("$t の有効化に失敗")
+    if [ -n "${restart_units[${t%.timer}]:-}" ] || ! systemctl --user is-active --quiet "$t"; then
+      systemctl --user restart "$t" || problems+=("$t の起動に失敗")
+    fi
   done
   for f in collectors/systemd/*.service; do
     n=$(basename "$f" .service)
@@ -165,7 +212,8 @@ deploy() {
   if [ ${#problems[@]} -gt 0 ]; then
     fail "更新後の確認で異常: ${problems[*]}（${target_tag} は配置済み。journalctl --user -u <unit> を見る）"
   fi
-  write_status ok "$target_tag"
+  write_status ok "$target_tag" || fail "成功状態を保存できない"
+  rm -f "$PENDING_FILE" || fail "未完了状態を解消できない"
   log "完了: $target_tag"
 }
 
@@ -182,6 +230,7 @@ status() {
   result=$(jq -r '.result // "unknown"' "$STATUS_FILE" 2>/dev/null || echo unknown)
   dirty=0; [ -n "$(git status --porcelain)" ] && dirty=1
   [ "$result" = ok ] || bad=1
+  [ ! -e "$PENDING_FILE" ] && [ ! -e "$BACKUP_DIR" ] || bad=1
   [ "$behind_releases" -gt "$MAX_BEHIND_RELEASES" ] && bad=1
   [ $((now - last_ts)) -gt "$MAX_DEPLOY_AGE_SECONDS" ] && bad=1
   [ "$dirty" = 1 ] && bad=1
