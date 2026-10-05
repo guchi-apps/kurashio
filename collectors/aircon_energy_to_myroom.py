@@ -409,7 +409,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         print("posted: {}".format(result))
         if refetch and not args.dry_run:
-            report_refetch_done(args.api_url, refetch["requested_at"], args.http_timeout)
+            # 一部の日付しか送れていないときは依頼を残し、次回の定期実行で再試行する。
+            # 0 kWh は有効な取得結果。金額だけの欠損は再取得の完了を妨げない。
+            missing_dates = {date.isoformat() for date in dates} - {
+                record["date"] for record in records
+            }
+            if missing_dates:
+                print(
+                    "warning: 再取得が未完了の日付: {}".format(", ".join(sorted(missing_dates))),
+                    file=sys.stderr,
+                )
+            else:
+                report_refetch_done(args.api_url, refetch["requested_at"], args.http_timeout)
         return 0
     except AirCloudHomeRateLimitError as exc:
         # 1時間後の次回実行で取り直せばよいので、詳しく出して終わる。
