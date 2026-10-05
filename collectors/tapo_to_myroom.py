@@ -79,6 +79,7 @@ import socket
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import os.path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -505,8 +506,11 @@ def extract_daily_history(
 
 async def read_daily_history(
     device: Any, today: datetime.date, start: datetime.date
-) -> List[Tuple[datetime.date, float]]:
-    """プラグ本体が持つ日別履歴を読む。読めなければ空（当日ぶんの送信は止めない）。"""
+) -> Optional[List[Tuple[datetime.date, float]]]:
+    """プラグ本体が持つ日別履歴を読む。読めなければ None（当日ぶんの送信は止めない）。
+
+    履歴を持たない機器は空。None は「取れなかった」ことを呼び出し側へ伝えるためで、
+    再取得（#711）では過去分を送れていないのに完了にしないために使う。"""
     module = _energy_module(device)
     if module is None:
         return []
@@ -523,13 +527,13 @@ async def read_daily_history(
         )
     except Exception as exc:  # noqa: BLE001 - 過去ぶんが取れなくても当日ぶんは送る
         LOGGER.warning("日別履歴を取得できませんでした: %s", exc)
-        return []
+        return None
 
     try:
         return extract_daily_history(response, today, start)
     except (ValueError, TypeError, OverflowError, OSError) as exc:
         LOGGER.warning("日別履歴を解釈できませんでした: %s", exc)
-        return []
+        return None
 
 
 async def read_device(
@@ -562,12 +566,14 @@ async def read_device(
         history = (
             await read_daily_history(device, today, start) if start < today else []
         )
+        history_failed = history is None
 
         return {
             "host": host,
             "name": name_override or getattr(device, "alias", None) or host,
             "model": getattr(device, "model", None),
-            "history": history,
+            "history": history or [],
+            "history_failed": history_failed,
             **energy,
         }
     finally:
@@ -631,11 +637,14 @@ def build_payload(
     return {"records": records}
 
 
-def post_payload(api_url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def post_payload(
+    api_url: str, payload: Dict[str, Any], bearer: Optional[str] = None
+) -> Dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(
-        api_url, data=body, headers={"Content-Type": "application/json"}, method="POST"
-    )
+    headers = {"Content-Type": "application/json"}
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    request = urllib.request.Request(api_url, data=body, headers=headers, method="POST")
     with urllib.request.urlopen(request, timeout=POST_TIMEOUT) as response:
         return json.loads(response.read().decode("utf-8"))
 
@@ -727,6 +736,64 @@ async def discover_hosts(
 def candidates_url(api_url: str) -> str:
     """候補の受け口。`/api/energy` の下にある（#692）。"""
     return api_url.rstrip("/") + "/tapo-candidates"
+
+
+#: 再取得の依頼（#711）で `/api/energy/refetch/request` へ名乗る収集の名前
+REFETCH_KIND = "tapo"
+
+
+def refetch_url(api_url: str) -> str:
+    """再取得の受け口。`/api/energy` の下にある（#711）。"""
+    return api_url.rstrip("/") + "/refetch"
+
+
+def collector_api_key() -> Optional[str]:
+    """再取得の2口へ送る収集専用トークン（`COLLECTOR_API_KEY`・#714）。未設定なら None。"""
+    return os.getenv("COLLECTOR_API_KEY", "").strip() or None
+
+
+def fetch_refetch_request(api_url: str) -> Optional[Dict[str, Any]]:
+    """画面から「指定日以降を再取得」が依頼されていれば、その内容を返す。
+
+    読めなければ None（定期実行そのものは止めない）。
+    """
+    key = collector_api_key()
+    if not key:
+        # 無認証では送らない（サーバーは 503/401 で断る）。通常の収集は続ける
+        LOGGER.warning("COLLECTOR_API_KEY が未設定のため、再取得の依頼は確認しません")
+        return None
+    try:
+        query = urllib.parse.urlencode({"kind": REFETCH_KIND})
+        req = urllib.request.Request(
+            f"{refetch_url(api_url)}/request?{query}",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        with urllib.request.urlopen(req, timeout=POST_TIMEOUT) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - 依頼を読めなくても通常の収集は続ける
+        LOGGER.warning("再取得の依頼を確認できませんでした: %s", exc)
+        return None
+    if not data.get("pending") or not data.get("since") or not data.get("requested_at"):
+        return None
+    return data
+
+
+def refetch_days(today: datetime.date, since: str) -> int:
+    """依頼の日付から、当日を含めて何日ぶん取り直すか。プラグが持つ履歴の上限で切る。"""
+    start = datetime.date.fromisoformat(since)
+    return max(1, min(MAX_DAYS, (today - start).days + 1))
+
+
+def report_refetch_done(api_url: str, requested_at: str) -> None:
+    """取り直して送れたことを知らせる。失敗しても次回また取り直すだけなので落とさない。"""
+    try:
+        post_payload(
+            f"{refetch_url(api_url)}/done",
+            {"kind": REFETCH_KIND, "requested_at": requested_at},
+            bearer=collector_api_key(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning("再取得の完了を報告できませんでした: %s", exc)
 
 
 def fetch_refresh_pending(api_url: str) -> bool:
@@ -834,6 +901,14 @@ async def run_collect(
     config: Dict[str, Any], dry_run: bool, days: int, rediscover: bool = False
 ) -> int:
     today = datetime.datetime.now(JST).date()
+    refetch = None if dry_run else fetch_refetch_request(config["api_url"])
+    if refetch:
+        try:
+            days = max(days, refetch_days(today, refetch["since"]))
+            LOGGER.info("再取得の依頼があります（%s 以降・%d 日ぶん）", refetch["since"], days)
+        except ValueError:
+            LOGGER.warning("再取得の依頼の日付を読めませんでした: %r", refetch.get("since"))
+            refetch = None
     start = window_start(today, days)
     cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), HOSTS_CACHE_FILENAME)
 
@@ -896,6 +971,18 @@ async def run_collect(
         return 1
 
     LOGGER.info("送信しました: %s", result)
+    if refetch:
+        # 読めなかった機器があるうちは完了にしない。依頼は期限まで残るので次回また取り直す
+        missing = {host for host, _ in hosts} - {item["host"] for item in readings}
+        # 当日ぶんは読めても過去の履歴が取れなかった機器も、期間を取り直せていないので未完了
+        missing |= {item["host"] for item in readings if item.get("history_failed")}
+        if missing:
+            LOGGER.warning(
+                "再取得の依頼は未完了のままにします（読めなかった機器・履歴: %s）",
+                ", ".join(sorted(missing)),
+            )
+        else:
+            report_refetch_done(config["api_url"], refetch["requested_at"])
     # 一部の旧 IP が読めなくても、取得できたレコードの送信に成功していれば
     # systemd の service 全体は成功にする。未取得の機器は上の WARNING で追跡できる。
     return 0

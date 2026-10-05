@@ -48,3 +48,5 @@ ios/build/
 .DS_Store
 data/device_tokens.json
 data/device_tokens.json.lock
+data/energy_refetch.json
+data/energy_refetch.json.lock

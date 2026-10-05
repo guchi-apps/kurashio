@@ -1,0 +1,14 @@
+[Unit]
+# サブPCの collector を最新のリリース（vX.Y.Z タグ）へ追従させる（#707）。
+# 失敗するとこの unit が failed になる（systemctl --user --failed・status で見える）。
+Description=MyRoom: collector を最新リリースへ更新する
+Documentation=https://github.com/guchi-apps/myroom
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=10min
+WorkingDirectory=%h/apps/myroom
+ExecStart=%h/apps/myroom/collectors/deploy/collectors-deploy.sh deploy
+Nice=10

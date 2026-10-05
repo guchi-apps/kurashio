@@ -356,10 +356,46 @@ curl -s -H "Authorization: Bearer $INTERNAL_API_KEY" http://localhost:8000/api/i
 | `TLS の証明書検証に失敗しました` | 繋ぎ先がプリンターではない、または証明書が変わった |
 | `3mf から使用量を読めませんでした` | 再試行を使い切った。FTPS（990）が開いているか・SDカードの有無・クラウド経由の印刷でないかを見る。在庫へは自動で引かれないので、手入力で記録する |
 
+## 消費電力の「指定日以降の再取得」（#711）
+
+取得できなかった日を画面から取り直せる。消費電力の詳細パネルのヘッダーにある再取得アイコン →
+日付を選ぶ。**プラグ・エアコンのクラウドに届くのはサブPCだけ**なので、VPSは依頼の印
+（`app_settings` の `energy_refetch`）を立てるだけで、取り直すのは `tapo_to_myroom.py`・
+`aircon_energy_to_myroom.py` が次の定期実行で行う。
+
+- 収集は実行のたびに `GET /api/energy/refetch/request?kind=tapo|aircon` を見て、依頼があれば
+  **`--days` と依頼日からの日数の大きいほう**で取り直し、`/api/energy` へ送れたら
+  `POST /api/energy/refetch/done` で完了を報告する。依頼が無ければ従来どおり
+- 反映までの時間は timer の間隔どおり（Tapo は最大5分、エアコンは最大1時間）。依頼は90分で
+  期限切れ（`応答なし`）になる
+- 遡れる日数: Tapo は92日（プラグの日別履歴）、エアコンは31日（1日1リクエスト・2秒間隔）
+- 取得に失敗したら（Tapo は1台でも読めなかったときも）完了を報告しない。次の実行でまた依頼が見えるので、期限内なら自動で再試行される
+
+### 収集専用トークン（`COLLECTOR_API_KEY`・#714）
+
+`GET /api/energy/refetch/request` と `POST /api/energy/refetch/done` は、`Authorization: Bearer` に
+この値が合うときだけ通る（`/api/energy` 本体などの既存の収集は今までどおり無認証）。
+取得だけでも `requested_at` が分かり完了報告を偽造できるため、**2口とも**認証する。
+
+- **API範囲**: この2口だけ。`INTERNAL_API_KEY`（読み取り）・`INTERNAL_CONTROL_API_KEY`（操作）では通らず、
+  このトークンでそれらの口も通らない
+- **発行（初回）**: リポジトリの `provision-secret.sh --key COLLECTOR_API_KEY --generate hex32` で
+  1Password（`op://apps/MyRoom/collector-api-key`）とGitHub secretへ入れる。デプロイがVPSの `.env` へ同期する
+- **配布**: サブPCの `collectors/.env`（Tapo は `tapo.env`）へ `COLLECTOR_API_KEY=<値>` を書く
+  （値は `op read op://apps/MyRoom/collector-api-key`。リポジトリ・ログ・Issueには書かない）
+- **更新・失効**: 1Passwordの値を差し替え → GitHubへ同期 → デプロイ → サブPCの `.env` を更新、の順。
+  漏れたと疑うときは同じ手順で差し替えれば古い値は即401になる（再取得の2口以外は影響しない）
+- **反映順と切り戻し**: ①VPSへ先にデプロイ（キー未設定のうちは2口が503＝通常収集は無関係に続く）
+  → ②サブPCの `.env` へ値を置く → ③次の定期実行から再取得が使える。戻すときはサブPCの値を消すだけで
+  収集は通常どおり（再取得だけ「COLLECTOR_API_KEY が未設定」のWARNINGで止まる）
+- **追跡**: 収集のログに「COLLECTOR_API_KEY が未設定のため、再取得の依頼は確認しません」「再取得の依頼を
+  確認できませんでした: HTTP Error 401/503」が出る。401は値の不一致、503はVPS側が未設定
+
 ## 定期実行
 
 ユニットは [`systemd/`](systemd/) にある。`aide` と同じく
-**サブPCの `~/.config/systemd/user/` へ手でコピーする**（リポジトリからは自動反映されない）。
+**初回だけサブPCの `~/.config/systemd/user/` へ手でコピーする**。以後の変更は下の
+「リリースへの自動追従」が配置し直す（#707）。
 
 ```bash
 cp collectors/systemd/myroom-aircon-energy.service collectors/systemd/myroom-aircon-energy.timer \
@@ -385,3 +421,50 @@ systemctl --user enable --now myroom-bambu.service
 systemctl --user status myroom-bambu.service
 journalctl --user -u myroom-bambu.service -f
 ```
+
+## リリースへの自動追従（#707）
+
+サブPCの `~/apps/myroom` は **`myroom-collectors-deploy.timer`（15分ごと）が最新のリリースタグ
+（origin/main に含まれる最新の `vX.Y.Z`）へ進める。** 手動の `git pull` は要らない。
+VPS の `deploy.yml` とは独立しているので、サブPCがオフラインでも本番デプロイは影響を受けない。
+（以前は手動更新で、サブPCが141コミット遅れて #660 の Tapo 自動探索が届かなかった。）
+
+```bash
+# 初回だけ（以降はこの unit 自身も自動で更新される）
+cp collectors/systemd/myroom-collectors-deploy.* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now myroom-collectors-deploy.timer
+
+collectors/deploy/collectors-deploy.sh          # 今すぐ追従する
+collectors/deploy/collectors-deploy.sh status   # 状態（--json も可。異常があれば終了コード1）
+```
+
+`deploy` がすること: ローカル変更・main 以外のブランチ・fast-forward 不可なら**何も変えず失敗**
+→ `git merge --ff-only` → 専用 venv の依存を更新（requirements が変わったときと venv が無いとき。
+失敗したら更新対象venvをバックアップから復元し、元のコミットへ戻す）→ `collectors/systemd/` の unit を `~/.config/systemd/user/` へ同期
+→ 変わった collector だけ再起動（常駐は変更時のみ、timer は unit 変更時のみ）→ 変えた oneshot を
+1回実行し、常駐が起動しているかを確認。結果は `~/.local/state/myroom-collectors/deploy.json`。
+
+- **対象の判定は unit の `ExecStart` から導く**（`collectors/<script>.py`、`.venv-X` → `requirements-X.txt`）。
+  collector を足すときは `collectors/systemd/` に unit を置くだけでよい。どの unit にも無い
+  `collectors/*.py`（共有モジュール）が変わったときは全 collector を対象にする
+- 失敗すると `myroom-collectors-deploy.service` が `failed` になる（`systemctl --user --failed`）。
+  通知は未実装。`status --json` を StatusHub 等から読む形は別件
+- `status` の異常判定: 最新リリースより遅れている・デプロイが2時間成功していない・ローカル変更あり・
+  常駐が止まっている・oneshot が2回以上連続失敗／26時間成功していない
+- 配布は **リリースタグ単位**。`DEPLOY_REF=v4.37.3 collectors/deploy/collectors-deploy.sh` で特定のタグも指せる
+  （前に進める場合のみ。戻すのは手作業）
+
+### 更新失敗からの再試行
+
+- 更新を始める前に差分の基点を `~/.local/state/myroom-collectors/pending-base` へ保存する。
+  更新後の確認に失敗した場合は残し、同じコミットでも次回はcollectorを再起動・再検証する。
+  全件成功して状態を記録できたときだけ削除する。unit配置・daemon-reload・timer起動の失敗も成功扱いにしない。
+- pip実行前に変更対象venvを `dependency-backup/` へ保存する。後続の依存更新が失敗した場合は、
+  先に更新したvenvも含め元の内容へ戻す。新規venvだったものは削除する。復元失敗時はバックアップを保持して停止する。
+- 依存更新中の強制終了等で `dependency-backup/` が残った場合も、次回の自動更新は停止する。
+  デプロイtimerを止め、`dependency-backup/commit` と `paths` を確認し、対象collectorを停止してから
+  バックアップを元のパスへ復元しコードを記録コミットへ戻す。ローカル変更は破棄しない。
+  コードと依存の整合を確認してからバックアップを片付け、再実行する。未復旧のままバックアップだけ削除しない。
+- 隔離テスト: `python3 tests/test_collectors_deploy.py`。一時リポジトリ・偽systemctl/pipを使い、
+  依存の部分更新失敗、同一コミットでの再検証、途中終了の停止を検証する。実機には接続しない。

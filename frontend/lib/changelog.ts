@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.38.0",
+    date: "2026-10-06",
+    changes: [
+      "消費電力の画面に「データの再取得」を追加しました。取得できていなかった日があるとき、日付を指定してその日以降のデータを取り直せます。",
+    ],
+  },
+  {
     version: "4.37.2",
     date: "2026-10-03",
     changes: [
