@@ -192,6 +192,37 @@ class TestRefetch:
             == collector.REFETCH_MAX_DAYS
         )
 
+    def test_request_without_key_is_not_sent(self, monkeypatch):
+        """COLLECTOR_API_KEY が無いときは無認証で送らず、依頼なしとして扱う（#714）。"""
+        monkeypatch.delenv("COLLECTOR_API_KEY", raising=False)
+
+        def boom(*a, **k):
+            raise AssertionError("must not call the API")
+
+        monkeypatch.setattr(collector.requests, "get", boom)
+        assert collector.fetch_refetch_request("https://x/api/energy", 5) is None
+
+    def test_request_and_done_carry_bearer(self, monkeypatch):
+        monkeypatch.setenv("COLLECTOR_API_KEY", "k-1")
+        seen = []
+
+        class Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"pending": True, "since": "2026-10-01", "requested_at": "r"}
+
+        monkeypatch.setattr(
+            collector.requests, "get", lambda url, **kw: seen.append(kw["headers"]) or Resp()
+        )
+        monkeypatch.setattr(
+            collector.requests, "post", lambda url, **kw: seen.append(kw["headers"]) or Resp()
+        )
+        assert collector.fetch_refetch_request("https://x/api/energy", 5)["requested_at"] == "r"
+        collector.report_refetch_done("https://x/api/energy", "r", 5)
+        assert seen == [{"Authorization": "Bearer k-1"}] * 2
+
 
 @pytest.mark.parametrize("values, expected_done", [
     ([1.0, 2.0], True),

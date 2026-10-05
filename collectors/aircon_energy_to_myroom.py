@@ -239,11 +239,23 @@ def refetch_url(api_url: str) -> str:
     return api_url.rstrip("/") + "/refetch"
 
 
+def collector_headers() -> Optional[Dict[str, str]]:
+    """再取得の2口へ送る収集専用トークン（`COLLECTOR_API_KEY`・#714）。未設定なら None。"""
+    key = os.getenv("COLLECTOR_API_KEY", "").strip()
+    return {"Authorization": "Bearer " + key} if key else None
+
+
 def fetch_refetch_request(api_url: str, timeout: int) -> Optional[Dict[str, Any]]:
     """画面から「指定日以降を再取得」が依頼されていれば、その内容を返す。読めなければ None。"""
+    headers = collector_headers()
+    if headers is None:
+        # 無認証では送らない（サーバーは 503/401 で断る）。通常の収集は続ける
+        print("warning: COLLECTOR_API_KEY が未設定のため、再取得の依頼は確認しません", file=sys.stderr)
+        return None
     try:
         response = requests.get(
             refetch_url(api_url) + "/request",
+            headers=headers,
             params={"kind": REFETCH_KIND},
             timeout=timeout,
         )
@@ -269,6 +281,7 @@ def report_refetch_done(api_url: str, requested_at: str, timeout: int) -> None:
         requests.post(
             refetch_url(api_url) + "/done",
             json={"kind": REFETCH_KIND, "requested_at": requested_at},
+            headers=collector_headers(),
             timeout=timeout,
         ).raise_for_status()
     except Exception as exc:  # noqa: BLE001

@@ -180,3 +180,16 @@ def authed_client(client):
         yield client
     finally:
         del app.dependency_overrides[get_current_user]
+
+
+@pytest.fixture
+def collector_api_key(monkeypatch):
+    """収集専用トークンを設定する（#714）。読み取り用・操作用とは別の値。"""
+    key = "test-collector-api-key"
+    monkeypatch.setenv("COLLECTOR_API_KEY", key)
+    return key
+
+
+@pytest.fixture
+def no_collector_api_key(monkeypatch):
+    monkeypatch.delenv("COLLECTOR_API_KEY", raising=False)
