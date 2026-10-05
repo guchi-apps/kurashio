@@ -227,6 +227,54 @@ def post_to_myroom(
     return response.json()
 
 
+#: 再取得の依頼（#711）で `/api/energy/refetch/request` へ名乗る収集の名前
+REFETCH_KIND = "aircon"
+
+#: 再取得で遡る最大日数。日付ごとにAPIを叩く（間隔2秒）うえレート制限があるので短くする。
+#: `backend/energy_refetch.py` の `MAX_DAYS_BY_KIND["aircon"]` と同じ値。
+REFETCH_MAX_DAYS = 31
+
+
+def refetch_url(api_url: str) -> str:
+    return api_url.rstrip("/") + "/refetch"
+
+
+def fetch_refetch_request(api_url: str, timeout: int) -> Optional[Dict[str, Any]]:
+    """画面から「指定日以降を再取得」が依頼されていれば、その内容を返す。読めなければ None。"""
+    try:
+        response = requests.get(
+            refetch_url(api_url) + "/request",
+            params={"kind": REFETCH_KIND},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:  # noqa: BLE001 - 依頼を読めなくても通常の収集は続ける
+        print("warning: 再取得の依頼を確認できませんでした: {}".format(exc), file=sys.stderr)
+        return None
+    if not data.get("pending") or not data.get("since") or not data.get("requested_at"):
+        return None
+    return data
+
+
+def refetch_days(today: datetime.date, since: str) -> int:
+    """依頼の日付から、当日を含めて何日ぶん取り直すか（上限 REFETCH_MAX_DAYS）。"""
+    start = datetime.date.fromisoformat(since)
+    return max(1, min(REFETCH_MAX_DAYS, (today - start).days + 1))
+
+
+def report_refetch_done(api_url: str, requested_at: str, timeout: int) -> None:
+    """取り直して送れたことを知らせる。失敗しても次回また取り直すだけなので落とさない。"""
+    try:
+        requests.post(
+            refetch_url(api_url) + "/done",
+            json={"kind": REFETCH_KIND, "requested_at": requested_at},
+            timeout=timeout,
+        ).raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        print("warning: 再取得の完了を報告できませんでした: {}".format(exc), file=sys.stderr)
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="AirCloud Home (白くまくん) の日別使用量 -> MyRoom /api/energy"
@@ -291,10 +339,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         args = parse_args(argv)
 
+        refetch = None
         if args.date:
             dates = [datetime.date.fromisoformat(args.date)]
         else:
-            dates = target_dates(today_jst(), args.days)
+            days = args.days
+            if not (args.dry_run or args.dump_raw or args.list_units):
+                refetch = fetch_refetch_request(args.api_url, args.http_timeout)
+            if refetch:
+                try:
+                    days = max(days, refetch_days(today_jst(), refetch["since"]))
+                    print("refetch: {} 以降 {}日ぶん".format(refetch["since"], days))
+                except ValueError:
+                    refetch = None
+            dates = target_dates(today_jst(), days)
 
         with AirCloudHomeClient(args.email, args.password, timeout=args.http_timeout) as client:
             family_ids = client.get_family_ids()
@@ -350,6 +408,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             dry_run=args.dry_run,
         )
         print("posted: {}".format(result))
+        if refetch and not args.dry_run:
+            report_refetch_done(args.api_url, refetch["requested_at"], args.http_timeout)
         return 0
     except AirCloudHomeRateLimitError as exc:
         # 1時間後の次回実行で取り直せばよいので、詳しく出して終わる。

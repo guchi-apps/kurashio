@@ -79,6 +79,7 @@ import socket
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import os.path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -729,6 +730,51 @@ def candidates_url(api_url: str) -> str:
     return api_url.rstrip("/") + "/tapo-candidates"
 
 
+#: 再取得の依頼（#711）で `/api/energy/refetch/request` へ名乗る収集の名前
+REFETCH_KIND = "tapo"
+
+
+def refetch_url(api_url: str) -> str:
+    """再取得の受け口。`/api/energy` の下にある（#711）。"""
+    return api_url.rstrip("/") + "/refetch"
+
+
+def fetch_refetch_request(api_url: str) -> Optional[Dict[str, Any]]:
+    """画面から「指定日以降を再取得」が依頼されていれば、その内容を返す。
+
+    読めなければ None（定期実行そのものは止めない）。
+    """
+    try:
+        query = urllib.parse.urlencode({"kind": REFETCH_KIND})
+        with urllib.request.urlopen(
+            f"{refetch_url(api_url)}/request?{query}", timeout=POST_TIMEOUT
+        ) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - 依頼を読めなくても通常の収集は続ける
+        LOGGER.warning("再取得の依頼を確認できませんでした: %s", exc)
+        return None
+    if not data.get("pending") or not data.get("since") or not data.get("requested_at"):
+        return None
+    return data
+
+
+def refetch_days(today: datetime.date, since: str) -> int:
+    """依頼の日付から、当日を含めて何日ぶん取り直すか。プラグが持つ履歴の上限で切る。"""
+    start = datetime.date.fromisoformat(since)
+    return max(1, min(MAX_DAYS, (today - start).days + 1))
+
+
+def report_refetch_done(api_url: str, requested_at: str) -> None:
+    """取り直して送れたことを知らせる。失敗しても次回また取り直すだけなので落とさない。"""
+    try:
+        post_payload(
+            f"{refetch_url(api_url)}/done",
+            {"kind": REFETCH_KIND, "requested_at": requested_at},
+        )
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning("再取得の完了を報告できませんでした: %s", exc)
+
+
 def fetch_refresh_pending(api_url: str) -> bool:
     """画面から「候補を更新」が押されて、まだ応えていないか。
 
@@ -834,6 +880,14 @@ async def run_collect(
     config: Dict[str, Any], dry_run: bool, days: int, rediscover: bool = False
 ) -> int:
     today = datetime.datetime.now(JST).date()
+    refetch = None if dry_run else fetch_refetch_request(config["api_url"])
+    if refetch:
+        try:
+            days = max(days, refetch_days(today, refetch["since"]))
+            LOGGER.info("再取得の依頼があります（%s 以降・%d 日ぶん）", refetch["since"], days)
+        except ValueError:
+            LOGGER.warning("再取得の依頼の日付を読めませんでした: %r", refetch.get("since"))
+            refetch = None
     start = window_start(today, days)
     cache_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), HOSTS_CACHE_FILENAME)
 
@@ -896,6 +950,8 @@ async def run_collect(
         return 1
 
     LOGGER.info("送信しました: %s", result)
+    if refetch:
+        report_refetch_done(config["api_url"], refetch["requested_at"])
     # 一部の旧 IP が読めなくても、取得できたレコードの送信に成功していれば
     # systemd の service 全体は成功にする。未取得の機器は上の WARNING で追跡できる。
     return 0

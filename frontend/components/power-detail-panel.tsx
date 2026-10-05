@@ -7,11 +7,13 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  RefreshCw,
   Upload,
   X,
 } from "lucide-react";
 import { fetchEnergyHourly, fetchEnergySummary, importKepcoCsv, updateUiSettings } from "@/lib/api";
 import { EnergyDateCalendar } from "@/components/energy-date-calendar";
+import { EnergyRefetchSheet } from "@/components/energy-refetch-sheet";
 import { EnergySourceNameSheet } from "@/components/energy-source-name-sheet";
 import { PowerSourceDetail } from "@/components/power-source-detail";
 import { SettingsIconButton } from "@/components/ui/settings-icon-button";
@@ -125,6 +127,7 @@ export function PowerDetailPanel({
   const [calendarOpen, setCalendarOpen] = useState(false);
   // 取得元（スマートプラグ）の名前を変えるシート（#335）
   const [nameSheetOpen, setNameSheetOpen] = useState(false);
+  const [refetchSheetOpen, setRefetchSheetOpen] = useState(false);
 
   useEffect(() => {
     if (tab !== "hourly" || !hourlyDate) return;
@@ -296,6 +299,18 @@ export function PowerDetailPanel({
               見出しの中にボタンを置けないため、入口はこのヘッダー1か所に持つ。
               機器を1つ選んだあと（推移の画面）は、その場の設定ではないので出さない。
             */}
+            {/* 指定日以降の再取得（#711）。設定ではないので歯車とは別のアイコンにする */}
+            {!selectedSource && todayIso && (
+              <button
+                type="button"
+                onClick={() => setRefetchSheetOpen(true)}
+                className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                aria-label="データの再取得"
+                title="データの再取得"
+              >
+                <RefreshCw className="size-[18px]" strokeWidth={1.75} />
+              </button>
+            )}
             {!selectedSource && plugCount > 0 && (
               <SettingsIconButton
                 label="取得元の名前"
@@ -683,6 +698,14 @@ export function PowerDetailPanel({
             setCalendarOpen(false);
           }}
           onClose={() => setCalendarOpen(false)}
+        />
+      )}
+
+      {refetchSheetOpen && todayIso && (
+        <EnergyRefetchSheet
+          today={todayIso}
+          onClose={() => setRefetchSheetOpen(false)}
+          onCompleted={onKepcoImported}
         />
       )}
 

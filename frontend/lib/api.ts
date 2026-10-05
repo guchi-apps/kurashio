@@ -43,6 +43,7 @@ import type {
   FilamentSpoolPatch,
 } from "@/lib/filament";
 import type { GarbageSchedule } from "@/lib/garbage";
+import type { EnergyRefetch } from "@/lib/energy-refetch";
 import type { TapoCandidates } from "@/lib/tapo-candidates";
 import type {
   RemoteButtons,
@@ -594,6 +595,34 @@ export async function refreshTapoCandidates(): Promise<TapoCandidates> {
   return fetchJson<TapoCandidates>("/api/energy/tapo-candidates/refresh", {
     method: "POST",
   });
+}
+
+/** 消費電力の再取得の進み具合（#711） */
+export async function fetchEnergyRefetch(): Promise<EnergyRefetch> {
+  return fetchJson<EnergyRefetch>("/api/energy/refetch");
+}
+
+/**
+ * 「指定日以降を再取得」。取り直すのはサブPCの収集で、応答は待ち状態（`pending`）になる。
+ * すでに依頼中（409）・日付が不正（422）のときは、サーバーの理由をそのまま投げる。
+ */
+export async function requestEnergyRefetch(since: string): Promise<EnergyRefetch> {
+  const res = await fetchWithAuth("/api/energy/refetch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ since }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      // 本文が読めなければ既定の文言にする
+    }
+    throw new Error(detail || "再取得を依頼できませんでした");
+  }
+  return res.json() as Promise<EnergyRefetch>;
 }
 
 /**

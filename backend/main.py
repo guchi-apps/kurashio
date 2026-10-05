@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import datetime
 import random
 from dotenv import load_dotenv
-from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
+from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
 from .auth import get_current_user
 from .internal_auth import require_internal_control_token, require_internal_token
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -2137,6 +2137,65 @@ def create_tapo_candidates(
         logger.exception("tapo候補の保存に失敗")
         raise HTTPException(status_code=500, detail="internal error") from e
     return {"status": "ok", "devices": len(state["devices"])}
+
+
+class EnergyRefetchPayload(BaseModel):
+    since: str
+
+
+class EnergyRefetchDonePayload(BaseModel):
+    kind: str
+    requested_at: str
+
+
+@app.get("/api/energy/refetch")
+def get_energy_refetch(
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    """消費電力の再取得の進み具合（#711）。取得元ごとに待機中・完了を返す。"""
+    return energy_refetch.get_state(db, get_now_jst())
+
+
+@app.post("/api/energy/refetch")
+def request_energy_refetch(
+    payload: EnergyRefetchPayload,
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    """「指定日以降を再取得」。取り直すのはサブPCの収集で、次の定期実行で拾う。"""
+    try:
+        since = energy.parse_date(payload.since)
+        return energy_refetch.request_refetch(since, db, get_now_jst())
+    except energy_refetch.RefetchBusyError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:  # RefetchError も ValueError
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@app.get("/api/energy/refetch/request")
+def get_energy_refetch_request(
+    kind: str = Query(...),
+    db: Session = Depends(database.get_db),
+):
+    """収集が自分の再取得依頼を見る口。**認証なし**（`/api/energy` の収集経路と同じ扱い・#249）。"""
+    return energy_refetch.get_request_for(kind, db, get_now_jst())
+
+
+@app.post("/api/energy/refetch/done")
+def post_energy_refetch_done(
+    payload: EnergyRefetchDonePayload,
+    db: Session = Depends(database.get_db),
+):
+    """収集の完了報告。**認証なし**（#249と同じ）。書けるのは完了印だけで、依頼は立てられない。"""
+    try:
+        return energy_refetch.mark_done(payload.kind, payload.requested_at, db, get_now_jst())
+    except energy_refetch.RefetchError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        db.rollback()
+        logger.exception("energy再取得の完了報告に失敗")
+        raise HTTPException(status_code=500, detail="internal error") from e
 
 
 @app.get("/api/energy/summary")

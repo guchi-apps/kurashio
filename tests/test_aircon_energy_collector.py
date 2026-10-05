@@ -177,3 +177,17 @@ def test_load_env_file_reads_quotes_export_and_comments(tmp_path):
 
 def test_load_env_file_returns_empty_when_missing(tmp_path):
     assert collector.load_env_file(str(tmp_path / "none.env")) == {}
+
+
+class TestRefetch:
+    """画面からの「指定日以降の再取得」依頼（#711）。"""
+
+    def test_days_count_from_since_including_today(self):
+        today = datetime.date(2026, 10, 5)
+        assert collector.refetch_days(today, "2026-10-01") == 5
+
+    def test_days_are_capped_to_protect_the_rate_limit(self):
+        assert (
+            collector.refetch_days(datetime.date(2026, 10, 5), "2026-01-01")
+            == collector.REFETCH_MAX_DAYS
+        )

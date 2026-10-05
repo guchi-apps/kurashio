@@ -680,3 +680,18 @@ class TestRefreshRequest:
 
         assert posted == [{"devices": []}]
         assert tapo.load_hosts_cache(path, now=1001.0)[0] == [("a", "冷蔵庫")]
+
+
+class TestRefetch:
+    """画面からの「指定日以降の再取得」依頼（#711）。"""
+
+    def test_days_count_from_since_including_today(self):
+        today = datetime.date(2026, 10, 5)
+        assert tapo.refetch_days(today, "2026-10-01") == 5
+        assert tapo.refetch_days(today, "2026-10-05") == 1
+
+    def test_days_are_capped_by_the_plug_history(self):
+        assert tapo.refetch_days(datetime.date(2026, 10, 5), "2026-01-01") == tapo.MAX_DAYS
+
+    def test_request_url_sits_under_api_energy(self):
+        assert tapo.refetch_url("https://x/api/energy") == "https://x/api/energy/refetch"
