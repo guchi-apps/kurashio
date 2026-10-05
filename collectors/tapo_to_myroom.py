@@ -506,8 +506,11 @@ def extract_daily_history(
 
 async def read_daily_history(
     device: Any, today: datetime.date, start: datetime.date
-) -> List[Tuple[datetime.date, float]]:
-    """プラグ本体が持つ日別履歴を読む。読めなければ空（当日ぶんの送信は止めない）。"""
+) -> Optional[List[Tuple[datetime.date, float]]]:
+    """プラグ本体が持つ日別履歴を読む。読めなければ None（当日ぶんの送信は止めない）。
+
+    履歴を持たない機器は空。None は「取れなかった」ことを呼び出し側へ伝えるためで、
+    再取得（#711）では過去分を送れていないのに完了にしないために使う。"""
     module = _energy_module(device)
     if module is None:
         return []
@@ -524,13 +527,13 @@ async def read_daily_history(
         )
     except Exception as exc:  # noqa: BLE001 - 過去ぶんが取れなくても当日ぶんは送る
         LOGGER.warning("日別履歴を取得できませんでした: %s", exc)
-        return []
+        return None
 
     try:
         return extract_daily_history(response, today, start)
     except (ValueError, TypeError, OverflowError, OSError) as exc:
         LOGGER.warning("日別履歴を解釈できませんでした: %s", exc)
-        return []
+        return None
 
 
 async def read_device(
@@ -563,12 +566,14 @@ async def read_device(
         history = (
             await read_daily_history(device, today, start) if start < today else []
         )
+        history_failed = history is None
 
         return {
             "host": host,
             "name": name_override or getattr(device, "alias", None) or host,
             "model": getattr(device, "model", None),
-            "history": history,
+            "history": history or [],
+            "history_failed": history_failed,
             **energy,
         }
     finally:
@@ -953,9 +958,11 @@ async def run_collect(
     if refetch:
         # 読めなかった機器があるうちは完了にしない。依頼は期限まで残るので次回また取り直す
         missing = {host for host, _ in hosts} - {item["host"] for item in readings}
+        # 当日ぶんは読めても過去の履歴が取れなかった機器も、期間を取り直せていないので未完了
+        missing |= {item["host"] for item in readings if item.get("history_failed")}
         if missing:
             LOGGER.warning(
-                "再取得の依頼は未完了のままにします（読めなかった機器: %s）",
+                "再取得の依頼は未完了のままにします（読めなかった機器・履歴: %s）",
                 ", ".join(sorted(missing)),
             )
         else:

@@ -57,6 +57,9 @@ export function EnergyRefetchSheet({ today, onClose, onCompleted }: EnergyRefetc
   const [since, setSince] = useState(() => shiftEnergyDate(today, -4));
   const [state, setState] = useState<EnergyRefetch | null>(null);
   const [error, setError] = useState("");
+  // 取り直しに失敗した回数。成功時は `state` が変わるが、失敗時は変わらず effect が再実行されないため、
+  // これを依存に入れて次回のポーリングを予約し直す
+  const [pollFailures, setPollFailures] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   // 日付を選んだだけの入力を、画面復帰時の自動リロードで捨てない（#277）
   useUnsavedEdits();
@@ -86,17 +89,21 @@ export function EnergyRefetchSheet({ today, onClose, onCompleted }: EnergyRefetc
     const timer = setTimeout(() => {
       fetchEnergyRefetch()
         .then((next) => {
-          if (!cancelled) setState(next);
+          if (cancelled) return;
+          setError("");
+          setState(next);
         })
         .catch(() => {
-          if (!cancelled) setError("状況を読み込めませんでした");
+          if (cancelled) return;
+          setError("状況を読み込めませんでした");
+          setPollFailures((count) => count + 1);
         });
     }, ENERGY_REFETCH_POLL_MS);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [pending, state]);
+  }, [pending, state, pollFailures]);
 
   // 完了した取得元が増えたら、集計を取り直してもらう
   useEffect(() => {
