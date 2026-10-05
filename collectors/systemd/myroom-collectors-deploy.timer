@@ -1,0 +1,10 @@
+[Unit]
+Description=MyRoom: collector のリリース追従（15分ごと）
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

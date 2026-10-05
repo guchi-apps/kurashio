@@ -359,7 +359,8 @@ curl -s -H "Authorization: Bearer $INTERNAL_API_KEY" http://localhost:8000/api/i
 ## 定期実行
 
 ユニットは [`systemd/`](systemd/) にある。`aide` と同じく
-**サブPCの `~/.config/systemd/user/` へ手でコピーする**（リポジトリからは自動反映されない）。
+**初回だけサブPCの `~/.config/systemd/user/` へ手でコピーする**。以後の変更は下の
+「リリースへの自動追従」が配置し直す（#707）。
 
 ```bash
 cp collectors/systemd/myroom-aircon-energy.service collectors/systemd/myroom-aircon-energy.timer \
@@ -385,3 +386,36 @@ systemctl --user enable --now myroom-bambu.service
 systemctl --user status myroom-bambu.service
 journalctl --user -u myroom-bambu.service -f
 ```
+
+## リリースへの自動追従（#707）
+
+サブPCの `~/apps/myroom` は **`myroom-collectors-deploy.timer`（15分ごと）が最新のリリースタグ
+（origin/main に含まれる最新の `vX.Y.Z`）へ進める。** 手動の `git pull` は要らない。
+VPS の `deploy.yml` とは独立しているので、サブPCがオフラインでも本番デプロイは影響を受けない。
+（以前は手動更新で、サブPCが141コミット遅れて #660 の Tapo 自動探索が届かなかった。）
+
+```bash
+# 初回だけ（以降はこの unit 自身も自動で更新される）
+cp collectors/systemd/myroom-collectors-deploy.* ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now myroom-collectors-deploy.timer
+
+collectors/deploy/collectors-deploy.sh          # 今すぐ追従する
+collectors/deploy/collectors-deploy.sh status   # 状態（--json も可。異常があれば終了コード1）
+```
+
+`deploy` がすること: ローカル変更・main 以外のブランチ・fast-forward 不可なら**何も変えず失敗**
+→ `git merge --ff-only` → 専用 venv の依存を更新（requirements が変わったときと venv が無いとき。
+失敗したら元のコミットへ戻す）→ `collectors/systemd/` の unit を `~/.config/systemd/user/` へ同期
+→ 変わった collector だけ再起動（常駐は変更時のみ、timer は unit 変更時のみ）→ 変えた oneshot を
+1回実行し、常駐が起動しているかを確認。結果は `~/.local/state/myroom-collectors/deploy.json`。
+
+- **対象の判定は unit の `ExecStart` から導く**（`collectors/<script>.py`、`.venv-X` → `requirements-X.txt`）。
+  collector を足すときは `collectors/systemd/` に unit を置くだけでよい。どの unit にも無い
+  `collectors/*.py`（共有モジュール）が変わったときは全 collector を対象にする
+- 失敗すると `myroom-collectors-deploy.service` が `failed` になる（`systemctl --user --failed`）。
+  通知は未実装。`status --json` を StatusHub 等から読む形は別件
+- `status` の異常判定: 最新リリースより遅れている・デプロイが2時間成功していない・ローカル変更あり・
+  常駐が止まっている・oneshot が2回以上連続失敗／26時間成功していない
+- 配布は **リリースタグ単位**。`DEPLOY_REF=v4.37.3 collectors/deploy/collectors-deploy.sh` で特定のタグも指せる
+  （前に進める場合のみ。戻すのは手作業）
