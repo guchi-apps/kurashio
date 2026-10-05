@@ -951,7 +951,15 @@ async def run_collect(
 
     LOGGER.info("送信しました: %s", result)
     if refetch:
-        report_refetch_done(config["api_url"], refetch["requested_at"])
+        # 読めなかった機器があるうちは完了にしない。依頼は期限まで残るので次回また取り直す
+        missing = {host for host, _ in hosts} - {item["host"] for item in readings}
+        if missing:
+            LOGGER.warning(
+                "再取得の依頼は未完了のままにします（読めなかった機器: %s）",
+                ", ".join(sorted(missing)),
+            )
+        else:
+            report_refetch_done(config["api_url"], refetch["requested_at"])
     # 一部の旧 IP が読めなくても、取得できたレコードの送信に成功していれば
     # systemd の service 全体は成功にする。未取得の機器は上の WARNING で追跡できる。
     return 0
