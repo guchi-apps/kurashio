@@ -177,3 +177,89 @@ def test_load_env_file_reads_quotes_export_and_comments(tmp_path):
 
 def test_load_env_file_returns_empty_when_missing(tmp_path):
     assert collector.load_env_file(str(tmp_path / "none.env")) == {}
+
+
+class TestRefetch:
+    """画面からの「指定日以降の再取得」依頼（#711）。"""
+
+    def test_days_count_from_since_including_today(self):
+        today = datetime.date(2026, 10, 5)
+        assert collector.refetch_days(today, "2026-10-01") == 5
+
+    def test_days_are_capped_to_protect_the_rate_limit(self):
+        assert (
+            collector.refetch_days(datetime.date(2026, 10, 5), "2026-01-01")
+            == collector.REFETCH_MAX_DAYS
+        )
+
+    def test_request_without_key_is_not_sent(self, monkeypatch):
+        """COLLECTOR_API_KEY が無いときは無認証で送らず、依頼なしとして扱う（#714）。"""
+        monkeypatch.delenv("COLLECTOR_API_KEY", raising=False)
+
+        def boom(*a, **k):
+            raise AssertionError("must not call the API")
+
+        monkeypatch.setattr(collector.requests, "get", boom)
+        assert collector.fetch_refetch_request("https://x/api/energy", 5) is None
+
+    def test_request_and_done_carry_bearer(self, monkeypatch):
+        monkeypatch.setenv("COLLECTOR_API_KEY", "k-1")
+        seen = []
+
+        class Resp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"pending": True, "since": "2026-10-01", "requested_at": "r"}
+
+        monkeypatch.setattr(
+            collector.requests, "get", lambda url, **kw: seen.append(kw["headers"]) or Resp()
+        )
+        monkeypatch.setattr(
+            collector.requests, "post", lambda url, **kw: seen.append(kw["headers"]) or Resp()
+        )
+        assert collector.fetch_refetch_request("https://x/api/energy", 5)["requested_at"] == "r"
+        collector.report_refetch_done("https://x/api/energy", "r", 5)
+        assert seen == [{"Authorization": "Bearer k-1"}] * 2
+
+
+@pytest.mark.parametrize("values, expected_done", [
+    ([1.0, 2.0], True),
+    ([0.0, 0.0], True),
+    ([None, 2.0], False),
+    ([None, None], False),
+])
+def test_main_refetch_completes_only_after_all_dates_are_sent(monkeypatch, values, expected_done):
+    today = datetime.date(2026, 10, 5)
+    dates = collector.target_dates(today, 2)
+    client = _FakeClient(dict(zip(dates, [_summary(_rac("リビング", v)) for v in values])))
+    client.get_family_ids = lambda: [7]
+
+    class Context:
+        def __enter__(self):
+            return client
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(collector, "AirCloudHomeClient", lambda *a, **kw: Context())
+    monkeypatch.setattr(collector, "apply_env_files", lambda paths: None)
+    monkeypatch.setattr(collector, "today_jst", lambda: today)
+    monkeypatch.setattr(collector.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(collector, "fetch_refetch_request", lambda *a: {
+        "since": dates[0].isoformat(), "requested_at": "request-1", "pending": True,
+    })
+    posted = []
+    completed = []
+    monkeypatch.setattr(collector, "post_to_myroom", lambda **kw: posted.append(kw["payload"]) or {})
+    monkeypatch.setattr(collector, "report_refetch_done", lambda *a: completed.append(a))
+
+    result = collector.main(["--email", "test@example.com", "--password", "test", "--days", "2"])
+    assert result == (0 if any(v is not None for v in values) else 1)
+    assert bool(completed) is expected_done
+    if completed:
+        assert posted
+        assert completed[0][1] == "request-1"
+    if posted:
+        assert len(posted[0]["records"]) == sum(v is not None for v in values)

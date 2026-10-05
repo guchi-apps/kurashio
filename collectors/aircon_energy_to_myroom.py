@@ -227,6 +227,67 @@ def post_to_myroom(
     return response.json()
 
 
+#: 再取得の依頼（#711）で `/api/energy/refetch/request` へ名乗る収集の名前
+REFETCH_KIND = "aircon"
+
+#: 再取得で遡る最大日数。日付ごとにAPIを叩く（間隔2秒）うえレート制限があるので短くする。
+#: `backend/energy_refetch.py` の `MAX_DAYS_BY_KIND["aircon"]` と同じ値。
+REFETCH_MAX_DAYS = 31
+
+
+def refetch_url(api_url: str) -> str:
+    return api_url.rstrip("/") + "/refetch"
+
+
+def collector_headers() -> Optional[Dict[str, str]]:
+    """再取得の2口へ送る収集専用トークン（`COLLECTOR_API_KEY`・#714）。未設定なら None。"""
+    key = os.getenv("COLLECTOR_API_KEY", "").strip()
+    return {"Authorization": "Bearer " + key} if key else None
+
+
+def fetch_refetch_request(api_url: str, timeout: int) -> Optional[Dict[str, Any]]:
+    """画面から「指定日以降を再取得」が依頼されていれば、その内容を返す。読めなければ None。"""
+    headers = collector_headers()
+    if headers is None:
+        # 無認証では送らない（サーバーは 503/401 で断る）。通常の収集は続ける
+        print("warning: COLLECTOR_API_KEY が未設定のため、再取得の依頼は確認しません", file=sys.stderr)
+        return None
+    try:
+        response = requests.get(
+            refetch_url(api_url) + "/request",
+            headers=headers,
+            params={"kind": REFETCH_KIND},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except Exception as exc:  # noqa: BLE001 - 依頼を読めなくても通常の収集は続ける
+        print("warning: 再取得の依頼を確認できませんでした: {}".format(exc), file=sys.stderr)
+        return None
+    if not data.get("pending") or not data.get("since") or not data.get("requested_at"):
+        return None
+    return data
+
+
+def refetch_days(today: datetime.date, since: str) -> int:
+    """依頼の日付から、当日を含めて何日ぶん取り直すか（上限 REFETCH_MAX_DAYS）。"""
+    start = datetime.date.fromisoformat(since)
+    return max(1, min(REFETCH_MAX_DAYS, (today - start).days + 1))
+
+
+def report_refetch_done(api_url: str, requested_at: str, timeout: int) -> None:
+    """取り直して送れたことを知らせる。失敗しても次回また取り直すだけなので落とさない。"""
+    try:
+        requests.post(
+            refetch_url(api_url) + "/done",
+            json={"kind": REFETCH_KIND, "requested_at": requested_at},
+            headers=collector_headers(),
+            timeout=timeout,
+        ).raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        print("warning: 再取得の完了を報告できませんでした: {}".format(exc), file=sys.stderr)
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="AirCloud Home (白くまくん) の日別使用量 -> MyRoom /api/energy"
@@ -291,10 +352,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         args = parse_args(argv)
 
+        refetch = None
         if args.date:
             dates = [datetime.date.fromisoformat(args.date)]
         else:
-            dates = target_dates(today_jst(), args.days)
+            days = args.days
+            if not (args.dry_run or args.dump_raw or args.list_units):
+                refetch = fetch_refetch_request(args.api_url, args.http_timeout)
+            if refetch:
+                try:
+                    days = max(days, refetch_days(today_jst(), refetch["since"]))
+                    print("refetch: {} 以降 {}日ぶん".format(refetch["since"], days))
+                except ValueError:
+                    refetch = None
+            dates = target_dates(today_jst(), days)
 
         with AirCloudHomeClient(args.email, args.password, timeout=args.http_timeout) as client:
             family_ids = client.get_family_ids()
@@ -350,6 +421,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             dry_run=args.dry_run,
         )
         print("posted: {}".format(result))
+        if refetch and not args.dry_run:
+            # 一部の日付しか送れていないときは依頼を残し、次回の定期実行で再試行する。
+            # 0 kWh は有効な取得結果。金額だけの欠損は再取得の完了を妨げない。
+            missing_dates = {date.isoformat() for date in dates} - {
+                record["date"] for record in records
+            }
+            if missing_dates:
+                print(
+                    "warning: 再取得が未完了の日付: {}".format(", ".join(sorted(missing_dates))),
+                    file=sys.stderr,
+                )
+            else:
+                report_refetch_done(args.api_url, refetch["requested_at"], args.http_timeout)
         return 0
     except AirCloudHomeRateLimitError as exc:
         # 1時間後の次回実行で取り直せばよいので、詳しく出して終わる。

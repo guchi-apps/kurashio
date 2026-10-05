@@ -15,6 +15,8 @@ ops-dashboard の `OPS_API_TOKEN`（`requireSessionOrApiToken`）と同じ形。
 
 - `INTERNAL_API_KEY` … 読み取り専用（`GET /api/internal/room-state`）
 - `INTERNAL_CONTROL_API_KEY` … 操作専用（`/api/internal/remote/…`・#419、`/api/internal/aircon/…`・#439）
+- `COLLECTOR_API_KEY` … サブPCの収集専用（消費電力の再取得 `/api/energy/refetch/request`・`/done`・#714）。
+  共有トークンは使わず環境変数だけ。既存の2つのキーの用途は広げていない
 
 **片方のトークンでもう片方の経路は通らない。** 読み取り用が漏れても操作の口は塞がったままに
 するための分け方なので、1つの依存にまとめて「どちらでも通す」形にしないこと。
@@ -40,6 +42,7 @@ load_dotenv()
 
 ENV_VAR_NAME = "INTERNAL_API_KEY"
 CONTROL_ENV_VAR_NAME = "INTERNAL_CONTROL_API_KEY"
+COLLECTOR_ENV_VAR_NAME = "COLLECTOR_API_KEY"
 
 # issue-deck の共有トークン名（#525）。取れなければ上の環境変数へフォールバックする
 SHARED_TOKEN_NAME = "MYROOM_INTERNAL_API_KEY"
@@ -111,3 +114,19 @@ def require_internal_control_token(
     読み取り用の `INTERNAL_API_KEY` では通らない。
     """
     _check_bearer(authorization, CONTROL_ENV_VAR_NAME, get_internal_control_api_key())
+
+
+def get_collector_api_key() -> Optional[str]:
+    """収集用トークン（`COLLECTOR_API_KEY`）。共有トークンは無く、環境変数だけを見る。"""
+    value = os.getenv(COLLECTOR_ENV_VAR_NAME)
+    return value if value else None
+
+
+def require_collector_token(
+    authorization: Optional[str] = Header(default=None),
+) -> None:
+    """サブPCの収集向けの依存（`COLLECTOR_API_KEY`・#714）。
+
+    読み取り用・操作用のどちらのトークンでも通らない。未設定なら無認証へ落とさず 503。
+    """
+    _check_bearer(authorization, COLLECTOR_ENV_VAR_NAME, get_collector_api_key())
