@@ -771,7 +771,7 @@ DaySpan・AIDE が読むタスク一覧に「次の掃除」を並べること�
 - **死活監視用 API**: `/api/health` が `GET` / `HEAD` で `200 OK` を返す
 - **ログイン管理**:
   - ダッシュボードのデータ取得 API は **認証必須**（`Authorization: Bearer <Supabaseアクセストークン>`）。センサー POST（`/api/sensor`）・エアコン POST（`/api/aircon`）は認証なし
-  - ログインは Supabase Auth 経由の Google 認証で行う（複数の自作アプリ共通の Supabase プロジェクトを使用）。許可したアカウントのみアクセス可能（`ALLOWED_GOOGLE_EMAILS` にメールアドレスをカンマ区切りで設定）
+  - ログインは Supabase Auth 経由の Google 認証で行う（複数の自作アプリ共通の Supabase プロジェクトを使用）。許可したアカウントのみアクセス可能（**許可の正本は StatusHub の共通アクセス設定**。管理画面「アプリ」タブの `myroom` で追加・取り消しでき、再デプロイは要らない。判定は `backend/access.py`・#718。旧 `ALLOWED_GOOGLE_EMAILS` は判定に使わない）
   - バックエンドは Supabase の JWKS（`{SUPABASE_URL}/auth/v1/.well-known/jwks.json`）を取得・キャッシュし、kid 付きの JWT（ES256/RS256）は手元で検証する。kid の無い JWT と、Googleで確認済みのアカウントかどうか（identities）は Auth サーバー（`/auth/v1/user`）に問い合わせ、トークンごとに5分覚える（#724）。問い合わせには `SUPABASE_PUBLISHABLE_KEY` が要る（本番は `deploy.yml` がサーバー `.env` へ同期。ローカルは `.env` に開発用の値を書く）
   - 本番: GitHub の organization variable `SUPABASE_PROJECT_URL` / `SUPABASE_PUBLISHABLE_KEY` と、このリポジトリの secret `ALLOWED_GOOGLE_EMAILS` を、それぞれ `SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_URL`・`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `ALLOWED_GOOGLE_EMAILS` としてサーバー `.env` と GitHub Actions のフロントエンドビルドへ反映（`deploy.yml`。対応表は `.github/secrets-manifest.tsv`）
   - ローカル開発: 本番と誤って同じ Supabase プロジェクトを操作しないよう、1Password 共有アイテム `Supabase` の `dev-project-url` / `dev-publishable-key`（開発用の別 Supabase プロジェクト）を使用。**ローカルは自動同期されない**ため、バックエンドはローカルの `.env` に `SUPABASE_URL` を、フロントエンドは `frontend/.env.local` に `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` を、それぞれ 1Password アプリから値をコピーして書き込む（詳細は「3. フロントエンド (Next.js)」参照）
