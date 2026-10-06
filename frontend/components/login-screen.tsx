@@ -18,6 +18,10 @@ function getInitialError(): string {
   if (authError === "forbidden") return "このGoogleアカウントではログインできません";
   // iOSアプリの認証シートから戻れなかったとき（ios/Kurashio/WebViewModel.swift）
   if (authError === "failed") return SIGN_IN_FAILED;
+  // 認証サーバー・バックエンドへ届かなかったとき（#724）。アカウントのせいにしない
+  if (authError === "unavailable") {
+    return "認証サーバーに接続できませんでした。しばらくしてからやり直してください";
+  }
   return "";
 }
 

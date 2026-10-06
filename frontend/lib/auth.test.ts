@@ -29,13 +29,10 @@ describe("signOutThisApp", () => {
   });
 });
 
-describe("401応答時のセッション破棄", () => {
+describe.each([401, 403])("%i応答時のセッション破棄", (status) => {
   beforeEach(() => {
     signOut.mockClear();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ status: 401, ok: false } as Response)
-    );
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status, ok: false } as Response));
   });
 
   afterEach(() => {
@@ -47,6 +44,28 @@ describe("401応答時のセッション破棄", () => {
 
     expect(signOut).toHaveBeenCalledTimes(1);
     expect(signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
+});
+
+describe("認証と関係ない失敗ではセッションを残す", () => {
+  beforeEach(() => {
+    signOut.mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("503（認証サーバーへ届かない）ではログアウトさせない", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ status: 503, ok: false } as Response));
+    await expect(fetchUiSettings()).rejects.not.toBeInstanceOf(AuthError);
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it("通信不達ではログアウトさせない", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    await expect(fetchUiSettings()).rejects.toBeInstanceOf(TypeError);
+    expect(signOut).not.toHaveBeenCalled();
   });
 });
 

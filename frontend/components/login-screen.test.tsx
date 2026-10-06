@@ -37,5 +37,11 @@ describe("LoginScreen", () => {
     it("iOSアプリの認証シートから戻れなかったら、失敗を出す（#526）", () => {
       expect(renderWithSearch("?authError=failed")).toContain("Googleログインに失敗しました");
     });
+
+    it("認証サーバーへ届かなかったら、アカウントのせいにしない（#724）", () => {
+      const html = renderWithSearch("?authError=unavailable");
+      expect(html).toContain("認証サーバーに接続できませんでした");
+      expect(html).not.toContain("このGoogleアカウントではログインできません");
+    });
   });
 });
