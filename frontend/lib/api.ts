@@ -56,6 +56,15 @@ import { toApiDateTime, type AirconHistoryPoint } from "@/lib/history-loader";
 import { expandDeviceIdsForHistory } from "@/lib/device-inheritance";
 import { authHeaders, AuthError, signOutThisApp } from "@/lib/auth";
 
+/**
+ * バックエンドがこのセッションを受け付けなかった。403 を返すのは認証（`backend/auth.py` の
+ * 許可リスト・Googleログインの判定）だけなので、401 と同じくこのアプリのセッションを破棄して
+ * ログイン画面へ戻す（#724）。以前は 403 を素通しし、どのAPIも失敗する空のダッシュボードが残っていた。
+ */
+function isAuthRejected(status: number): boolean {
+  return status === 401 || status === 403;
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -70,7 +79,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
     const message = err instanceof Error ? err.message : "Failed to fetch";
     throw new TypeError(`${message} (${url})`);
   }
-  if (res.status === 401) {
+  if (isAuthRejected(res.status)) {
     await signOutThisApp();
     throw new AuthError();
   }
@@ -86,7 +95,7 @@ async function fetchWithAuth(url: string, init?: RequestInit): Promise<Response>
       ...(init?.headers ?? {}),
     },
   });
-  if (res.status === 401) {
+  if (isAuthRejected(res.status)) {
     await signOutThisApp();
     throw new AuthError();
   }

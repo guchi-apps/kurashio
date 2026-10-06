@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AppLoadingScreen } from "@/components/app-loading-screen";
 import { authHeaders, signOutThisApp } from "@/lib/auth";
 import { notifyLogin } from "@/lib/api";
+import { completeAuthCallback } from "@/lib/auth-callback";
 import { supabase } from "@/lib/supabase-client";
 
 export default function AuthCallbackPage() {
@@ -17,18 +18,13 @@ export default function AuthCallbackPage() {
 
     (async () => {
       const code = new URLSearchParams(window.location.search).get("code");
-      if (code) {
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) {
-          router.replace("/?authError=forbidden");
-          return;
-        }
-      }
-
-      const res = await fetch("/api/auth/me", { headers: await authHeaders() });
-      if (!res.ok) {
-        await signOutThisApp();
-        router.replace("/?authError=forbidden");
+      const result = await completeAuthCallback(code, {
+        exchangeCode: (value) => supabase.auth.exchangeCodeForSession(value),
+        checkMe: async () => fetch("/api/auth/me", { headers: await authHeaders() }),
+        discardSession: signOutThisApp,
+      });
+      if (!result.ok) {
+        router.replace(`/?authError=${result.error}`);
         return;
       }
 

@@ -163,6 +163,8 @@ jobs:
       - name: Restart Backend Service
         env:
           SUPABASE_URL: ${{ env.SUPABASE_URL }}
+          # Auth サーバー（/auth/v1/user）への問い合わせに使う公開キー（#724）。フロントと同じ値で秘密ではない。
+          SUPABASE_PUBLISHABLE_KEY: ${{ env.SUPABASE_PUBLISHABLE_KEY }}
           ALLOWED_GOOGLE_EMAILS: ${{ env.ALLOWED_GOOGLE_EMAILS }}
           # 白くまくん（AirCloud Home）のログイン情報。エアコンの操作にだけ使う（#213）。
           # 未設定なら操作機能が無効になるだけで、デプロイは通る。
@@ -214,6 +216,7 @@ jobs:
         run: |
           b64() { printf '%s' "$1" | base64 -w 0; }
           SUPABASE_URL_B64=$(b64 "$SUPABASE_URL")
+          SUPABASE_PUBLISHABLE_KEY_B64=$(b64 "$SUPABASE_PUBLISHABLE_KEY")
           ALLOWED_GOOGLE_EMAILS_B64=$(b64 "$ALLOWED_GOOGLE_EMAILS")
           AIRCON_EMAIL_B64=$(b64 "$AIRCON_EMAIL")
           AIRCON_PASSWORD_B64=$(b64 "$AIRCON_PASSWORD")
@@ -262,6 +265,7 @@ jobs:
             }
 
             sync_env_var SUPABASE_URL '${SUPABASE_URL_B64}'
+            sync_env_var SUPABASE_PUBLISHABLE_KEY '${SUPABASE_PUBLISHABLE_KEY_B64}'
             sync_env_var ALLOWED_GOOGLE_EMAILS '${ALLOWED_GOOGLE_EMAILS_B64}'
             sync_env_var AIRCON_EMAIL '${AIRCON_EMAIL_B64}'
             sync_env_var AIRCON_PASSWORD '${AIRCON_PASSWORD_B64}'
