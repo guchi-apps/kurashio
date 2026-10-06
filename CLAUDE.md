@@ -746,6 +746,10 @@ DDLもデータの一括書き換えも要らず、本番の権限問題（上�
 - **トークンはサブPCの `collectors/.env`（`COLLECTOR_API_KEY`）とVPSの `.env`（デプロイが同期）に同じ値を置く。**
   発行・更新・失効は `collectors/README.md` の「収集専用トークン」。収集側は未設定のとき再取得の確認を
   見送り、通常の収集は続ける（WARNINGに残る）
+- **Tapoの完了は「全台読めたとき」だが、`TAPO_HOSTS` に残った古いIPは数えない**（#728）。
+  Tapoアプリでプラグを改名すると `merge_hosts()` が名前で新しいIPへ付け替えられず、旧IPが手書きの
+  まま残る（「サブPC」→「PC」で実際に発生）。読めず・その回の探索でも見つからない手書きIPは
+  `stale_manual_hosts()` が除き、WARNING で `TAPO_HOSTS` から外すよう促す。探索が0台なら判断しない
 - **依頼中の重ね押しは409で断る。** 受け付けると待ちが延び、完了済みの取得元がやり直しになる
 - 遡れる日数は `MAX_DAYS_BY_KIND`（Tapo 92日・エアコン31日）。収集側の定数
   （`tapo_to_myroom.MAX_DAYS`・`aircon_energy_to_myroom.REFETCH_MAX_DAYS`）と揃えること

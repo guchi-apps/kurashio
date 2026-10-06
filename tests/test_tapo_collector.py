@@ -11,6 +11,7 @@ import importlib.util
 import ipaddress
 import json
 import pathlib
+import time
 
 import pytest
 
@@ -705,6 +706,71 @@ class TestRefetch:
 
         monkeypatch.setattr(tapo.urllib.request, "urlopen", boom)
         assert tapo.fetch_refetch_request("https://x/api/energy") is None
+
+    def test_stale_manual_host_is_one_not_found_by_discovery(self):
+        """改名・撤去で探索に出てこない手書きの IP だけを古い設定とみなす（#728）。"""
+        manual = [("192.168.2.168", "サブPC"), ("192.168.2.143", "乾燥機")]
+        found = [("192.168.2.177", "乾燥機"), ("192.168.2.178", "PC")]
+        assert tapo.stale_manual_hosts(
+            manual, ["192.168.2.168", "192.168.2.177"], found
+        ) == {"192.168.2.168"}
+        # 探索が0台なら LAN 側の不調と区別できないので判断しない
+        assert tapo.stale_manual_hosts(manual, ["192.168.2.168"], []) == set()
+
+    def _run_with_refetch(self, monkeypatch, tmp_path, found):
+        config = {
+            "username": "u",
+            "password": "p",
+            "hosts": [("192.168.2.168", "サブPC")],
+            "api_url": "https://example.test/api/energy",
+        }
+        monkeypatch.setattr(
+            tapo,
+            "fetch_refetch_request",
+            lambda _url: {"pending": True, "since": "2026-10-02", "requested_at": "r"},
+        )
+        monkeypatch.setattr(tapo, "fetch_refresh_pending", lambda _url: False)
+        cache = tmp_path / "c.json"
+        monkeypatch.setattr(tapo, "HOSTS_CACHE_FILENAME", str(cache))
+
+        async def fake_resolve(_config, path, rediscover, now=None):
+            tapo.save_hosts_cache(path, found, time.time())
+            return [("192.168.2.168", "サブPC"), ("192.168.2.178", "PC")], True
+
+        async def fake_collect(*_args, **_kwargs):
+            return [
+                {
+                    "host": "192.168.2.178",
+                    "name": "PC",
+                    "kwh_today": 0.1,
+                    "power_w": 10.0,
+                    "history": [],
+                }
+            ]
+
+        done = []
+        monkeypatch.setattr(tapo, "resolve_hosts", fake_resolve)
+        monkeypatch.setattr(tapo, "collect", fake_collect)
+        monkeypatch.setattr(tapo, "post_payload", lambda url, payload: {"status": "ok"})
+        monkeypatch.setattr(tapo, "report_refetch_done", lambda url, r: done.append(r))
+        assert asyncio.run(tapo.run_collect(config, dry_run=False, days=2)) == 0
+        return done
+
+    def test_refetch_completes_despite_stale_manual_host(self, monkeypatch, tmp_path):
+        """TAPO_HOSTS に古い IP が残っていても再取得は完了にする（#728）。"""
+        done = self._run_with_refetch(monkeypatch, tmp_path, [("192.168.2.178", "PC")])
+        assert done == ["r"]
+
+    def test_refetch_stays_pending_when_discovery_found_the_unread_host(
+        self, monkeypatch, tmp_path
+    ):
+        """探索では見えているのに読めなかった機器は、従来どおり未完了のまま（#711）。"""
+        done = self._run_with_refetch(
+            monkeypatch,
+            tmp_path,
+            [("192.168.2.168", "サブPC"), ("192.168.2.178", "PC")],
+        )
+        assert done == []
 
     def test_request_and_done_carry_bearer(self, monkeypatch):
         monkeypatch.setenv("COLLECTOR_API_KEY", "k-1")
