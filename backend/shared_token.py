@@ -47,7 +47,13 @@ def clear_cache() -> None:
         _cache.clear()
 
 
-def _endpoint() -> Optional[Tuple[str, str]]:
+def forget(name: str) -> None:
+    """名前のキャッシュを捨てる。再発行で古い値が失効したとき、次の取得で読み直させる。"""
+    with _lock:
+        _cache.pop(name, None)
+
+
+def _endpoint() ->Optional[Tuple[str, str]]:
     """（取得URL, Bearer）。どちらかが未設定・空なら None（＝共有トークンは使わない）。"""
     secret = os.getenv(SECRET_ENV_VAR)
     base_url = os.getenv(URL_ENV_VAR)

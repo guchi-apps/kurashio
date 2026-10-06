@@ -11,6 +11,8 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 
+from . import access
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -39,12 +41,6 @@ SUPABASE_USER_URL = f"{SUPABASE_ISSUER}/user"
 # この時間のうちに反映するため。
 AUTH_USER_CACHE_TTL_SECONDS = 300
 AUTH_USER_CACHE_MAX_ENTRIES = 256
-
-ALLOWED_GOOGLE_EMAILS = {
-    email.strip().lower()
-    for email in os.getenv("ALLOWED_GOOGLE_EMAILS", "").split(",")
-    if email.strip()
-}
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
@@ -328,12 +324,6 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
 
     payload = verify_token(token)
     email = str(payload.get("email", "")).lower()
-    if email not in ALLOWED_GOOGLE_EMAILS:
-        logger.warning("Login rejected: email not in allowlist (%s)", _mask_email(email))
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="このGoogleアカウントではログインできません",
-        )
     # Supabaseは他アプリと共有のプロジェクト。メール/パスワード登録などで許可リストの
     # アドレスを名乗れてしまわないよう、Googleで確認済みのアカウントのOAuthログインだけ通す（#616）。
     try:
@@ -362,6 +352,18 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
     if reason:
         logger.warning(
             "Login rejected: not a verified Google login (%s): %s", _mask_email(email), reason
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="このGoogleアカウントではログインできません",
+        )
+    # 許可の正本は StatusHub の共通アクセス設定（#718）。Googleで確認済みと分かったIDだけを送る。
+    decision = access.decide(access.AccessSubject(sub=str(user["id"]), email=email, email_verified=True))
+    if not decision.allowed:
+        logger.warning(
+            "Login rejected: not allowed by StatusHub access (%s): %s",
+            _mask_email(email),
+            decision.reason or "unknown",
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

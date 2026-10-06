@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import HTTPException
 from jose import jwk, jwt
 
-from backend import auth
+from backend import access, auth
 
 EMAIL = "owner@example.com"
 SUB = str(uuid.uuid4())
@@ -86,6 +86,10 @@ def _auth_user(identities=None, **overrides):
     return user
 
 
+def _allow(subject):
+    return access.AccessDecision(True, ["member"])
+
+
 @pytest.fixture(autouse=True)
 def setup(monkeypatch):
     monkeypatch.setitem(auth._jwks_cache, "keys_by_kid", {})
@@ -93,7 +97,7 @@ def setup(monkeypatch):
     monkeypatch.setitem(auth._jwks_cache, "attempted_at", None)
     monkeypatch.setattr(auth, "_auth_user_cache", {})
     monkeypatch.setattr(auth, "_fetch_jwks", lambda: {KID: {**SIGNING_JWK, "kid": KID, "alg": "ES256"}})
-    monkeypatch.setattr(auth, "ALLOWED_GOOGLE_EMAILS", {EMAIL})
+    monkeypatch.setattr(access, "decide", _allow)
     monkeypatch.setattr(auth, "SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test")
 
 
@@ -252,10 +256,24 @@ def test_auth_user_email_differs_from_token_is_403(monkeypatch):
     assert _status(_es256_token()) == 403
 
 
-def test_email_not_in_allowlist_is_403_without_asking_auth_server(monkeypatch):
-    calls = _auth_server(monkeypatch, _auth_user())
-    assert _status(_es256_token(email="stranger@example.com")) == 403
-    assert calls == []
+def test_denied_by_status_hub_is_403(monkeypatch):
+    _auth_server(monkeypatch, _auth_user())
+    monkeypatch.setattr(access, "decide", lambda s: access.AccessDecision(False, [], "revoked"))
+    assert _status(_es256_token()) == 403
+
+
+def test_status_hub_gets_only_verified_identity(monkeypatch):
+    _auth_server(monkeypatch, _auth_user())
+    seen = []
+    monkeypatch.setattr(access, "decide", lambda s: seen.append(s) or _allow(s))
+    auth.get_current_user(token=_es256_token())
+    assert seen == [access.AccessSubject(sub=SUB, email=EMAIL, email_verified=True)]
+
+
+def test_status_hub_is_not_asked_for_unverified_google_login(monkeypatch):
+    _auth_server(monkeypatch, _auth_user(identities=[_identity("github")]))
+    monkeypatch.setattr(access, "decide", lambda s: pytest.fail("判定APIを呼んではいけない"))
+    assert _status(_es256_token()) == 403
 
 
 def test_revoked_session_is_401(monkeypatch):
