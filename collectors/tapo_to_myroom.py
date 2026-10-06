@@ -82,7 +82,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import os.path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 try:
     from kasa import Credentials, Discover
@@ -838,6 +838,28 @@ async def answer_refresh_request(
     LOGGER.info("候補を送りました（%d 台・うち計測できる機器 %d 台）", len(candidates), len(hosts))
 
 
+def stale_manual_hosts(
+    manual: Sequence[Tuple[str, Optional[str]]],
+    unread_hosts: Sequence[str],
+    found: Sequence[Tuple[str, Optional[str]]],
+) -> Set[str]:
+    """`TAPO_HOSTS` に書かれているのに読めず、探索でも見つからなかった IP（#728）。
+
+    プラグを Tapo アプリで改名すると、`merge_hosts()` は名前で新しい IP へ付け替えられず、
+    古い IP が手書きのまま残る（「サブPC」を「PC」へ改名した実例）。これを読めない機器として
+    数えると、再取得の依頼が完了しないまま期限切れになる。
+
+    探索が1台も見つけられなかったとき（LAN 側の不調）は判断できないので空を返す。
+    """
+    found_ips = {host for host, _ in found}
+    if not found_ips:
+        return set()
+    manual_ips = {host for host, _ in manual}
+    return {
+        host for host in unread_hosts if host in manual_ips and host not in found_ips
+    }
+
+
 async def resolve_hosts(
     config: Dict[str, Any],
     cache_path: str,
@@ -937,6 +959,22 @@ async def run_collect(
         LOGGER.info("読めない機器があったので探し直します")
         hosts, _ = await resolve_hosts(config, cache_path, True)
         readings = await collect(config, hosts, today, start)
+        discovered = True
+
+    stale_hosts: Set[str] = set()
+    if discovered:
+        found_hosts, _ = load_hosts_cache(cache_path, time.time())
+        stale_hosts = stale_manual_hosts(
+            config["hosts"],
+            [h for h, _ in hosts if h not in {item["host"] for item in readings}],
+            found_hosts,
+        )
+        for host in sorted(stale_hosts):
+            LOGGER.warning(
+                "TAPO_HOSTS の %s は探索でも見つかりません。撤去・改名したプラグなら"
+                " TAPO_HOSTS から外してください（再取得の完了の判定からは外します）",
+                host,
+            )
     if not readings:
         LOGGER.error("どのプラグからも読み取れませんでした")
         return 1
@@ -973,7 +1011,11 @@ async def run_collect(
     LOGGER.info("送信しました: %s", result)
     if refetch:
         # 読めなかった機器があるうちは完了にしない。依頼は期限まで残るので次回また取り直す
-        missing = {host for host, _ in hosts} - {item["host"] for item in readings}
+        # ただし TAPO_HOSTS に残った古い IP（探索でも見つからない）は待っても読めないので
+        # 数えない。数えると依頼が期限切れまで「応答なし」で残り続ける（#728）
+        missing = (
+            {host for host, _ in hosts} - {item["host"] for item in readings} - stale_hosts
+        )
         # 当日ぶんは読めても過去の履歴が取れなかった機器も、期間を取り直せていないので未完了
         missing |= {item["host"] for item in readings if item.get("history_failed")}
         if missing:
