@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.38.2",
+    date: "2026-10-07",
+    changes: [
+      "消費電力の「指定日以降の再取得」が、スマートプラグを改名したあとも終わらずに残ってしまう問題を直しました。",
+    ],
+  },
+  {
     version: "4.38.1",
     date: "2026-10-07",
     changes: [
