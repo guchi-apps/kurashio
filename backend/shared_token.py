@@ -53,7 +53,7 @@ def forget(name: str) -> None:
         _cache.pop(name, None)
 
 
-def _endpoint() ->Optional[Tuple[str, str]]:
+def _endpoint() -> Optional[Tuple[str, str]]:
     """（取得URL, Bearer）。どちらかが未設定・空なら None（＝共有トークンは使わない）。"""
     secret = os.getenv(SECRET_ENV_VAR)
     base_url = os.getenv(URL_ENV_VAR)
