@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.38.1",
+    date: "2026-10-07",
+    changes: [
+      "Googleでログインしようとすると、アカウントによっては「ログインできない」と表示されてしまう不具合を修正しました。ログインに失敗したときの画面の扱いも改善しています。",
+    ],
+  },
+  {
     version: "4.38.0",
     date: "2026-10-06",
     changes: [
