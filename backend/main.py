@@ -12,6 +12,7 @@ import datetime
 import random
 from dotenv import load_dotenv
 from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
+from . import access
 from .auth import get_current_user
 from .internal_auth import require_collector_token, require_internal_control_token, require_internal_token
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -191,6 +192,13 @@ async def _light_state_poll_loop() -> None:
         await asyncio.sleep(LIGHT_STATE_POLL_INTERVAL_SECONDS)
 
 
+async def _access_heartbeat_loop() -> None:
+    """StatusHub へ反映状況（適用中の版）を伝える。利用者の操作が無くても5分以内に1回は呼ぶ（#718）。"""
+    while True:
+        await asyncio.to_thread(access.send_heartbeat)
+        await asyncio.sleep(access.HEARTBEAT_INTERVAL_SECONDS)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(_app: FastAPI):
     tasks = []
@@ -199,6 +207,7 @@ async def lifespan(_app: FastAPI):
         tasks.append(asyncio.create_task(_garbage_notion_sync_loop()))
         tasks.append(asyncio.create_task(_cleaning_notion_sync_loop()))
         tasks.append(asyncio.create_task(_light_state_poll_loop()))
+        tasks.append(asyncio.create_task(_access_heartbeat_loop()))
     try:
         yield
     finally:

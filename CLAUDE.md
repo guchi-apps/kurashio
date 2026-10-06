@@ -177,6 +177,18 @@ Supabase は共有プロジェクトで、`signOut()` を引数なしで呼ぶ�
   （`lib/api.ts`。403 を返すのは認証だけ）。`/auth/callback` の判定は `lib/auth-callback.ts` で、
   通信が例外になっても「ログインしています」のまま止めない
 
+### 許可はStatusHubの判定API（#718）
+
+**誰が通れるかの正本は StatusHub の共通アクセス設定。** `backend/access.py` が `POST /api/access/v1/decision` を
+引く（アプリID `myroom`・トークンは issue-deck の共有トークン `MYROOM_ACCESS_APP_TOKEN`）。`auth.get_current_user` は
+Supabaseのトークン・Googleのidentity確認のあとに、**確認済みの `sub`・メール・`emailVerified: true` だけ**を送る。
+
+- **`ALLOWED_GOOGLE_EMAILS` を判定にもフォールバックにも使わない。** 判定APIが使えないときに旧リストで通すと、
+  StatusHubで取り消した利用者が通る。トークンが無い・一度も判定できていない場合は全員拒否になる
+- 結果は `ttlSeconds`（30秒）だけ使い回し、取得失敗時は直前の判定を `maxStaleSeconds`（5分）まで使う。超えたら拒否
+- `lifespan` のハートビート（4分ごと）が適用中の版を申告し、管理画面で「反映済み」になる。DB_MOCK では回さない
+- 旧設定（`deploy.yml`・`secrets-manifest.tsv`・1Passwordの `allowed-google-emails`）は、本番の移行検証と復旧確認の後に整理する
+
 ## iOSアプリ（`ios/`）とのつなぎ目
 
 **`ios/` は Web版を WKWebView で開くだけの殻**（#526）。ビルド手順・Web版との更新対象の違いは
