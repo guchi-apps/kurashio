@@ -26,6 +26,11 @@ final class WebViewModel: NSObject, ObservableObject {
         // Cookie・localStorage（Supabaseのセッション）を端末に残し、再起動後もログインを保つ
         configuration.websiteDataStore = .default()
         configuration.applicationNameForUserAgent = AppConfig.userAgentApplicationName
+        // Web版のドメインだけをApp-Bound Domains（Info.plist の WKAppBoundDomains）として扱う。
+        // これでWKWebViewでもService Workerが動き、完全オフラインでも控えのHTMLとチャンクから開ける（#736）。
+        // 外部ドメインへの画面遷移は `decidePolicyFor` がもともとSafari等へ逃がしており、
+        // Supabaseへのfetchは遷移ではないので制限されない。ドメインを変えたら Info.plist も揃えること
+        configuration.limitsNavigationsToAppBoundDomains = true
 
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()

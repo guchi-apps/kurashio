@@ -76,9 +76,26 @@ self.addEventListener("fetch", (event) => {
   // 新しいビルドの有無を確かめるための値。**キャッシュに載せてはいけない**（#277）。
   // 一度でも載せると古いバージョンを返し続け、アプリは永久に更新へ気付けなくなる
   if (url.pathname === "/version.json") return;
-  // Next.js の JS/CSS チャンクは常にネットワーク優先（古いバンドル参照を防ぐ）
+  // Next.js の JS/CSS チャンクは常にネットワーク優先（古いバンドル参照を防ぐ）。
+  // **通信できなかったときだけ**控えから返す（#736）。控えのHTMLだけ返してもチャンクが無いと
+  // 画面が組み上がらないため。404（デプロイ直後にチャンクが未着・#450）は失敗ではないので
+  // そのまま返し、控えには成功した応答だけを残す。控えは CACHE_NAME（版ごと）と一緒に消える
   if (url.pathname.startsWith("/_next/")) {
-    event.respondWith(fetch(request));
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            void caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(async () => {
+          const cached = await caches.match(request);
+          if (cached) return cached;
+          throw new TypeError("offline and not cached");
+        })
+    );
     return;
   }
 

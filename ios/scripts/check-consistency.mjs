@@ -145,6 +145,22 @@ export function collectProblems(files) {
     );
   }
 
+  // 7. App-Bound Domains（#736）: limitsNavigationsToAppBoundDomains を有効にしているので、
+  //    baseURL のホストが WKAppBoundDomains に無いと WebView が画面を開けない
+  const appBound = files.appInfoPlist.match(/<key>WKAppBoundDomains<\/key>\s*<array>([\s\S]*?)<\/array>/);
+  const baseUrl = files.appConfig.match(/baseURL\s*=\s*URL\(string:\s*"([^"]+)"\)/);
+  if (!appBound || !baseUrl) {
+    problems.push("Info.plist の WKAppBoundDomains または AppConfig.baseURL が読み取れません（書き方を変えたならこのスクリプトも直す）");
+  } else {
+    const domains = [...appBound[1].matchAll(/<string>([^<]+)<\/string>/g)].map((m) => m[1].trim());
+    const host = new URL(baseUrl[1]).hostname;
+    if (!domains.includes(host)) {
+      problems.push(
+        `AppConfig.baseURL のホスト (${host}) が Info.plist の WKAppBoundDomains にありません（WebView が開けなくなる）`
+      );
+    }
+  }
+
   return problems;
 }
 
