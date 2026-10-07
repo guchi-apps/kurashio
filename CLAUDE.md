@@ -233,7 +233,9 @@ Web側の分岐は `frontend/lib/native-app.ts` の `isNativeApp()`
   消さないので、そのあとのページ側の `exchangeCodeForSession` は通る（auth-js 2.110 で確認）
 - 戻り先 `kurashio://auth-callback` は Supabase の許可リダイレクトURLへの登録が要る。
   Swift の `AppConfig.authCallbackScheme` と `NATIVE_AUTH_REDIRECT` を揃えること
-- WKWebView では Service Worker・Web Push が使えない。`window.confirm()` はアプリ側で実装している
+- WKWebView では Web Push が使えない。**Service Worker は App-Bound Domains（`Info.plist` の `WKAppBoundDomains`）で
+  有効にしてあり**、完全オフラインでも控えから開ける（#736）。Web版のドメインを変えるときは `AppConfig.baseURL` と
+  `WKAppBoundDomains` を揃えること（無いホストは WebView が開けない）。`window.confirm()` はアプリ側で実装している
   （無いと常に false になり、記録の削除が効かない）
 - **ウィジェットの電気の操作ボタンは、ウィジェットから送らない**（#546）。JWT・固定トークンを渡さず、
   `PressRemoteButtonIntent`（`openAppWhenRun`）がアプリを前面に出し、WebのセッションでWeb側

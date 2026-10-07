@@ -223,7 +223,8 @@ Info.plist ファイルは作らず、ビルド設定から生成している。
 
 ### 開発サーバーへ向けるとき
 
-`Kurashio/AppConfig.swift` の `baseURL` だけを変えます。**LAN IP の `http://` のままでは Google ログインが
+`Kurashio/AppConfig.swift` の `baseURL` と、`Kurashio/Info.plist` の `WKAppBoundDomains` に同じホストを
+足します（#736。App-Bound Domains に無いホストは WebView が開けない）。**LAN IP の `http://` のままでは Google ログインが
 戻れない**ため、sslip.io などでホスト名にし、そのURLも Supabase の許可リダイレクトURL（Site URL 側）に
 入っている必要があります（`sslip-io-lan-dev` の手順）。戻すのを忘れてコミットしないこと。
 
@@ -250,8 +251,8 @@ WebView の中にある `code_verifier` が無ければ交換できません。
 
 ### 通信できないとき
 
-WKWebView では Service Worker が使えないため、オフラインでキャッシュの画面は出ません。代わりに
-アプリ側（`ConnectionErrorView.swift`）が理由と「再読み込み」を出します。
+**一度開いたことがあれば、オフラインでも前回のデータで開けます**（#736・下記「完全オフラインでの起動」）。
+控えが無い（初回・アプリの入れ直し直後）ときは、アプリ側（`ConnectionErrorView.swift`）が理由と「再読み込み」を出します。
 
 - 端末がオフライン → 「インターネットに接続できません」。回線が戻ると自動で読み込み直す
 - サーバーが 5xx を返す・応答しない → 「kurashioのサーバーに接続できません（エラー 502）」
@@ -277,9 +278,26 @@ Web・PWA でも同じように効く。前回のデータを出している間�
   （`overlayBackgroundSensors()`）。取り直しが終われば、その値が正になる
 - ログアウト（`deviceTokenCleared`）で保存を消し、予約も取り消す
 
-**オフラインで開いたときの制約:** WKWebView では Service Worker が使えないため、**HTML そのものが取れないと
-前回のデータも出せない**（「インターネットに接続できません」のまま）。効くのは回線が遅い・API だけ取れない
-ときまで。完全オフライン起動（App-Bound Domains で Service Worker を有効にする案）は別 Issue で扱う。
+### 完全オフラインでの起動（#736）
+
+WKWebView は既定では Service Worker を使えないが、**App-Bound Domains を宣言すると使える**（iOS 14 以降）。
+
+- `Info.plist` の `WKAppBoundDomains` に `myroom.gucchii.com`、`WebViewModel` で
+  `limitsNavigationsToAppBoundDomains = true`。Web・PWA と同じ `frontend/public/sw.js` が登録される
+- `sw.js` は画面遷移（HTML）と `/_next/` のチャンクを「ネットワーク優先・通信できないときだけ控え」で返す。
+  控えのHTMLが返ると WebView の読み込みは成功するので、アプリのエラー画面は出ず、Web 側の
+  「前回のデータを表示しています」になる（回線復帰時の取り直しも Web 側が行う）
+- **App-Bound でないドメインへの画面遷移は WebView 内では失敗する。** 外部リンクはもともと `decidePolicyFor` が
+  Safari 等へ逃がしており、Supabase への `fetch` は遷移ではないので影響しない。Googleログインは
+  `ASWebAuthenticationSession`（WebView の外）。`evaluateJavaScript`・ブリッジは App-Bound のページでだけ動く
+- 控えは `CACHE_NAME`（版ごと）で持ち、新しい版の Service Worker が有効になると古い控えは消える。
+  **デプロイ後に1回開いただけの状態では、次に開くまで控えが揃っていない**ことがある（その回の HTML・チャンクは
+  古い版の控えへ入ったため）。オンラインでもう一度開けば揃う
+- Web Push（`PushManager`）は App-Bound でも WKWebView では使えない。通知は従来どおり APNs
+
+**実機での確認:** 入れ直し後、オンラインで一度開いて閉じ（アプリを終了）、機内モードにしてから開く。前回のデータで
+ダッシュボードが出て、上に「前回のデータを表示しています」と出ればよい。Safari の Web インスペクタ（Mac）で
+アプリの WebView を開き、`navigator.serviceWorker.controller` が `null` でないことでも登録を確かめられる。
 
 **電池への影響の考え方と確かめ方:**
 
@@ -303,7 +321,7 @@ PWA で出ている上端のぼかし（#478・#521）とは別の作りです�
 
 ### プッシュ通知（APNs・#527）
 
-**Web PushとiOSアプリの通知は別経路。** WKWebViewはService Workerを使えないため、iOSアプリはPWAのWeb Push
+**Web PushとiOSアプリの通知は別経路。** WKWebViewはWeb Pushを使えない（Service Worker自体は #736 から動く）ため、iOSアプリはPWAのWeb Push
 （`backend/push_notify.py`）を受け取れない。代わりにApple Push Notification service（APNs）を使う別経路
 （`backend/apns_notify.py`・`backend/apns_subscriptions.py`）を持ち、ゴミの日・部屋の異常/復旧の通知イベント
 （`backend/notify_events.py`）から両方へ同時に配信する。**アプリ内の通知設定（`/devices`の通知設定シート）は
