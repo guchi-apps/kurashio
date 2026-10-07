@@ -11,14 +11,21 @@ struct KurashioWidgetView: View {
             LockScreenView(family: family, reading: entry.roomReading)
         } else if let snapshot = entry.snapshot, let reading = entry.roomReading {
             if family == .systemLarge {
-                LargeContentView(snapshot: snapshot, reading: reading, pressResult: entry.pressResult)
+                LargeContentView(
+                    snapshot: snapshot, reading: reading, pressResult: entry.pressResult,
+                    updatedText: MeasuredTimeLabel.text(for: [reading], now: entry.date)
+                )
             } else if family == .systemMedium {
-                MediumContentView(readings: entry.mediumReadings)
+                let readings = entry.mediumReadings
+                MediumContentView(readings: readings, updatedText: MeasuredTimeLabel.text(for: readings, now: entry.date))
             } else {
                 if let second = entry.secondReading {
-                    SmallDualContentView(first: reading, second: second)
+                    SmallDualContentView(
+                        first: reading, second: second,
+                        updatedText: MeasuredTimeLabel.text(for: [reading, second], now: entry.date)
+                    )
                 } else {
-                    SmallContentView(reading: reading)
+                    SmallContentView(reading: reading, updatedText: MeasuredTimeLabel.text(for: [reading], now: entry.date))
                 }
             }
         } else {
@@ -110,6 +117,48 @@ private struct LockScreenView: View {
     }
 }
 
+/// 値を測った時刻の小さな表示（#745）。複数のセンサーを並べるときは、いちばん古い時刻を出す
+/// （「この時刻より新しい」と言えるため）。`measuredAt` はJSTの文字列で、端末のタイムゾーンでは解釈し直さない
+enum MeasuredTimeLabel {
+    static func text(for readings: [SharedWidgetSnapshot.RoomReading], now: Date) -> String? {
+        let stamps = readings.compactMap { reading -> String? in
+            guard let value = reading.measuredAt, value.count >= 16 else { return nil }
+            let text = String(value.prefix(19)).replacingOccurrences(of: " ", with: "T")
+            return text.dropFirst(10).first == "T" ? text : nil
+        }
+        guard let oldest = stamps.min() else { return nil }
+        let day = String(oldest.prefix(10))
+        let clock = String(oldest.dropFirst(11).prefix(5))
+        if day == today(now: now) { return "\(clock) 取得" }
+        let parts = day.split(separator: "-")
+        guard parts.count == 3, let month = Int(parts[1]), let date = Int(parts[2]) else { return "\(clock) 取得" }
+        return "\(month)/\(date) \(clock) 取得"
+    }
+
+    private static func today(now: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Tokyo")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: now)
+    }
+}
+
+/// 最下部の右寄せ9pt。既存の文字サイズは変えず、余白に足す
+private struct MeasuredTimeNote: View {
+    let text: String?
+
+    var body: some View {
+        if let text {
+            Text(text)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+}
+
 private struct MessageView: View {
     let text: String
 
@@ -127,6 +176,7 @@ private struct MessageView: View {
 /// Small（155×155pt相当）: 室温・湿度の2項目だけに絞る
 private struct SmallContentView: View {
     let reading: SharedWidgetSnapshot.RoomReading
+    var updatedText: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -158,6 +208,7 @@ private struct SmallContentView: View {
             StaleNote(stale: reading.stale)
 
             Spacer(minLength: 0)
+            MeasuredTimeNote(text: updatedText)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .containerBackground(.fill.tertiary, for: .widget)
@@ -168,12 +219,15 @@ private struct SmallContentView: View {
 private struct SmallDualContentView: View {
     let first: SharedWidgetSnapshot.RoomReading
     let second: SharedWidgetSnapshot.RoomReading
+    var updatedText: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SensorBlock(reading: first)
             Divider().padding(.vertical, 4)
             SensorBlock(reading: second)
+            Spacer(minLength: 0)
+            MeasuredTimeNote(text: updatedText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .containerBackground(.fill.tertiary, for: .widget)
@@ -183,11 +237,22 @@ private struct SmallDualContentView: View {
 /// Medium（329×155pt相当）: 最大4地点を2×2で並べる（#614）。1台は大きく、2台は左右、3〜4台は2×2
 private struct MediumContentView: View {
     let readings: [SharedWidgetSnapshot.RoomReading]
+    var updatedText: String? = nil
 
     var body: some View {
+        VStack(spacing: 0) {
+            Group { content }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            MeasuredTimeNote(text: readings.count <= 1 ? nil : updatedText)
+        }
+        .containerBackground(.fill.tertiary, for: .widget)
+    }
+
+    @ViewBuilder
+    private var content: some View {
         Group {
             if readings.count <= 1, let only = readings.first {
-                SmallContentView(reading: only)
+                SmallContentView(reading: only, updatedText: updatedText)
             } else if readings.count == 2 {
                 HStack(alignment: .center, spacing: 0) {
                     SensorBlock(reading: readings[0])
@@ -202,8 +267,6 @@ private struct MediumContentView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .containerBackground(.fill.tertiary, for: .widget)
     }
 
     private func row(_ items: ArraySlice<SharedWidgetSnapshot.RoomReading>) -> some View {
@@ -291,13 +354,17 @@ private struct LargeContentView: View {
     let snapshot: SharedWidgetSnapshot.Snapshot
     let reading: SharedWidgetSnapshot.RoomReading
     let pressResult: WidgetPressStore.Result?
+    var updatedText: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(reading.name.map { "kurashio・\($0)" } ?? "kurashio")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            HStack(spacing: 6) {
+                Text(reading.name.map { "センサー・\($0)" } ?? "センサー")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                MeasuredTimeNote(text: updatedText)
+            }
 
             HStack(spacing: 20) {
                 MetricColumn(label: "室温", value: reading.temperature.map { String(format: "%.1f℃", $0) } ?? "—")
