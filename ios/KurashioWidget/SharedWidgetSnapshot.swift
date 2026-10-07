@@ -31,6 +31,8 @@ enum SharedWidgetSnapshot {
         var co2Level: String?
         /// 受信が止まっている（値は最後に受信した時点のもの）
         var stale: Bool
+        /// 値を測った時刻（JSTの文字列）。ウィジェットの最下部に「いつの値か」を出す（#745）。届かない古い版では nil
+        var measuredAt: String?
     }
 
     /// Largeに並べる電気の操作ボタン1つぶん（#546。Web側の `WidgetRemoteButton`）
@@ -106,6 +108,7 @@ enum SharedWidgetSnapshot {
         var co2: Double?
         var co2Level: String?
         var stale: Bool
+        var measuredAt: String? = nil
     }
 
     private static let logger = Logger(subsystem: "com.gucchii.kurashio", category: "WidgetSnapshot")
@@ -122,7 +125,8 @@ enum SharedWidgetSnapshot {
                 humidity: sensor.humidity,
                 co2: sensor.co2,
                 co2Level: sensor.co2Level,
-                stale: sensor.stale
+                stale: sensor.stale,
+                measuredAt: sensor.measuredAt
             )
         }
         return RoomReading(
@@ -147,7 +151,8 @@ enum SharedWidgetSnapshot {
             humidity: sensor.humidity,
             co2: sensor.co2,
             co2Level: sensor.co2Level,
-            stale: sensor.stale
+            stale: sensor.stale,
+            measuredAt: sensor.measuredAt
         )
     }
 
@@ -225,6 +230,7 @@ enum SharedWidgetSnapshot {
             updated.co2 = latest.co2
             updated.co2Level = latest.co2Level
             updated.stale = latest.stale
+            updated.measuredAt = latest.measuredAt ?? sensor.measuredAt
             return updated
         }
         // `sensors` を持たない古いスナップショットのための室温・湿度も、既定のセンサーに合わせる
@@ -286,7 +292,8 @@ enum SharedWidgetSnapshot {
             humidity: double(raw["humidity"]),
             co2: double(raw["co2"]),
             co2Level: raw["co2Level"] as? String,
-            stale: (raw["stale"] as? Bool) ?? false
+            stale: (raw["stale"] as? Bool) ?? false,
+            measuredAt: raw["measuredAt"] as? String
         )
     }
 
