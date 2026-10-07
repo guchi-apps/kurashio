@@ -34,6 +34,15 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.39.0",
+    date: "2026-10-07",
+    changes: [
+      "アプリを開いた直後に、前回表示したデータ（センサー値や暮らしのカードなど）が先に表示されるようになり、最新の情報が届くまで待たずに状況を確認できます。",
+      "iOSアプリで、電波のない場所（完全オフライン）でも前回のデータで画面を開けるようになりました。",
+      "iOSアプリを閉じている間も、センサーの値を取っておけるようになりました。",
+    ],
+  },
+  {
     version: "4.38.2",
     date: "2026-10-07",
     changes: [
