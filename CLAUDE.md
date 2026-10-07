@@ -211,6 +211,15 @@ develop→main のPRには `.github/workflows/ios-rebuild-notice.yml` が「入�
 IPA は公開リポジトリの artifact に載せない（署名・アップロードは同じジョブ）。TestFlight 版は
 `aps-environment=production` だが、バックエンドが端末トークンごとに APNs の送信先を振り分けるので通知も届く（#593）。
 
+**起動直後は端末に残した前回のデータを先に出し、裏で取り直す**（#735）。スナップショット
+（`lib/offline-cache.ts`）は表示設定・暮らしのカードも持ち、`applyDashboardSnapshot(snapshot, "preview")` で
+ログイン判定のあとに適用する（**判定中の読み込み画面・ログイン画面は置き換えない**・#250）。前回のデータを
+出している間（`showingCachedData`）は、エアコンの操作・ウィジェットへの同期・スナップショットの保存し直しを
+止める。**3Dプリンターの状態はスナップショットに入れない**（進捗が古いと終わった印刷を印刷中と見せる）。
+ログアウト（`signOutThisApp()`）でスナップショットを消す。iOSアプリが閉じている間に取ったセンサー値
+（`ios/Kurashio/BackgroundRefresh.swift`）は Web からの pull（`backgroundSensorsReady`）だけで受け取る。
+詳細は `ios/README.md`「起動直後の前回データと、閉じている間の取得」。
+
 Web側の分岐は `frontend/lib/native-app.ts` の `isNativeApp()`
 （ブリッジ `window.webkit.messageHandlers.kurashioAuth` の有無）に集め、**Web・PWA の挙動は変えない。**
 
@@ -224,7 +233,9 @@ Web側の分岐は `frontend/lib/native-app.ts` の `isNativeApp()`
   消さないので、そのあとのページ側の `exchangeCodeForSession` は通る（auth-js 2.110 で確認）
 - 戻り先 `kurashio://auth-callback` は Supabase の許可リダイレクトURLへの登録が要る。
   Swift の `AppConfig.authCallbackScheme` と `NATIVE_AUTH_REDIRECT` を揃えること
-- WKWebView では Service Worker・Web Push が使えない。`window.confirm()` はアプリ側で実装している
+- WKWebView では Web Push が使えない。**Service Worker は App-Bound Domains（`Info.plist` の `WKAppBoundDomains`）で
+  有効にしてあり**、完全オフラインでも控えから開ける（#736）。Web版のドメインを変えるときは `AppConfig.baseURL` と
+  `WKAppBoundDomains` を揃えること（無いホストは WebView が開けない）。`window.confirm()` はアプリ側で実装している
   （無いと常に false になり、記録の削除が効かない）
 - **ウィジェットの電気の操作ボタンは、ウィジェットから送らない**（#546）。JWT・固定トークンを渡さず、
   `PressRemoteButtonIntent`（`openAppWhenRun`）がアプリを前面に出し、WebのセッションでWeb側

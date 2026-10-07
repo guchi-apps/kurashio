@@ -26,6 +26,11 @@ final class WebViewModel: NSObject, ObservableObject {
         // Cookie・localStorage（Supabaseのセッション）を端末に残し、再起動後もログインを保つ
         configuration.websiteDataStore = .default()
         configuration.applicationNameForUserAgent = AppConfig.userAgentApplicationName
+        // Web版のドメインだけをApp-Bound Domains（Info.plist の WKAppBoundDomains）として扱う。
+        // これでWKWebViewでもService Workerが動き、完全オフラインでも控えのHTMLとチャンクから開ける（#736）。
+        // 外部ドメインへの画面遷移は `decidePolicyFor` がもともとSafari等へ逃がしており、
+        // Supabaseへのfetchは遷移ではないので制限されない。ドメインを変えたら Info.plist も揃えること
+        configuration.limitsNavigationsToAppBoundDomains = true
 
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
@@ -303,11 +308,19 @@ extension WebViewModel: WKScriptMessageHandler {
             DeviceSensors.saveToken(token)
             WatchSync.shared.setToken(token)
             reloadWidgetTimelines()
+            // アプリを閉じている間の取得（#735）もこのトークンで行う
+            BackgroundRefresh.schedule()
         case "deviceTokenCleared":
             // ログアウト。端末・Watchの保存を消す（ウィジェットは次の再評価で保存済みの値も消える）
             DeviceSensors.clearToken()
             WatchSync.shared.setToken(nil)
             reloadWidgetTimelines()
+            // 閉じている間に取った値（#735）も前の利用者のものなので捨て、予約も取り消す
+            BackgroundRefresh.clear()
+            BackgroundRefresh.schedule()
+        case "backgroundSensorsReady":
+            // 閉じている間に取ったセンサーの値（#735）。Webが取りにきたときにだけ返す（pull）
+            deliverBackgroundSensors()
         case "widgetReady":
             deliverPendingWidgetPress()
         case "widgetPressResult":
@@ -336,6 +349,17 @@ extension WebViewModel {
         )
         // iPhoneが持っているトークンを、まだ受け取っていないWatchへも渡す（Watchアプリを後から入れた場合など）
         WatchSync.shared.setToken(DeviceSensors.loadToken())
+    }
+}
+
+// MARK: - 閉じている間に取ったセンサーの値（#735）
+
+extension WebViewModel {
+    /// Webの `backgroundSensorsReady` への返事。中身は `BackgroundRefresh` が保存したJSON（数値・文字列だけ）
+    fileprivate func deliverBackgroundSensors() {
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('myroom-native-background-sensors', { detail: \(BackgroundRefresh.payloadJSON()) }))"
+        )
     }
 }
 

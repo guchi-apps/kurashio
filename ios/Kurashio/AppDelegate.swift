@@ -15,6 +15,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // アプリを閉じている間のセンサー取得（#735）。起動処理の中で登録しないと OS が起こせない
+        BackgroundRefresh.register()
         return true
     }
 

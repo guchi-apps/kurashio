@@ -38,6 +38,11 @@ struct ContentView: View {
             model.refreshNotificationAuthorizationStatus()
         }
         .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                // 閉じている間に最新の値を取っておく（#735）。実行の時刻・回数は OS が決める
+                BackgroundRefresh.schedule()
+                return
+            }
             guard phase == .active else { return }
             // 別アプリへ行っているあいだに回線が戻っていることがある
             if model.failure != nil { model.retry() }

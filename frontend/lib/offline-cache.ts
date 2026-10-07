@@ -1,3 +1,9 @@
+import type { ChartColorSettings } from "@/lib/chart-colors";
+import type { CleaningSchedule } from "@/lib/cleaning";
+import type { DisplayOrderItem } from "@/lib/display-order";
+import type { FilamentPayload } from "@/lib/filament";
+import type { GarbageSchedule } from "@/lib/garbage";
+import type { RemoteButtons } from "@/lib/remote";
 import type {
   AirconData,
   AirconUnitInfo,
@@ -8,6 +14,9 @@ import type {
   OutdoorLocation,
   OutdoorLocationEntry,
   OutdoorLocationWeather,
+  EnergyBreakdown,
+  SensorDeviceStatus,
+  UtilityBillSummary,
 } from "@/lib/types";
 
 export const OFFLINE_CACHE_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -15,6 +24,36 @@ const DB_NAME = "myroom-offline";
 const DB_VERSION = 1;
 const STORE_NAME = "snapshots";
 const SNAPSHOT_KEY = "dashboard";
+
+/**
+ * 表示設定（並び順・非表示など）。起動直後に前回と同じ並びで出すために持つ（#735）。
+ * 設定の正はサーバー（`app_settings`）で、取り直せたらそちらで置き換える
+ */
+export interface DashboardSnapshotUiSettings {
+  displayOrder: DisplayOrderItem[];
+  lifeCardOrder: string[];
+  chartColors: ChartColorSettings;
+  /** `Set` は IndexedDB へそのまま入るが、読み書きの形を揃えるため配列で持つ */
+  hiddenDeviceKeys: string[];
+  staleAlertExcludedKeys: string[];
+  lightThresholds: Record<string, number>;
+}
+
+/**
+ * 「暮らし」のカードなど、センサー以外の表示データ（#735）。
+ * **3Dプリンターの状態は持たない。** 印刷の進捗は分単位で変わり、「いま」の基準も応答の時刻なので、
+ * 前回の値を出すと終わった印刷を印刷中と見せてしまう（フィラメント残量はアプリの記録なので持つ）
+ */
+export interface DashboardSnapshotLife {
+  garbageSchedule: GarbageSchedule | null;
+  energyBreakdown: EnergyBreakdown | null;
+  remoteButtons: RemoteButtons | null;
+  billSummary: UtilityBillSummary | null;
+  cleaningSchedule: CleaningSchedule | null;
+  filament: FilamentPayload | null;
+  sensorStatuses: SensorDeviceStatus[];
+  staleThresholdMinutes: number | null;
+}
 
 export interface DashboardOfflineSnapshot {
   cachedAt: string;
@@ -33,6 +72,10 @@ export interface DashboardOfflineSnapshot {
   outdoorLocations?: OutdoorLocationEntry[];
   /** 地点ごとの「いまの天気」（#321） */
   outdoorWeathers?: OutdoorLocationWeather[];
+  /** #735 より前に保存されたスナップショットには無い */
+  uiSettings?: DashboardSnapshotUiSettings;
+  /** #735 より前に保存されたスナップショットには無い */
+  life?: DashboardSnapshotLife;
 }
 
 export interface BuildDashboardOfflineSnapshotInput {
@@ -47,6 +90,8 @@ export interface BuildDashboardOfflineSnapshotInput {
   outdoorLocation: OutdoorLocation | null;
   outdoorLocations?: OutdoorLocationEntry[];
   outdoorWeathers?: OutdoorLocationWeather[];
+  uiSettings?: DashboardSnapshotUiSettings;
+  life?: DashboardSnapshotLife;
   windowMs?: number;
 }
 
@@ -181,6 +226,8 @@ export function buildDashboardOfflineSnapshot(
     outdoorLocation: input.outdoorLocation,
     outdoorLocations: input.outdoorLocations ?? [],
     outdoorWeathers: input.outdoorWeathers ?? [],
+    ...(input.uiSettings ? { uiSettings: input.uiSettings } : {}),
+    ...(input.life ? { life: input.life } : {}),
   };
 }
 
@@ -199,6 +246,62 @@ export async function loadDashboardOfflineSnapshot(): Promise<DashboardOfflineSn
   } catch {
     return null;
   }
+}
+
+/**
+ * 端末に残した前回のデータを消す。ログアウト時に呼ぶ（#735）。
+ * 起動直後に前回のデータを出すようになったため、残すと次にログインした別のアカウントに一瞬見える
+ */
+export async function clearDashboardOfflineSnapshot(): Promise<void> {
+  try {
+    await runTransaction("readwrite", (store) => store.delete(SNAPSHOT_KEY));
+  } catch {
+    // IndexedDB が使えない環境では残っているものも無い
+  }
+}
+
+/**
+ * iOSアプリが閉じている間に取っておいたセンサーの値（#735・`ios/Kurashio/BackgroundRefresh.swift`）。
+ * 形は `GET /api/device/sensors` の1件と同じ
+ */
+export interface BackgroundSensorReading {
+  deviceId: number;
+  measuredAt: string | null;
+  temperature: number | null;
+  humidity: number | null;
+  co2: number | null;
+}
+
+/**
+ * 前回のデータへ、アプリが閉じている間に取った値を重ねる（#735）。
+ *
+ * **測った時刻（`measuredAt`）が前回の値より新しいセンサーだけ**を置き換え、届いた項目（室温・湿度・CO2）
+ * だけを差し替える。前回のデータに無いセンサーは足さない（どのセンサーを出すかはダッシュボードの設定が正）。
+ * 何も変わらなければ同じオブジェクトを返す
+ */
+export function overlayBackgroundSensors(
+  latestByDevice: Record<number, LatestData | null>,
+  readings: readonly BackgroundSensorReading[]
+): Record<number, LatestData | null> {
+  let next: Record<number, LatestData | null> | null = null;
+  for (const reading of readings) {
+    if (!(reading.deviceId in latestByDevice)) continue;
+    const current = latestByDevice[reading.deviceId];
+    const readingMs = parseDataTimestamp(reading.measuredAt);
+    if (readingMs == null) continue;
+    const currentMs = parseDataTimestamp(current?.datetime);
+    if (currentMs != null && readingMs <= currentMs) continue;
+
+    next ??= { ...latestByDevice };
+    next[reading.deviceId] = {
+      ...current,
+      datetime: reading.measuredAt ?? undefined,
+      ...(reading.temperature != null ? { temperature: reading.temperature } : {}),
+      ...(reading.humidity != null ? { humidity: reading.humidity } : {}),
+      ...(reading.co2 != null ? { co2: reading.co2 } : {}),
+    };
+  }
+  return next ?? latestByDevice;
 }
 
 export function isOffline(): boolean {

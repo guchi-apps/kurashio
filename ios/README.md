@@ -223,7 +223,8 @@ Info.plist ファイルは作らず、ビルド設定から生成している。
 
 ### 開発サーバーへ向けるとき
 
-`Kurashio/AppConfig.swift` の `baseURL` だけを変えます。**LAN IP の `http://` のままでは Google ログインが
+`Kurashio/AppConfig.swift` の `baseURL` と、`Kurashio/Info.plist` の `WKAppBoundDomains` に同じホストを
+足します（#736。App-Bound Domains に無いホストは WebView が開けない）。**LAN IP の `http://` のままでは Google ログインが
 戻れない**ため、sslip.io などでホスト名にし、そのURLも Supabase の許可リダイレクトURL（Site URL 側）に
 入っている必要があります（`sslip-io-lan-dev` の手順）。戻すのを忘れてコミットしないこと。
 
@@ -250,12 +251,66 @@ WebView の中にある `code_verifier` が無ければ交換できません。
 
 ### 通信できないとき
 
-WKWebView では Service Worker が使えないため、オフラインでキャッシュの画面は出ません。代わりに
-アプリ側（`ConnectionErrorView.swift`）が理由と「再読み込み」を出します。
+**一度開いたことがあれば、オフラインでも前回のデータで開けます**（#736・下記「完全オフラインでの起動」）。
+控えが無い（初回・アプリの入れ直し直後）ときは、アプリ側（`ConnectionErrorView.swift`）が理由と「再読み込み」を出します。
 
 - 端末がオフライン → 「インターネットに接続できません」。回線が戻ると自動で読み込み直す
 - サーバーが 5xx を返す・応答しない → 「kurashioのサーバーに接続できません（エラー 502）」
 - Safari へは誘導しない
+
+### 起動直後の前回データと、閉じている間の取得（#735）
+
+**起動を速く見せるのは Web 側の仕組み。** ダッシュボードは端末（IndexedDB）に残した前回のデータ
+（センサー・直近24時間のグラフ・暮らしのカード・並び順）を、ログイン判定のあとすぐに出し、裏で取り直して
+置き換える（`frontend/lib/offline-cache.ts`・`components/myroom-dashboard.tsx` の `applyDashboardSnapshot`）。
+Web・PWA でも同じように効く。前回のデータを出している間は、上に「前回のデータを表示しています」と出し、
+エアコンの操作を止め、ウィジェットへの同期もしない（古い値でウィジェットの新しい値を上書きしないため）。
+
+**アプリは閉じている間に、センサーの値だけを取っておく**（`BackgroundRefresh.swift`）。
+
+- `BGAppRefreshTask`（識別子 `com.gucchii.kurashio.refresh`・`Info.plist` の `BGTaskSchedulerPermittedIdentifiers` と
+  `UIBackgroundModes = fetch`）。バックグラウンドへ移るときと、トークンを受け取ったときに予約する
+- 取得は `DeviceSensors.fetch()`（端末用トークン・#683）。**画面全体のデータは取らない**（トークンで読めるのは
+  `GET /api/device/sensors` だけ。口を増やさない方針はそのまま）
+- 保存はアプリ専用の `UserDefaults.standard`。Web が `backgroundSensorsReady` で取りにきたときだけ
+  `myroom-native-background-sensors` で返す（**pull だけ**。押し込むと復帰時の自動リロードと競合する・#546 と同じ）
+- Web は測った時刻（`measuredAt`）が前回のデータより新しいセンサーだけ、室温・湿度・CO2を重ねる
+  （`overlayBackgroundSensors()`）。取り直しが終われば、その値が正になる
+- ログアウト（`deviceTokenCleared`）で保存を消し、予約も取り消す
+
+### 完全オフラインでの起動（#736）
+
+WKWebView は既定では Service Worker を使えないが、**App-Bound Domains を宣言すると使える**（iOS 14 以降）。
+
+- `Info.plist` の `WKAppBoundDomains` に `myroom.gucchii.com`、`WebViewModel` で
+  `limitsNavigationsToAppBoundDomains = true`。Web・PWA と同じ `frontend/public/sw.js` が登録される
+- `sw.js` は画面遷移（HTML）と `/_next/` のチャンクを「ネットワーク優先・通信できないときだけ控え」で返す。
+  控えのHTMLが返ると WebView の読み込みは成功するので、アプリのエラー画面は出ず、Web 側の
+  「前回のデータを表示しています」になる（回線復帰時の取り直しも Web 側が行う）
+- **App-Bound でないドメインへの画面遷移は WebView 内では失敗する。** 外部リンクはもともと `decidePolicyFor` が
+  Safari 等へ逃がしており、Supabase への `fetch` は遷移ではないので影響しない。Googleログインは
+  `ASWebAuthenticationSession`（WebView の外）。`evaluateJavaScript`・ブリッジは App-Bound のページでだけ動く
+- 控えは `CACHE_NAME`（版ごと）で持ち、新しい版の Service Worker が有効になると古い控えは消える。
+  **デプロイ後に1回開いただけの状態では、次に開くまで控えが揃っていない**ことがある（その回の HTML・チャンクは
+  古い版の控えへ入ったため）。オンラインでもう一度開けば揃う
+- Web Push（`PushManager`）は App-Bound でも WKWebView では使えない。通知は従来どおり APNs
+
+**実機での確認:** 入れ直し後、オンラインで一度開いて閉じ（アプリを終了）、機内モードにしてから開く。前回のデータで
+ダッシュボードが出て、上に「前回のデータを表示しています」と出ればよい。Safari の Web インスペクタ（Mac）で
+アプリの WebView を開き、`navigator.serviceWorker.controller` が `null` でないことでも登録を確かめられる。
+
+**電池への影響の考え方と確かめ方:**
+
+- 実行の時刻・回数は OS が利用状況・電池残量・低電力モードから決める（`earliestBeginDate` の15分は下限でしかない。
+  実際は数回/日のことが多い）。低電力モードや「設定 > 一般 > Appのバックグラウンド更新」がオフなら動かない
+- 1回の仕事は GET 1本（数KB）で、持ち時間は約30秒。ウィジェットがすでに約15分ごとに同じ API を叩いているので、
+  増えるのはウィジェットを置いていない場合の数回/日ぶん
+- 実機での確認: 入れ直し後、数日使ってから「設定 > バッテリー」でkurashioの「バックグラウンドのアクティビティ」の
+  時間・割合を以前と比べる。気になる値なら「Appのバックグラウンド更新」でkurashioだけオフにすればこの取得だけ止まる
+  （画面の先出しは Web 側なので残る）
+- 動作の確認（Xcode）: アプリをバックグラウンドへ送ったあと、デバッガで一時停止して
+  `e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:@"com.gucchii.kurashio.refresh"]`
+  を実行すると、すぐに1回走る。続けてアプリを開き、前回より新しい室温が出ることを見る
 
 ### 上端（ステータスバー）
 
@@ -266,7 +321,7 @@ PWA で出ている上端のぼかし（#478・#521）とは別の作りです�
 
 ### プッシュ通知（APNs・#527）
 
-**Web PushとiOSアプリの通知は別経路。** WKWebViewはService Workerを使えないため、iOSアプリはPWAのWeb Push
+**Web PushとiOSアプリの通知は別経路。** WKWebViewはWeb Pushを使えない（Service Worker自体は #736 から動く）ため、iOSアプリはPWAのWeb Push
 （`backend/push_notify.py`）を受け取れない。代わりにApple Push Notification service（APNs）を使う別経路
 （`backend/apns_notify.py`・`backend/apns_subscriptions.py`）を持ち、ゴミの日・部屋の異常/復旧の通知イベント
 （`backend/notify_events.py`）から両方へ同時に配信する。**アプリ内の通知設定（`/devices`の通知設定シート）は
@@ -523,7 +578,7 @@ Watch・iPhoneウィジェットが、アプリ（WebView）を開いていな�
 - **CO2の段階はバックエンドが返す**（`co2Level`）。しきい値は `backend/main.py` と `frontend/lib/device-metrics.ts` の2か所に
   なるが、`tests/test_device_tokens.py` が両者の一致を照合する。Swiftはこれまでどおり色を当てるだけ
 - **更新間隔は約15分**（ウィジェットの Timeline policy・Watchのバックグラウンド更新。実際の実行はOS任せ）
-- iPhone の BGAppRefresh は採らない（ログインがWebView内でネイティブから取れないため。トークン方式なら不要になる）
+- iPhone の BGAppRefresh は当初採らなかったが、#735 でこのトークンを使って足した（下の「起動直後の前回データと、閉じている間の取得」）
 
 **端末側の実装（#683・Swiftは subpc でビルドできないので Mac mini・実機で確認する）**
 

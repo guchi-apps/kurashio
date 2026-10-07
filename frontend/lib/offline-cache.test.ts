@@ -5,6 +5,7 @@ import {
   filterDailyStatsToOfflineWindow,
   filterHistoryToOfflineWindow,
   getLatestDataTimestamp,
+  overlayBackgroundSensors,
 } from "@/lib/offline-cache";
 import type { DailyStat, HistoryPoint, LatestData } from "@/lib/types";
 
@@ -88,6 +89,43 @@ describe("buildDashboardOfflineSnapshot", () => {
     expect(snapshot?.latestByDevice[1]?.temperature).toBe(24.5);
   });
 
+  it("起動直後に前回と同じ並びで出すため、表示設定と暮らしのカードを持つ（#735）", () => {
+    const uiSettings = {
+      displayOrder: [{ type: "device" as const, deviceId: 1 }],
+      lifeCardOrder: ["garbage"],
+      chartColors: {},
+      hiddenDeviceKeys: ["device:2"],
+      staleAlertExcludedKeys: [],
+      lightThresholds: { "1": 100 },
+    };
+    const life = {
+      garbageSchedule: null,
+      energyBreakdown: null,
+      remoteButtons: null,
+      billSummary: null,
+      cleaningSchedule: null,
+      filament: null,
+      sensorStatuses: [],
+      staleThresholdMinutes: 30,
+    };
+    const snapshot = buildDashboardOfflineSnapshot({
+      sensorDeviceIds: [1],
+      airconAcId: 1,
+      latestByDevice: { 1: { datetime: "2026-06-07T12:00:00" } },
+      dailyStatsByDevice: {},
+      airconLatest: null,
+      historyData: [makePoint(-1)],
+      devices: [],
+      airconUnits: [],
+      outdoorLocation: null,
+      uiSettings: uiSettings as never,
+      life,
+    });
+
+    expect(snapshot?.uiSettings).toEqual(uiSettings);
+    expect(snapshot?.life).toEqual(life);
+  });
+
   it("returns null when there is no history to cache", () => {
     const snapshot = buildDashboardOfflineSnapshot({
       sensorDeviceIds: [1],
@@ -102,5 +140,37 @@ describe("buildDashboardOfflineSnapshot", () => {
     });
 
     expect(snapshot).toBeNull();
+  });
+});
+
+describe("overlayBackgroundSensors（#735）", () => {
+  const latest: Record<number, LatestData | null> = {
+    1: { datetime: "2026-10-07T12:00:00", temperature: 24, humidity: 50, co2: 600, illuminance: 120 },
+    2: { datetime: "2026-10-07T12:00:00", temperature: 20 },
+  };
+
+  it("測った時刻が新しいセンサーだけ、届いた項目を差し替える", () => {
+    const result = overlayBackgroundSensors(latest, [
+      { deviceId: 1, measuredAt: "2026-10-07T12:30:00", temperature: 25, humidity: null, co2: 700 },
+      { deviceId: 2, measuredAt: "2026-10-07T11:00:00", temperature: 18, humidity: null, co2: null },
+    ]);
+
+    expect(result[1]).toEqual({
+      datetime: "2026-10-07T12:30:00",
+      temperature: 25,
+      humidity: 50,
+      co2: 700,
+      illuminance: 120,
+    });
+    expect(result[2]).toBe(latest[2]);
+  });
+
+  it("前回のデータに無いセンサーは足さず、変化が無ければ同じオブジェクトを返す", () => {
+    const result = overlayBackgroundSensors(latest, [
+      { deviceId: 9, measuredAt: "2026-10-07T13:00:00", temperature: 30, humidity: null, co2: null },
+      { deviceId: 1, measuredAt: null, temperature: 30, humidity: null, co2: null },
+    ]);
+
+    expect(result).toBe(latest);
   });
 });
