@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Box, ChevronRight, LineChart, RefreshCw } from "lucide-react";
 import { WeatherIcon } from "@/lib/weather-icon";
 import { AppSettingsSheet } from "@/components/app-settings-sheet";
@@ -57,7 +57,9 @@ import {
   getLatestDataTimestamp,
   isOffline,
   loadDashboardOfflineSnapshot,
+  overlayBackgroundSensors,
   saveDashboardOfflineSnapshot,
+  type BackgroundSensorReading,
   type DashboardOfflineSnapshot,
 } from "@/lib/offline-cache";
 import { useChartHistory } from "@/lib/use-chart-history";
@@ -122,7 +124,12 @@ import type {
   CleaningTaskInput,
 } from "@/lib/cleaning";
 import { buildGarbageHighlight, type GarbageSchedule } from "@/lib/garbage";
-import type { WidgetSnapshot } from "@/lib/native-app";
+import {
+  NATIVE_BACKGROUND_SENSORS_EVENT,
+  parseNativeBackgroundSensors,
+  requestNativeBackgroundSensors,
+  type WidgetSnapshot,
+} from "@/lib/native-app";
 import { buildWidgetGarbageDays } from "@/lib/widget-garbage";
 import { buildWidgetAircons } from "@/lib/widget-aircon";
 import { buildWidgetRemoteButtons } from "@/lib/widget-remote-buttons";
@@ -443,6 +450,20 @@ export function MyRoomDashboard() {
   const [offlineSnapshot, setOfflineSnapshot] = useState<DashboardOfflineSnapshot | null>(
     null
   );
+  /**
+   * 起動直後に、端末に残した前回のデータを出しているあいだ true（#735）。取り直しが終わると false。
+   * オフライン表示（`isOfflineMode`）とは別で、裏では取り直しを続けている
+   */
+  const [isCachedPreview, setIsCachedPreview] = useState(false);
+  /** 上で出している前回のデータの時点 */
+  const [cachedPreviewAt, setCachedPreviewAt] = useState<string | null>(null);
+  /** 前回のデータ（起動直後の先出し・オフライン）を出していて、いまの状態とは限らない */
+  const showingCachedData = isOfflineMode || isCachedPreview;
+  const showingCachedRef = useRef(false);
+  /** iOSアプリが閉じている間に取っておいたセンサーの値（#735）。前回のデータへ重ねる */
+  const backgroundSensorsRef = useRef<BackgroundSensorReading[]>([]);
+  /** サーバーから表示設定を読めたか。読めていれば、前回のデータに入っている設定で上書きしない */
+  const uiSettingsLoadedRef = useRef(false);
   const [layoutReady, setLayoutReady] = useState(false);
   const [dashboardDataLoaded, setDashboardDataLoaded] = useState(false);
   const [latestLoadStatusByDevice, setLatestLoadStatusByDevice] = useState<
@@ -551,29 +572,71 @@ export function MyRoomDashboard() {
     offlineCacheKey: offlineSnapshot?.cachedAt ?? null,
   });
 
-  const applyOfflineSnapshot = useCallback((snapshot: DashboardOfflineSnapshot) => {
-    const sensorIds = getSensorDeviceIds(snapshot.devices);
-    setLatestByDevice(snapshot.latestByDevice);
-    setDailyStatsByDevice(snapshot.dailyStatsByDevice);
-    setAirconLatest(snapshot.airconLatest);
-    setDevices(snapshot.devices);
-    setAirconUnits(snapshot.airconUnits);
-    setOutdoorLocations(snapshot.outdoorLocations ?? []);
-    setOutdoorWeatherById(
-      Object.fromEntries(
-        (snapshot.outdoorWeathers ?? []).map((weather) => [weather.id, weather])
-      )
-    );
-    setOutdoorWeatherFailed(false);
-    setLatestLoadStatusByDevice(
-      buildLoadStatusFromLatest(snapshot.latestByDevice, sensorIds)
-    );
-    setAirconLoadStatus(resolveAirconDataLoadStatus(snapshot.airconLatest, false));
-    setDashboardDataLoaded(true);
-    setLayoutReady(true);
-    setOfflineSnapshot(snapshot);
-    setIsOfflineMode(true);
-  }, []);
+  /**
+   * 端末に残した前回のデータを画面へ出す。
+   *
+   * - `offline`: 取得できない（オフライン・通信の失敗）。「オフライン表示中」を出し、グラフもキャッシュから描く
+   * - `preview`: 起動直後の先出し（#735）。裏では取り直しを続け、届いたら置き換わる
+   *
+   * 表示設定・暮らしのカードは、サーバーから取れているものを前回の値で上書きしない
+   */
+  const applyDashboardSnapshot = useCallback(
+    (snapshot: DashboardOfflineSnapshot, mode: "offline" | "preview") => {
+      const sensorIds = getSensorDeviceIds(snapshot.devices);
+      setLatestByDevice(
+        overlayBackgroundSensors(snapshot.latestByDevice, backgroundSensorsRef.current)
+      );
+      setDailyStatsByDevice(snapshot.dailyStatsByDevice);
+      setAirconLatest(snapshot.airconLatest);
+      setDevices(snapshot.devices);
+      setAirconUnits(snapshot.airconUnits);
+      setOutdoorLocations(snapshot.outdoorLocations ?? []);
+      setOutdoorWeatherById(
+        Object.fromEntries(
+          (snapshot.outdoorWeathers ?? []).map((weather) => [weather.id, weather])
+        )
+      );
+      setOutdoorWeatherFailed(false);
+      setLatestLoadStatusByDevice(
+        buildLoadStatusFromLatest(snapshot.latestByDevice, sensorIds)
+      );
+      setAirconLoadStatus(resolveAirconDataLoadStatus(snapshot.airconLatest, false));
+
+      const ui = snapshot.uiSettings;
+      if (ui && !uiSettingsLoadedRef.current) {
+        setDisplayOrder(ui.displayOrder);
+        setLifeCardOrder(ui.lifeCardOrder);
+        setChartColors(ui.chartColors);
+        setHiddenDeviceKeys(new Set(ui.hiddenDeviceKeys));
+        setStaleAlertExcludedKeys(new Set(ui.staleAlertExcludedKeys));
+        setLightThresholds(ui.lightThresholds);
+        setDefaultLineVisibility(loadChartLineVisibility(sensorIds));
+      }
+      const life = snapshot.life;
+      if (life) {
+        setGarbageSchedule((prev) => prev ?? life.garbageSchedule);
+        setEnergyBreakdown((prev) => prev ?? life.energyBreakdown);
+        setRemoteButtons((prev) => prev ?? life.remoteButtons);
+        setBillSummary((prev) => prev ?? life.billSummary);
+        setCleaningSchedule((prev) => prev ?? life.cleaningSchedule);
+        setFilament((prev) => prev ?? life.filament);
+        setSensorStatuses((prev) => (prev.length ? prev : life.sensorStatuses));
+        setStaleThresholdMinutes((prev) => prev ?? life.staleThresholdMinutes);
+      }
+
+      setDashboardDataLoaded(true);
+      setLayoutReady(true);
+      if (mode === "offline") {
+        setOfflineSnapshot(snapshot);
+        setIsOfflineMode(true);
+        setIsCachedPreview(false);
+      } else {
+        setIsCachedPreview(true);
+        setCachedPreviewAt(snapshot.dataLatestAt);
+      }
+    },
+    []
+  );
 
   const deviceNames = useMemo(() => {
     const names: Record<number, string> = {};
@@ -648,18 +711,35 @@ export function MyRoomDashboard() {
     }
 
     let cancelled = false;
+    let bootstrapDone = false;
+    // 前回のデータを先に出す（#735）。下の取得（設定類→データ）が揃うまで読み込み画面で待たせない。
+    // 取得のほうが先に終わったときは出さない（新しい表示を古い値で戻さない）
+    let previewSnapshot: DashboardOfflineSnapshot | null = null;
+    uiSettingsLoadedRef.current = false;
+    void loadDashboardOfflineSnapshot().then((snapshot) => {
+      if (cancelled || bootstrapDone || !snapshot) return;
+      previewSnapshot = snapshot;
+      applyDashboardSnapshot(snapshot, "preview");
+    });
 
     async function bootstrap() {
       try {
-        const [deviceList, airconUnitsResponse, outdoorList] = await Promise.all([
-          fetchDevices().catch(() => [] as DeviceInfo[]),
-          fetchAirconUnitsResponse().catch(() => ({
-            units: [] as AirconUnitInfo[],
-            control_enabled: false,
-          })),
-          fetchOutdoorLocations().catch(() => [] as OutdoorLocationEntry[]),
+        const [fetchedDevices, fetchedAirconUnits, fetchedOutdoor] = await Promise.all([
+          fetchDevices().catch(() => null),
+          fetchAirconUnitsResponse().catch(() => null),
+          fetchOutdoorLocations().catch(() => null),
         ]);
         if (cancelled) return;
+        bootstrapDone = true;
+
+        // 取れなかったものは、先に出している前回のデータの値を残す（無ければ空）
+        const deviceList: DeviceInfo[] = fetchedDevices ?? previewSnapshot?.devices ?? [];
+        const airconUnitsResponse = fetchedAirconUnits ?? {
+          units: (previewSnapshot?.airconUnits ?? []) as AirconUnitInfo[],
+          control_enabled: false,
+        };
+        const outdoorList: OutdoorLocationEntry[] =
+          fetchedOutdoor ?? previewSnapshot?.outdoorLocations ?? [];
 
         const sensorIds = getSensorDeviceIds(deviceList);
         // 並び順・非表示のキーは地点ごとなので、地点の一覧が揃ってから設定を読む（#321）
@@ -668,15 +748,19 @@ export function MyRoomDashboard() {
           primaryId:
             (outdoorList.find((loc) => loc.is_primary) ?? outdoorList[0])?.id ?? null,
         };
-        let settings;
+        let settings = null;
         try {
           settings = await loadUiSettingsFromServer(sensorIds, outdoorContext);
+          uiSettingsLoadedRef.current = true;
         } catch (err) {
           if (err instanceof AuthError) {
             setIsAuthenticated(false);
             return;
           }
-          settings = getDefaultUiSettings(sensorIds, outdoorContext);
+          // 前回のデータに設定が入っていれば、既定の並びへ戻さずそれを出し続ける
+          if (!previewSnapshot?.uiSettings) {
+            settings = getDefaultUiSettings(sensorIds, outdoorContext);
+          }
         }
         if (cancelled) return;
 
@@ -684,15 +768,18 @@ export function MyRoomDashboard() {
         setAirconUnits(airconUnitsResponse.units);
         setAirconControlEnabled(airconUnitsResponse.control_enabled);
         setOutdoorLocations(outdoorList);
-        setDisplayOrder(settings.displayOrder);
-        setLifeCardOrder(settings.lifeCardOrder);
-        setChartColors(settings.chartColors);
-        setHiddenDeviceKeys(settings.hiddenDeviceKeys);
-        setStaleAlertExcludedKeys(settings.staleAlertExcludedKeys);
-        setLightThresholds(settings.lightThresholds);
-        setDefaultLineVisibility(loadChartLineVisibility(sensorIds));
+        if (settings) {
+          setDisplayOrder(settings.displayOrder);
+          setLifeCardOrder(settings.lifeCardOrder);
+          setChartColors(settings.chartColors);
+          setHiddenDeviceKeys(settings.hiddenDeviceKeys);
+          setStaleAlertExcludedKeys(settings.staleAlertExcludedKeys);
+          setLightThresholds(settings.lightThresholds);
+          setDefaultLineVisibility(loadChartLineVisibility(sensorIds));
+        }
         setLayoutReady(true);
       } catch {
+        bootstrapDone = true;
         if (!cancelled) setLayoutReady(true);
       }
     }
@@ -701,7 +788,7 @@ export function MyRoomDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated, setIsAuthenticated]);
+  }, [isAuthenticated, setIsAuthenticated, applyDashboardSnapshot]);
 
   useEffect(() => {
     const reloadVisibility = () => {
@@ -807,7 +894,7 @@ export function MyRoomDashboard() {
         if (isOffline()) {
           const snapshot = await loadDashboardOfflineSnapshot();
           if (snapshot) {
-            applyOfflineSnapshot(snapshot);
+            applyDashboardSnapshot(snapshot, "offline");
             return;
           }
         }
@@ -839,6 +926,7 @@ export function MyRoomDashboard() {
         ]);
         setIsOfflineMode(false);
         setOfflineSnapshot(null);
+        setIsCachedPreview(false);
         setLatestByDevice(data.latestByDevice);
         setDailyStatsByDevice(data.dailyStatsByDevice);
         setAirconLatest(data.airconLatest);
@@ -882,7 +970,7 @@ export function MyRoomDashboard() {
         console.error(err);
         const snapshot = await loadDashboardOfflineSnapshot();
         if (snapshot) {
-          applyOfflineSnapshot(snapshot);
+          applyDashboardSnapshot(snapshot, "offline");
         } else {
           setLatestLoadStatusByDevice((prev) => {
             const next = { ...prev };
@@ -904,13 +992,14 @@ export function MyRoomDashboard() {
       airconLatest?.ac_id,
       visibleSensorDeviceIds,
       devices,
-      applyOfflineSnapshot,
+      applyDashboardSnapshot,
       setIsAuthenticated,
     ]
   );
 
   useEffect(() => {
-    if (!isAuthenticated || isOfflineMode || isOffline()) return;
+    // 前回のデータを出しているあいだは保存し直さない（古い値に「いま」の時刻が付くため）
+    if (!isAuthenticated || showingCachedData || isOffline()) return;
     if (!historyData.length || Object.keys(latestByDevice).length === 0) return;
 
     const snapshot = buildDashboardOfflineSnapshot({
@@ -925,13 +1014,46 @@ export function MyRoomDashboard() {
       outdoorLocation: primaryOutdoorLocation,
       outdoorLocations,
       outdoorWeathers: Object.values(outdoorWeatherById),
+      // 起動直後に前回と同じ並び・同じカードで出すため（#735）
+      uiSettings: {
+        displayOrder,
+        lifeCardOrder,
+        chartColors,
+        hiddenDeviceKeys: [...hiddenDeviceKeys],
+        staleAlertExcludedKeys: [...staleAlertExcludedKeys],
+        lightThresholds,
+      },
+      life: {
+        garbageSchedule,
+        energyBreakdown,
+        remoteButtons,
+        billSummary,
+        cleaningSchedule,
+        filament,
+        sensorStatuses,
+        staleThresholdMinutes,
+      },
     });
 
     if (!snapshot) return;
     void saveDashboardOfflineSnapshot(snapshot);
   }, [
     isAuthenticated,
-    isOfflineMode,
+    showingCachedData,
+    displayOrder,
+    lifeCardOrder,
+    chartColors,
+    hiddenDeviceKeys,
+    staleAlertExcludedKeys,
+    lightThresholds,
+    garbageSchedule,
+    energyBreakdown,
+    remoteButtons,
+    billSummary,
+    cleaningSchedule,
+    filament,
+    sensorStatuses,
+    staleThresholdMinutes,
     sensorDeviceIds,
     activeAirconId,
     latestByDevice,
@@ -993,6 +1115,26 @@ export function MyRoomDashboard() {
     // アプリが持っていなければ発行して渡す（持っていれば何もしない）
     if (!isAuthenticated) return;
     return initializeNativeDeviceToken();
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    showingCachedRef.current = showingCachedData;
+  }, [showingCachedData]);
+
+  useEffect(() => {
+    // iOSアプリが閉じている間に取っておいたセンサーの値（#735）を取りにいく。前回のデータを出している
+    // あいだだけ、それより新しい値を重ねる（取り直しが終われば、その値が正）
+    if (!isAuthenticated) return;
+    const handleBackgroundSensors = (event: Event) => {
+      const readings = parseNativeBackgroundSensors((event as CustomEvent).detail);
+      backgroundSensorsRef.current = readings;
+      if (!showingCachedRef.current || readings.length === 0) return;
+      setLatestByDevice((prev) => overlayBackgroundSensors(prev, readings));
+    };
+    window.addEventListener(NATIVE_BACKGROUND_SENSORS_EVENT, handleBackgroundSensors);
+    requestNativeBackgroundSensors();
+    return () =>
+      window.removeEventListener(NATIVE_BACKGROUND_SENSORS_EVENT, handleBackgroundSensors);
   }, [isAuthenticated]);
 
   const handleLogout = () => {
@@ -1143,8 +1285,8 @@ export function MyRoomDashboard() {
   // `NativeWidgetSnapshotSync` が中身で行う）
   const widgetRemoteButtons = useMemo(() => buildWidgetRemoteButtons(remoteButtons), [remoteButtons]);
   const widgetAircons = useMemo(
-    () => buildWidgetAircons(airconUnits, airconLatest, airconControlEnabled && !isOfflineMode),
-    [airconUnits, airconLatest, airconControlEnabled, isOfflineMode]
+    () => buildWidgetAircons(airconUnits, airconLatest, airconControlEnabled && !showingCachedData),
+    [airconUnits, airconLatest, airconControlEnabled, showingCachedData]
   );
   const widgetSnapshot: WidgetSnapshot = useMemo(
     () => ({
@@ -1218,7 +1360,7 @@ export function MyRoomDashboard() {
    * （ログイン情報が未設定）とオフラインでは入口ごと出さない。
    */
   const remoteAircon: RemoteAirconEntry | null =
-    airconControlEnabled && !isOfflineMode
+    airconControlEnabled && !showingCachedData
       ? {
           title: airconTitle,
           // 「ダッシュボードに表示（設定温度）」を切っているときは状態も出さない。
@@ -1242,10 +1384,17 @@ export function MyRoomDashboard() {
         minute: "2-digit",
       })
     : null;
+  const cachedPreviewLabel = cachedPreviewAt
+    ? formatUpdatedAt(new Date(cachedPreviewAt).getTime())
+    : null;
 
   return (
     <div className="w-full pb-10">
-      <NativeWidgetSnapshotSync snapshot={widgetSnapshot} />
+      {/*
+        前回のデータを出しているあいだはウィジェットへ送らない（#735）。ウィジェットが自分で取った
+        新しい値（#683）を、古い値で上書きしてしまうため
+      */}
+      {!showingCachedData && <NativeWidgetSnapshotSync snapshot={widgetSnapshot} />}
       {/*
         ヘッダーは「いつのデータか」と「アプリの操作」がまとまる場所（#277）。右の3つは
         左から データを取り直す・部屋のようす・アプリ全体の設定。フッターは設定シートへ畳んだ。
@@ -1374,7 +1523,13 @@ export function MyRoomDashboard() {
             {offlineCachedAt ? `（${offlineCachedAt} 時点・直近24時間）` : "（直近24時間）"}
           </div>
         )}
-        {hasStaleSensors && !isOfflineMode && !staleAlertDismissed && (
+        {isCachedPreview && !isOfflineMode && (
+          <p className="text-xs text-muted-foreground" role="status">
+            前回のデータを表示しています
+            {cachedPreviewLabel ? `（${cachedPreviewLabel} 時点）` : ""}。最新のデータを読み込み中…
+          </p>
+        )}
+        {hasStaleSensors && !showingCachedData && !staleAlertDismissed && (
           <div className="relative rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 pr-10 text-sm text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
             <p>
               センサーからのデータがしばらく届いていません（{staleDeviceNames.join("・")}）。通知設定からプッシュ通知を有効にできます。
@@ -1881,7 +2036,7 @@ export function MyRoomDashboard() {
           title={airconTitle}
           acId={activeAirconId}
           latest={airconLatest}
-          controllable={airconControlEnabled && !isOfflineMode}
+          controllable={airconControlEnabled && !showingCachedData}
           chartColors={chartColors}
           lineVisibility={defaultLineVisibility}
           isOfflineMode={isOfflineMode}

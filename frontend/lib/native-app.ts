@@ -11,6 +11,7 @@ import type { WidgetGarbageDay } from "@/lib/widget-garbage";
 import type { WidgetAircon } from "@/lib/widget-aircon";
 import type { WidgetRemoteButton } from "@/lib/widget-remote-buttons";
 import type { WidgetSensor } from "@/lib/widget-sensors";
+import type { BackgroundSensorReading } from "@/lib/offline-cache";
 
 /** Googleログインの戻り先。Supabase の許可リダイレクトURLに登録が要る（ios/README.md） */
 export const NATIVE_AUTH_REDIRECT = "kurashio://auth-callback";
@@ -275,4 +276,49 @@ export function clearNativeDeviceToken(): boolean {
   if (!bridge) return false;
   bridge.postMessage({ type: "deviceTokenCleared" });
   return true;
+}
+
+/**
+ * アプリが閉じている間に取っておいたセンサーの値（#735）を届けるイベント。
+ * {@link requestNativeBackgroundSensors} への返事としてだけ飛んでくる（アプリから自発的には送らない）。
+ * `detail` は `{ sensors: [...] }`。中身は {@link parseNativeBackgroundSensors} で読む
+ */
+export const NATIVE_BACKGROUND_SENSORS_EVENT = "myroom-native-background-sensors";
+
+/**
+ * アプリが閉じている間に取った値を取りにいく（返事は {@link NATIVE_BACKGROUND_SENSORS_EVENT}）。
+ * **受け渡しはWebからの pull だけ**にしている。アプリから中身を押し込むと、復帰時の自動リロードと
+ * 重なって取りこぼす（ウィジェットの押下 #546 と同じ理由）。アプリの外では何もしない
+ */
+export function requestNativeBackgroundSensors(): boolean {
+  const bridge = getBridge();
+  if (!bridge) return false;
+  bridge.postMessage({ type: "backgroundSensorsReady" });
+  return true;
+}
+
+function toNumberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** アプリから届いた `detail` を読む。形の合わない要素は捨てる */
+export function parseNativeBackgroundSensors(detail: unknown): BackgroundSensorReading[] {
+  if (typeof detail !== "object" || detail == null) return [];
+  const sensors = (detail as { sensors?: unknown }).sensors;
+  if (!Array.isArray(sensors)) return [];
+  return sensors.flatMap((raw): BackgroundSensorReading[] => {
+    if (typeof raw !== "object" || raw == null) return [];
+    const item = raw as Record<string, unknown>;
+    const deviceId = toNumberOrNull(item.deviceId);
+    if (deviceId == null) return [];
+    return [
+      {
+        deviceId,
+        measuredAt: typeof item.measuredAt === "string" ? item.measuredAt : null,
+        temperature: toNumberOrNull(item.temperature),
+        humidity: toNumberOrNull(item.humidity),
+        co2: toNumberOrNull(item.co2),
+      },
+    ];
+  });
 }
