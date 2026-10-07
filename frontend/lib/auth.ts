@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase-client";
 import { unregisterNativeNotificationsBestEffort } from "@/lib/native-notifications";
 import { syncWidgetSnapshot } from "@/lib/native-app";
 import { revokeNativeDeviceTokenBestEffort } from "@/lib/native-device-token";
+import { clearDashboardOfflineSnapshot } from "@/lib/offline-cache";
 
 export class AuthError extends Error {
   constructor(message = "Authentication required") {
@@ -29,6 +30,8 @@ export async function signOutThisApp(): Promise<void> {
   await revokeNativeDeviceTokenBestEffort();
   // ホーム画面ウィジェット（#537）に前の利用者の値を残さない
   syncWidgetSnapshot(null);
+  // 起動直後に出す前回のデータ（#735）。残すと次にログインした人に前の利用者の値が見える
+  await clearDashboardOfflineSnapshot();
   await supabase.auth.signOut({ scope: "local" });
 }
 

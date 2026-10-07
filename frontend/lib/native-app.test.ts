@@ -18,7 +18,9 @@ import {
   NATIVE_AUTH_REDIRECT,
   isNativeApp,
   openNativeNotificationSettings,
+  parseNativeBackgroundSensors,
   queryNativeNotificationState,
+  requestNativeBackgroundSensors,
   requestNativeNotificationPermission,
   startNativeGoogleSignIn,
   syncWidgetSnapshot,
@@ -158,5 +160,36 @@ describe("syncWidgetSnapshot", () => {
     const postMessage = installBridge();
     expect(syncWidgetSnapshot(null)).toBe(true);
     expect(postMessage).toHaveBeenCalledWith({ type: "widgetSnapshotCleared" });
+  });
+});
+
+describe("アプリが閉じている間に取った値（#735）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("取りにいくだけで、アプリの外では何もしない", () => {
+    vi.stubGlobal("window", {});
+    expect(requestNativeBackgroundSensors()).toBe(false);
+
+    const postMessage = installBridge();
+    expect(requestNativeBackgroundSensors()).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({ type: "backgroundSensorsReady" });
+  });
+
+  it("届いた値を読み、形の合わない要素は捨てる", () => {
+    expect(
+      parseNativeBackgroundSensors({
+        sensors: [
+          { deviceId: 1, measuredAt: "2026-10-07 12:00:00", temperature: 24.5, humidity: 50, co2: null },
+          { deviceId: "2", temperature: 20 },
+          null,
+          { deviceId: 3, temperature: "x" },
+        ],
+      })
+    ).toEqual([
+      { deviceId: 1, measuredAt: "2026-10-07 12:00:00", temperature: 24.5, humidity: 50, co2: null },
+      { deviceId: 3, measuredAt: null, temperature: null, humidity: null, co2: null },
+    ]);
+    expect(parseNativeBackgroundSensors(null)).toEqual([]);
+    expect(parseNativeBackgroundSensors({ sensors: "x" })).toEqual([]);
   });
 });

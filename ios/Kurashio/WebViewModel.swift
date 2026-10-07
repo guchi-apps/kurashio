@@ -303,11 +303,19 @@ extension WebViewModel: WKScriptMessageHandler {
             DeviceSensors.saveToken(token)
             WatchSync.shared.setToken(token)
             reloadWidgetTimelines()
+            // アプリを閉じている間の取得（#735）もこのトークンで行う
+            BackgroundRefresh.schedule()
         case "deviceTokenCleared":
             // ログアウト。端末・Watchの保存を消す（ウィジェットは次の再評価で保存済みの値も消える）
             DeviceSensors.clearToken()
             WatchSync.shared.setToken(nil)
             reloadWidgetTimelines()
+            // 閉じている間に取った値（#735）も前の利用者のものなので捨て、予約も取り消す
+            BackgroundRefresh.clear()
+            BackgroundRefresh.schedule()
+        case "backgroundSensorsReady":
+            // 閉じている間に取ったセンサーの値（#735）。Webが取りにきたときにだけ返す（pull）
+            deliverBackgroundSensors()
         case "widgetReady":
             deliverPendingWidgetPress()
         case "widgetPressResult":
@@ -336,6 +344,17 @@ extension WebViewModel {
         )
         // iPhoneが持っているトークンを、まだ受け取っていないWatchへも渡す（Watchアプリを後から入れた場合など）
         WatchSync.shared.setToken(DeviceSensors.loadToken())
+    }
+}
+
+// MARK: - 閉じている間に取ったセンサーの値（#735）
+
+extension WebViewModel {
+    /// Webの `backgroundSensorsReady` への返事。中身は `BackgroundRefresh` が保存したJSON（数値・文字列だけ）
+    fileprivate func deliverBackgroundSensors() {
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('myroom-native-background-sensors', { detail: \(BackgroundRefresh.payloadJSON()) }))"
+        )
     }
 }
 
