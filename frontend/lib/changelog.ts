@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.40.0",
+    date: "2026-10-09",
+    changes: [
+      "iOSのウィジェットの名前を「センサー」に変更しました。また、ウィジェットの最下部に、表示しているセンサーの値がいつ測られたものかが分かる取得時刻を表示するようにしました。",
+    ],
+  },
+  {
     version: "4.39.0",
     date: "2026-10-07",
     changes: [
