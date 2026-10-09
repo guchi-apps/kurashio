@@ -34,7 +34,7 @@ on:
 
 jobs:
   dispatch:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v47
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v48
     with:
       # 準備ステップは全てリポジトリルートで動くが、myroomのルートpackage.jsonは
       # バージョン管理用のscriptだけで依存を持たず、package-lock.jsonも空のスタブ
@@ -53,7 +53,7 @@ jobs:
       # ランナー標準のPythonを使う（許可ツールとしてpython・pip・pytestは通る）。
       node-version: "20"
       # uses: のタグと必ず同じ値にする。
-      prompts-ref: workflows/v47
+      prompts-ref: workflows/v48
     # CLAUDE_CODE_OAUTH_TOKEN・WORKFLOW_PATを呼ばれる側へ渡す。
     secrets: inherit
     permissions:
