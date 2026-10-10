@@ -1985,6 +1985,11 @@ export function MyRoomDashboard() {
           open={billPanelOpen}
           summary={billSummary}
           onClose={() => setBillPanelOpen(false)}
+          onSaved={() => {
+            void fetchBillsSummary()
+              .then((next) => setBillSummary(next))
+              .catch(() => {});
+          }}
         />
       )}
 

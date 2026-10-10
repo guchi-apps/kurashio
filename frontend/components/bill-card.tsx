@@ -4,10 +4,12 @@ import { ReceiptText } from "lucide-react";
 import {
   BILL_ELECTRICITY_COLOR,
   BILL_GAS_COLOR,
+  BILL_WATER_COLOR,
   billKindRatio,
   formatBillAmount,
   formatBillUsage,
   formatBillingMonth,
+  formatBillingMonthShort,
   hasBillData,
 } from "@/lib/bills";
 import { formatYen } from "@/lib/energy";
@@ -43,7 +45,7 @@ function CardShell({
             strokeWidth={1.9}
             style={{ color: "var(--bill-color)" }}
           />
-          電気・ガス料金
+          電気・ガス・水道料金
         </p>
         {billingMonth && (
           <span
@@ -100,11 +102,14 @@ function KindRow({
   color,
   total,
   month,
+  note,
 }: {
   label: string;
   color: string;
-  total: UtilityBillKindTotal | null;
+  total: UtilityBillKindTotal | null | undefined;
   month: UtilityBillMonth;
+  /** 電気・ガスの月と違うときに添える（水道は検針の月がずれる） */
+  note?: string;
 }) {
   const missing = total == null;
   return (
@@ -135,6 +140,9 @@ function KindRow({
           }}
         />
       </span>
+      {note && (
+        <span className="shrink-0 text-[11px] text-muted-foreground">{note}</span>
+      )}
     </div>
   );
 }
@@ -174,15 +182,19 @@ export function BillCard({ summary, loading, error, onOpenDetail }: BillCardProp
     return (
       <CardShell>
         <p className="text-sm text-muted-foreground">
-          まだ請求のお知らせを受け取っていません。はぴeみる電から検針結果のメールが届くと、ここに確定した電気・ガス料金が出ます。
+          まだ請求のお知らせを受け取っていません。はぴeみる電から検針結果のメールが届くと、ここに確定した電気・ガス料金が出ます。水道料金は詳細から記入できます。
         </p>
       </CardShell>
     );
   }
 
   const data = summary as UtilityBillSummary;
-  const latest = data.latest as UtilityBillMonth;
+  const latestWater = data.latest_water ?? null;
+  // 電気・ガスがまだ届いていなくても水道だけ記入できるので、その場合は水道の月を使う
+  const latest = (data.latest ?? latestWater) as UtilityBillMonth;
   const { comparison, measured } = data;
+  const waterMonthDiffers =
+    latestWater != null && latestWater.billing_month !== latest.billing_month;
 
   return (
     <CardShell onClick={onOpenDetail} billingMonth={latest.billing_month}>
@@ -212,6 +224,17 @@ export function BillCard({ summary, loading, error, onOpenDetail }: BillCardProp
           color={BILL_GAS_COLOR}
           total={latest.gas}
           month={latest}
+        />
+        <KindRow
+          label="水道"
+          color={BILL_WATER_COLOR}
+          total={latestWater?.water}
+          month={latestWater ?? latest}
+          note={
+            waterMonthDiffers && latestWater
+              ? formatBillingMonthShort(latestWater.billing_month)
+              : undefined
+          }
         />
       </div>
 

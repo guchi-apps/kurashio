@@ -1073,3 +1073,30 @@ def test_ui_settings_room_layout_round_trip(authed_client):
     assert fetched["room_layout"]["zones"][0]["device_id"] == 1
     assert fetched["room_layout"]["zones"][1]["key"] == "bath"
     assert fetched["energy_unit_price"] == 29.5
+
+
+def test_put_water_bill_requires_auth(client):
+    response = client.put("/api/bills/water", json={"billing_month": "2026-08", "amount_yen": 5000})
+    assert response.status_code == 401
+
+
+def test_put_water_bill_is_accepted_in_mock_mode(authed_client):
+    response = authed_client.put(
+        "/api/bills/water",
+        json={"billing_month": "2026-08", "amount_yen": 5000, "usage_m3": 20},
+    )
+    assert response.status_code == 200
+
+
+def test_put_water_bill_rejects_bad_input_even_in_mock_mode(authed_client):
+    for body in (
+        {"billing_month": "2026-08", "amount_yen": -1},
+        {"billing_month": "bad", "amount_yen": 5000},
+        {"billing_month": "2026-08", "amount_yen": 5000, "extra": 1},
+    ):
+        assert authed_client.put("/api/bills/water", json=body).status_code == 422
+
+
+def test_bills_summary_mock_has_latest_water(authed_client):
+    data = authed_client.get("/api/bills/summary").json()
+    assert data["latest_water"]["water"]["usage_unit"] == "m3"
