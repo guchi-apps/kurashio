@@ -907,6 +907,34 @@ export async function fetchBillsSummary(months = 12): Promise<UtilityBillSummary
   return fetchJson<UtilityBillSummary>(`/api/bills/summary?${params.toString()}`);
 }
 
+/** 水道料金を手入力で記録する（#750）。同じ検針月は上書き */
+export async function saveWaterBill(input: {
+  billing_month: string;
+  amount_yen: number;
+  usage_m3: number | null;
+}): Promise<void> {
+  const res = await fetchWithAuth("/api/bills/water", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(body?.detail || `Request failed: ${res.status}`);
+  }
+}
+
+/** 手入力した水道料金を1件消す */
+export async function deleteWaterBill(billingMonth: string): Promise<void> {
+  const res = await fetchWithAuth(`/api/bills/water/${encodeURIComponent(billingMonth)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(body?.detail || `Request failed: ${res.status}`);
+  }
+}
+
 export interface LatestBatchResult {
   latestByDevice: Record<number, LatestData | null>;
   loadStatusByDevice: Record<number, DeviceDataLoadStatus>;

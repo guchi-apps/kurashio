@@ -142,3 +142,56 @@ def test_summary_is_empty_when_no_bills_arrived():
     assert summary["months"] == []
     assert summary["comparison"] is None
     assert summary["measured"] is None
+
+
+def test_summary_includes_water_in_the_month_total():
+    rows = [
+        _bill("2026-07-01", "electricity", 8000, 270, "kWh"),
+        _bill("2026-08-01", "electricity", 9000, 300, "kWh"),
+        _bill("2026-08-01", "water", 5000, 20, "m3", contract="manual", plan=None),
+    ]
+    summary = bills.build_summary(rows, [], 31.0)
+    latest = summary["latest"]
+    assert latest["water"]["amount_yen"] == 5000
+    assert latest["total_yen"] == 14000
+    assert summary["latest_water"]["billing_month"] == "2026-08"
+
+
+def test_water_only_month_does_not_become_the_latest_month():
+    # 水道は検針の月が電気とずれる。水道だけの月が最新になると電気の欄が空になる
+    rows = [
+        _bill("2026-08-01", "electricity", 9000, 300, "kWh"),
+        _bill("2026-09-01", "water", 5000, 20, "m3", contract="manual", plan=None),
+    ]
+    summary = bills.build_summary(rows, [], 31.0)
+    assert summary["latest"]["billing_month"] == "2026-08"
+    assert summary["latest_water"]["billing_month"] == "2026-09"
+    assert [m["billing_month"] for m in summary["months"]] == ["2026-08", "2026-09"]
+
+
+def test_summary_without_water_has_no_latest_water():
+    summary = bills.build_summary([_bill("2026-08-01", "gas", 2000, 9, "m3")], [], 31.0)
+    assert summary["latest_water"] is None
+    assert summary["latest"]["water"] is None
+
+
+def test_collected_kinds_reject_water_but_manual_accepts_it():
+    import pytest
+
+    with pytest.raises(ValueError):
+        bills.normalize_kind("water")
+    assert bills.normalize_kind("water", bills.MANUAL_KINDS) == "water"
+
+
+def test_validate_manual_water_rejects_bad_values():
+    import pytest
+
+    assert bills.validate_manual_water("2026-08", 5000, 20) == datetime.date(2026, 8, 1)
+    with pytest.raises(ValueError):
+        bills.validate_manual_water("2026-08", -1, None)
+    with pytest.raises(ValueError):
+        bills.validate_manual_water("2026-08", 5000, -3)
+    with pytest.raises(ValueError):
+        bills.validate_manual_water("2999-01", 5000, None)
+    with pytest.raises(ValueError):
+        bills.validate_manual_water("bad", 5000, None)

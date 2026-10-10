@@ -170,7 +170,7 @@ class UtilityBillRecord(Base):
 
     #: 請求年月。月の1日で持つ（`2026-08-01` = 2026年8月分）
     billing_month = Column(Date, primary_key=True)
-    #: `electricity` / `gas`
+    #: `electricity` / `gas` / `water`（水道は手入力・#750）
     kind = Column(String(16), primary_key=True)
     contract_key = Column(String(32), primary_key=True)
 
@@ -577,6 +577,9 @@ MOCK_GAS_BILLS = (
 )
 
 
+MOCK_WATER_BILLS = (5120, 4860, 5340, 4980, 5210, 4720)
+
+
 def generate_mock_utility_bills(months: int = 12) -> list:
     """モック用の請求。最新の請求月は「先月分」にする。
 
@@ -620,6 +623,23 @@ def generate_mock_utility_bills(months: int = 12) -> list:
                 "updated_at": None,
             }
         )
+
+        # 水道は2か月に1回の検針。電気・ガスと同じ月には揃えず、1か月おきに置く
+        if index % 2 == 1:
+            water = MOCK_WATER_BILLS[index // 2 % len(MOCK_WATER_BILLS)]
+            rows.append(
+                {
+                    "billing_month": month,
+                    "kind": "water",
+                    "contract_key": "manual",
+                    "plan_name": None,
+                    "amount_yen": water,
+                    "usage_value": round(water / 260.0, 1),
+                    "usage_unit": "m3",
+                    "received_at": None,
+                    "updated_at": None,
+                }
+            )
 
     rows.sort(key=lambda item: (item["billing_month"], item["kind"]))
     return rows

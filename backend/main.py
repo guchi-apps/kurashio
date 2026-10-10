@@ -511,6 +511,24 @@ class UtilityBillPayload(BaseModel):
     records: List[UtilityBillItem]
 
 
+class ManualWaterBill(BaseModel):
+    """水道料金の手入力1件（#750）。検針の月ごとに1行で、同じ月は上書きする。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: 検針月。`2026-08`
+    billing_month: str
+    amount_yen: int
+    #: 使用量（m³）。明細に書いてあれば
+    usage_m3: Optional[float] = None
+
+    @model_validator(mode="after")
+    def check_values(self):
+        # DB_MOCK では保存まで行かないので、入力の誤りはここで弾く
+        bills.validate_manual_water(self.billing_month, self.amount_yen, self.usage_m3)
+        return self
+
+
 class BambuStatePayload(BaseModel):
     """`collectors/bambu_to_myroom.py` からの送信（#428）。
 
@@ -2401,6 +2419,51 @@ async def create_utility_bills(
         db.rollback()
         logger.exception("billsの保存に失敗")
         raise HTTPException(status_code=500, detail="internal error") from e
+
+
+@app.put("/api/bills/water")
+def put_water_bill(
+    payload: ManualWaterBill,
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    """水道料金を手入力で記録する（#750）。電気・ガスと違い取得元が無い。"""
+    if database.DB_MOCK:
+        return {"status": "mock_ok"}
+    try:
+        saved = bills.upsert_manual_water(
+            db, payload.billing_month, payload.amount_yen, payload.usage_m3
+        )
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        db.rollback()
+        logger.exception("水道料金の保存に失敗")
+        raise HTTPException(status_code=500, detail="internal error") from e
+    return {"status": "ok", **saved}
+
+
+@app.delete("/api/bills/water/{billing_month}")
+def delete_water_bill(
+    billing_month: str,
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    """手入力した水道料金を1件消す。"""
+    if database.DB_MOCK:
+        return {"status": "mock_ok"}
+    try:
+        deleted = bills.delete_manual_water(db, billing_month)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        db.rollback()
+        logger.exception("水道料金の削除に失敗")
+        raise HTTPException(status_code=500, detail="internal error") from e
+    if not deleted:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"status": "ok"}
 
 
 @app.get("/api/bills/summary")

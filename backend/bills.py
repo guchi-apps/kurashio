@@ -24,14 +24,28 @@ from . import database, energy
 
 KIND_ELECTRICITY = "electricity"
 KIND_GAS = "gas"
+#: 水道。2か月に1回の検針の使用明細を**手入力**で記録する（#750）。
+#: 電気・ガスのようにメールから取れる取得元が無い
+KIND_WATER = "water"
 
 #: 画面に出す並び。電気を先に置く（Issueの主題は電気代）
-KIND_ORDER = (KIND_ELECTRICITY, KIND_GAS)
+KIND_ORDER = (KIND_ELECTRICITY, KIND_GAS, KIND_WATER)
 
 KIND_LABELS = {
     KIND_ELECTRICITY: "電気",
     KIND_GAS: "ガス",
+    KIND_WATER: "水道",
 }
+
+#: 手入力の行の `contract_key`。収集（メール）由来の行とは混ざらない
+MANUAL_CONTRACT_KEY = "manual"
+
+#: 手入力で書いてよい種別。電気・ガスはメールから入るので、手で足すと二重計上になる
+MANUAL_KINDS = (KIND_WATER,)
+
+#: 手入力の上限。桁の打ち間違いを弾くだけの値
+MAX_MANUAL_AMOUNT_YEN = 1_000_000
+MAX_MANUAL_USAGE_M3 = 10_000
 
 #: カードと詳細パネルが使う月数（直近12か月）
 DEFAULT_HISTORY_MONTHS = 12
@@ -57,9 +71,13 @@ def parse_billing_month(value: Any) -> datetime.date:
     raise ValueError(f"Invalid billing month: {value}")
 
 
-def normalize_kind(value: Any) -> str:
+#: メール収集（`POST /api/bills`）が送ってよい種別。水道は手入力だけ
+COLLECTED_KINDS = (KIND_ELECTRICITY, KIND_GAS)
+
+
+def normalize_kind(value: Any, allowed: Sequence[str] = COLLECTED_KINDS) -> str:
     kind = str(value or "").strip().lower()
-    if kind not in (KIND_ELECTRICITY, KIND_GAS):
+    if kind not in allowed:
         raise ValueError(f"Invalid kind: {value}")
     return kind
 
@@ -69,7 +87,11 @@ def format_billing_month(month: datetime.date) -> str:
     return f"{month.year:04d}-{month.month:02d}"
 
 
-def upsert_records(db: Session, records: Sequence[Dict[str, Any]]) -> int:
+def upsert_records(
+    db: Session,
+    records: Sequence[Dict[str, Any]],
+    allowed_kinds: Sequence[str] = COLLECTED_KINDS,
+) -> int:
     """同じ (billing_month, kind, contract_key) は上書きする。書き込んだ件数を返す。
 
     送り直しても増えない。メールは何度読んでも同じ内容なので、収集スクリプトは
@@ -78,7 +100,7 @@ def upsert_records(db: Session, records: Sequence[Dict[str, Any]]) -> int:
     written = 0
     for item in records:
         month = parse_billing_month(item["billing_month"])
-        kind = normalize_kind(item.get("kind"))
+        kind = normalize_kind(item.get("kind"), allowed_kinds)
         contract_key = (item.get("contract_key") or "default").strip() or "default"
 
         row = (
@@ -105,6 +127,67 @@ def upsert_records(db: Session, records: Sequence[Dict[str, Any]]) -> int:
 
     db.commit()
     return written
+
+
+def validate_manual_water(
+    billing_month: Any, amount_yen: int, usage_m3: Optional[float]
+) -> datetime.date:
+    """手入力の水道料金を検証して、検針月（月の1日）を返す。"""
+    month = parse_billing_month(billing_month)
+    if month > datetime.date.today().replace(day=1) + datetime.timedelta(days=31):
+        raise ValueError("Billing month is in the future")
+    if amount_yen < 0 or amount_yen > MAX_MANUAL_AMOUNT_YEN:
+        raise ValueError("Invalid amount")
+    if usage_m3 is not None and (usage_m3 < 0 or usage_m3 > MAX_MANUAL_USAGE_M3):
+        raise ValueError("Invalid usage")
+    return month
+
+
+def upsert_manual_water(
+    db: Session,
+    billing_month: Any,
+    amount_yen: int,
+    usage_m3: Optional[float] = None,
+) -> Dict[str, Any]:
+    """水道料金を1件、手入力で記録する。同じ月は上書き（直し方は入れ直すだけ）。
+
+    `billing_month` は検針の月（明細に書かれた「検針月」）。2か月分をまとめて請求する
+    ので、使用期間ではなく検針月で1行にする。
+    """
+    month = validate_manual_water(billing_month, amount_yen, usage_m3)
+
+    upsert_records(
+        db,
+        [
+            {
+                "billing_month": month,
+                "kind": KIND_WATER,
+                "contract_key": MANUAL_CONTRACT_KEY,
+                "amount_yen": amount_yen,
+                "usage_value": usage_m3,
+                "usage_unit": "m3" if usage_m3 is not None else None,
+                "received_at": None,
+            }
+        ],
+        allowed_kinds=MANUAL_KINDS,
+    )
+    return {"billing_month": format_billing_month(month), "kind": KIND_WATER}
+
+
+def delete_manual_water(db: Session, billing_month: Any) -> bool:
+    """手入力の水道料金を1件消す。無ければ False。"""
+    month = parse_billing_month(billing_month)
+    deleted = (
+        db.query(database.UtilityBillRecord)
+        .filter(
+            database.UtilityBillRecord.billing_month == month,
+            database.UtilityBillRecord.kind == KIND_WATER,
+            database.UtilityBillRecord.contract_key == MANUAL_CONTRACT_KEY,
+        )
+        .delete()
+    )
+    db.commit()
+    return deleted > 0
 
 
 def _serialize_rows(rows: Sequence[Any]) -> List[Dict[str, Any]]:
@@ -183,13 +266,15 @@ def _month_payload(
     in_month = [row for row in rows if row["billing_month"] == month]
     electricity = _sum_kind(row for row in in_month if row["kind"] == KIND_ELECTRICITY)
     gas = _sum_kind(row for row in in_month if row["kind"] == KIND_GAS)
+    water = _sum_kind(row for row in in_month if row["kind"] == KIND_WATER)
     total = sum(
-        entry["amount_yen"] for entry in (electricity, gas) if entry is not None
+        entry["amount_yen"] for entry in (electricity, gas, water) if entry is not None
     )
     return {
         "billing_month": format_billing_month(month),
         "electricity": electricity,
         "gas": gas,
+        "water": water,
         "total_yen": total,
     }
 
@@ -270,15 +355,29 @@ def build_summary(
 ) -> Dict[str, Any]:
     """カードと詳細パネルが必要とするものをまとめて作る。DBアクセスを含まない。"""
     known_months = sorted({row["billing_month"] for row in rows})
-    latest_month = known_months[-1] if known_months else None
+    # 「最新」と「1つ前」は電気・ガスの月で決める。水道は2か月に1回で、検針の月も
+    # 電気とずれるため、水道だけの月が最新になると電気の欄が空になってしまう（#750）
+    main_months = sorted(
+        {row["billing_month"] for row in rows if row["kind"] != KIND_WATER}
+    )
+    latest_month = main_months[-1] if main_months else None
 
     # 記録のある月だけを並べる。届いていない月に0円の棒を立てると
     # 「その月は使わなかった」に見えてしまう
     history_months = known_months[-months:] if known_months else []
     history = [_month_payload(month, rows) for month in history_months]
 
-    latest = history[-1] if history else None
-    previous = history[-2] if len(history) >= 2 else None
+    by_month = {entry["billing_month"]: entry for entry in history}
+    main_history = [
+        by_month[format_billing_month(month)]
+        for month in main_months
+        if format_billing_month(month) in by_month
+    ]
+    latest = main_history[-1] if main_history else None
+    previous = main_history[-2] if len(main_history) >= 2 else None
+    latest_water = next(
+        (entry for entry in reversed(history) if entry["water"] is not None), None
+    )
 
     electricity_amount = (
         latest["electricity"]["amount_yen"]
@@ -293,6 +392,7 @@ def build_summary(
 
     return {
         "latest": latest,
+        "latest_water": latest_water,
         "previous": previous,
         "comparison": build_comparison(latest, previous),
         "months": history,

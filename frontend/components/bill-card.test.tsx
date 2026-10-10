@@ -66,7 +66,7 @@ describe("BillCard", () => {
     const html = render(
       <BillCard summary={summary} loading={false} error={false} onOpenDetail={() => {}} />
     );
-    expect(html).toContain("電気・ガス料金");
+    expect(html).toContain("電気・ガス・水道料金");
     expect(html).toContain("2026年8月分");
     expect(html).toContain("15,760");
     expect(html).toContain("540 kWh");
@@ -132,5 +132,32 @@ describe("BillCard", () => {
       <BillCard summary={null} loading={false} error onOpenDetail={() => {}} />
     );
     expect(html).toContain("請求額を読み込めませんでした");
+  });
+});
+
+describe("BillCard 水道", () => {
+  it("水道の記録があれば、電気・ガスと月が違うときは月を添えて出す", () => {
+    const withWater: UtilityBillSummary = {
+      ...summary,
+      latest_water: {
+        billing_month: "2026-07",
+        electricity: null,
+        gas: null,
+        water: {
+          amount_yen: 5120,
+          usage_value: 20,
+          usage_unit: "m3",
+          plan_name: null,
+          contracts: 1,
+        },
+        total_yen: 5120,
+      },
+    };
+    const html = render(
+      <BillCard summary={withWater} loading={false} error={false} onOpenDetail={() => {}} />
+    );
+    expect(html).toContain("水道");
+    expect(html).toContain("¥5,120");
+    expect(html).toContain("7月");
   });
 });

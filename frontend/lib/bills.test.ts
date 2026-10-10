@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   billKindRatio,
+  parseWaterBillDraft,
   buildBillMonthRows,
   buildBillStackColumns,
   formatBillAmount,
@@ -152,5 +153,61 @@ describe("一覧の並び", () => {
       "2026-07",
       "2026-06",
     ]);
+  });
+});
+
+describe("水道料金の手入力", () => {
+  it("下書きを送る形へ読む（桁区切り・円・単位つきも受ける）", () => {
+    expect(
+      parseWaterBillDraft({ billingMonth: "2026-09", amount: "5,120円", usage: "20.5 m³" })
+    ).toEqual({
+      ok: true,
+      value: { billing_month: "2026-09", amount_yen: 5120, usage_m3: 20.5 },
+    });
+  });
+
+  it("使用量は空でもよい", () => {
+    const result = parseWaterBillDraft({ billingMonth: "2026-09", amount: "5120", usage: "" });
+    expect(result.ok && result.value.usage_m3).toBeNull();
+  });
+
+  it("月・金額・使用量の誤りは理由を返す", () => {
+    expect(parseWaterBillDraft({ billingMonth: "", amount: "100", usage: "" }).ok).toBe(false);
+    expect(parseWaterBillDraft({ billingMonth: "2026-09", amount: "", usage: "" }).ok).toBe(false);
+    expect(parseWaterBillDraft({ billingMonth: "2026-09", amount: "-5", usage: "" }).ok).toBe(false);
+    expect(parseWaterBillDraft({ billingMonth: "2026-09", amount: "100", usage: "abc" }).ok).toBe(false);
+    expect(parseWaterBillDraft({ billingMonth: "2026-09", amount: "99999999", usage: "" }).ok).toBe(false);
+  });
+
+  it("積み上げに水道の段が入り、水道だけの記録でもカードのデータありになる", () => {
+    const water = {
+      amount_yen: 5000,
+      usage_value: 20,
+      usage_unit: "m3",
+      plan_name: null,
+      contracts: 1,
+    };
+    const m: UtilityBillMonth = {
+      billing_month: "2026-09",
+      electricity: null,
+      gas: null,
+      water,
+      total_yen: 5000,
+    };
+    const [column] = buildBillStackColumns([m]);
+    expect(column.segments.map((segment) => segment.kind)).toEqual(["water"]);
+    expect(
+      hasBillData({
+        latest: null,
+        latest_water: m,
+        previous: null,
+        comparison: null,
+        months: [m],
+        total_yen: 5000,
+        measured: null,
+        unit_price: 31,
+        updated_at: null,
+      })
+    ).toBe(true);
   });
 });

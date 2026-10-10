@@ -61,7 +61,7 @@ export const PRINTER_CARD_KEY = "printer";
  * 「電気の操作」だけは押すためのカードで、他は読むためのカード。
  * 目的があって開いたときに最初に触れるよう先頭へ置く。
  *
- * 電気・ガス料金は消費電力のすぐ後ろに置く。片方が「計測できている分」で
+ * 電気・ガス・水道料金は消費電力のすぐ後ろに置く。片方が「計測できている分」で
  * もう片方が「実際の請求」なので、離すと突き合わせられない。
  *
  * 掃除は末尾。押すためのカードだが、ゴミの日のように日付が決まっているわけではなく
@@ -76,7 +76,7 @@ export const LIFE_CARDS: readonly LifeCardDefinition[] = [
   { key: REMOTE_CARD_KEY, label: "電気の操作", accentVar: "--remote-color" },
   { key: GARBAGE_CARD_KEY, label: "ゴミの日" },
   { key: ENERGY_CARD_KEY, label: "消費電力", accentVar: "--energy-color" },
-  { key: BILL_CARD_KEY, label: "電気・ガス料金", accentVar: "--bill-color" },
+  { key: BILL_CARD_KEY, label: "電気・ガス・水道料金", accentVar: "--bill-color" },
   { key: CLEANING_CARD_KEY, label: "掃除" },
   { key: PRINTER_CARD_KEY, label: "3Dプリンター", accentVar: "--printer-color" },
 ];
