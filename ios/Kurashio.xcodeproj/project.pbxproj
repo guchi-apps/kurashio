@@ -295,9 +295,10 @@
 				};
 			};
 			buildConfigurationList = 4B52A1EC3061842200F8C8D5 /* Build configuration list for PBXProject "Kurashio" */;
-			developmentRegion = en;
+			developmentRegion = ja;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				ja,
 				en,
 				Base,
 			);
@@ -643,6 +644,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6AA3WFTR94;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Japanese-Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = kurashio;
 				INFOPLIST_KEY_WKApplication = YES;
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.gucchii.kurashio;
@@ -672,6 +674,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 6AA3WFTR94;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Japanese-Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = kurashio;
 				INFOPLIST_KEY_WKApplication = YES;
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.gucchii.kurashio;
