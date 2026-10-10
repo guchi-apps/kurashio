@@ -44,7 +44,7 @@ describe("LifeSettingsSheet", () => {
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
     // 並びに書いていないカードも落とさず末尾へ出す
     expect(html).toContain("消費電力");
-    expect(html).toContain("電気・ガス料金");
+    expect(html).toContain("電気・ガス・水道料金");
   });
 
   it("端の項目では矢印を押せない", () => {
@@ -58,7 +58,7 @@ describe("LifeSettingsSheet", () => {
 
   it("隠しているカードは目のボタンの状態と説明で分かる", () => {
     const html = render({ hiddenKeys: [BILL_CARD_KEY] });
-    expect(html).toContain('aria-label="電気・ガス料金をダッシュボードに表示する"');
+    expect(html).toContain('aria-label="電気・ガス・水道料金をダッシュボードに表示する"');
     expect(html).toContain('aria-label="消費電力をダッシュボードから隠す"');
     expect(html).toContain("非表示。ダッシュボードには出ません");
   });
@@ -76,7 +76,7 @@ describe("LifeSettingsSheet", () => {
       "電気の操作",
       "ゴミの日",
       "消費電力",
-      "電気・ガス料金",
+      "電気・ガス・水道料金",
       "掃除",
     ]) {
       expect(html).toContain(label);

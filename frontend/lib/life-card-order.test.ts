@@ -64,7 +64,7 @@ describe("life-card-order", () => {
   it("resolves the order into card definitions", () => {
     const cards = getOrderedLifeCards([BILL_CARD_KEY]);
     expect(cards[0].key).toBe(BILL_CARD_KEY);
-    expect(cards[0].label).toBe("電気・ガス料金");
+    expect(cards[0].label).toBe("電気・ガス・水道料金");
     expect(cards).toHaveLength(LIFE_CARDS.length);
   });
 

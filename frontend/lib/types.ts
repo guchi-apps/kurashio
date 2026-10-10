@@ -355,7 +355,7 @@ export interface EnergySourceSummary {
  */
 export interface UtilityBillKindTotal {
   amount_yen: number;
-  /** 電気は kWh、ガスは m3 */
+  /** 電気は kWh、ガス・水道は m3 */
   usage_value: number | null;
   usage_unit: string | null;
   /** `なっトクでんき`。契約が複数あれば ` / ` でつなぐ */
@@ -369,6 +369,8 @@ export interface UtilityBillMonth {
   billing_month: string;
   electricity: UtilityBillKindTotal | null;
   gas: UtilityBillKindTotal | null;
+  /** 水道（手入力・#750）。2か月に1回なので無い月が多い。古い控えには無い */
+  water?: UtilityBillKindTotal | null;
   total_yen: number;
 }
 
@@ -393,6 +395,8 @@ export interface UtilityBillMeasured {
 /** 電気・ガス料金カードが使う集計。`GET /api/bills/summary` の戻り */
 export interface UtilityBillSummary {
   latest: UtilityBillMonth | null;
+  /** 水道の記録がある最新の月。電気・ガスの最新月とはずれるので別に持つ */
+  latest_water?: UtilityBillMonth | null;
   previous: UtilityBillMonth | null;
   comparison: UtilityBillComparison | null;
   /** 記録のある月だけ。古い順。届いていない月は入らない */

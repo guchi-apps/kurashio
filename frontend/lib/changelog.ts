@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.41.0",
+    date: "2026-10-11",
+    changes: [
+      "電気・ガス料金カードが「電気・ガス・水道料金」になり、水道料金を手で記録できるようになりました。2か月に1回届く水道の使用明細から、検針月・請求額・使用量を記入すると、カードや詳細に水道の金額が表示され、電気・ガスとの合計も確認できます。記録した内容は後から削除できます。",
+    ],
+  },
+  {
     version: "4.40.0",
     date: "2026-10-09",
     changes: [
