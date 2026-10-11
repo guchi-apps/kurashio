@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.42.0",
+    date: "2026-10-11",
+    changes: [
+      "Tapoのスマートプラグの名前を変えても、これまでの消費電力の履歴を同じ機器として引き継げるようになりました。名前の変更で分かれてしまった履歴は、消費電力の詳細から「同じ機器」として結び付けられます。",
+    ],
+  },
+  {
     version: "4.41.0",
     date: "2026-10-11",
     changes: [
