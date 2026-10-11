@@ -99,6 +99,9 @@ def members(document: Dict[str, Dict[str, str]], source: str) -> List[str]:
 #: 衝突時の内部 source に付ける機器IDの末尾の桁数
 COLLISION_SUFFIX_LENGTH = 6
 
+#: `daily_energy.source` / `energy_readings.source` の列の長さ（`database.py` の `String(64)`）
+MAX_SOURCE_LENGTH = 64
+
 
 def storage_source(
     document: Dict[str, Dict[str, str]], device_id: Any, source: str
@@ -121,7 +124,22 @@ def storage_source(
     )
     if not taken:
         return source
-    return f"{source}#{normalized[-COLLISION_SUFFIX_LENGTH:]}"
+    suffix = f"#{normalized[-COLLISION_SUFFIX_LENGTH:]}"
+    # source 列は String(64)。長い名前は付け足す分だけ切り詰める（超えると保存が丸ごと失敗する）
+    return source[: MAX_SOURCE_LENGTH - len(suffix)] + suffix
+
+
+def claim_in_memory(
+    document: Dict[str, Dict[str, str]], device_id: Any, source: str
+) -> None:
+    """保存した `(device_id, source)` を、commit前でも以降の判定に見えるよう手元の対応表へ足す。
+
+    同じ受信に同名の未登録機器が複数あるとき、後続が先行の割り当てを認識して別の source へ
+    振り分けられるようにするため（#782）。書き込みはしない。登録は `register_devices` が行う。
+    """
+    normalized = normalize_device_id(device_id)
+    if normalized and source and normalized not in document["devices"]:
+        document["devices"][normalized] = resolve(document, source)
 
 
 def _check_link(document: Dict[str, Dict[str, str]], alias: str, canonical: str) -> None:

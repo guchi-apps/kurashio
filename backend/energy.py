@@ -137,6 +137,7 @@ def upsert_records(
         date = parse_date(item["date"])
         source = (item.get("source") or DEFAULT_SOURCE).strip() or DEFAULT_SOURCE
         source = energy_links.storage_source(document, item.get("device_id"), source)
+        energy_links.claim_in_memory(document, item.get("device_id"), source)
         row = (
             db.query(database.DailyEnergyRecord)
             .filter(
