@@ -536,6 +536,19 @@ async def read_daily_history(
         return None
 
 
+def _device_id(device: Any) -> Optional[str]:
+    """機器固有のID（MAC）を `AABBCCDDEEFF` の形で返す。取れなければ None。
+
+    表示名（alias）もIPも変わるので、同一機器の根拠にはMACを使う（#768）。None のときは
+    従来どおり名前だけで送る（サーバー側は機器IDが無ければ名前の同一性しか見ない）。
+    """
+    raw = getattr(device, "mac", None)
+    if not isinstance(raw, str):
+        return None
+    cleaned = "".join(ch for ch in raw if ch.isalnum()).upper()
+    return cleaned or None
+
+
 async def read_device(
     host: str,
     name_override: Optional[str],
@@ -572,6 +585,7 @@ async def read_device(
             "host": host,
             "name": name_override or getattr(device, "alias", None) or host,
             "model": getattr(device, "model", None),
+            "device_id": _device_id(device),
             "history": history or [],
             "history_failed": history_failed,
             **energy,
@@ -616,6 +630,7 @@ def build_payload(
     records: List[Dict[str, Any]] = []
     for item in readings:
         source = f"{SOURCE_PREFIX}{item['name']}"
+        device_id = item.get("device_id")
         for date, kwh in item.get("history") or ():
             records.append(
                 {
@@ -623,6 +638,7 @@ def build_payload(
                     "source": source,
                     "kwh": kwh,
                     "power_w": None,
+                    **({"device_id": device_id} if device_id else {}),
                 }
             )
         if item["kwh_today"] is not None:
@@ -632,6 +648,7 @@ def build_payload(
                     "source": source,
                     "kwh": item["kwh_today"],
                     "power_w": item["power_w"],
+                    **({"device_id": device_id} if device_id else {}),
                 }
             )
     return {"records": records}

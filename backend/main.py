@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import datetime
 import random
 from dotenv import load_dotenv
-from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
+from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_links, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
 from . import access
 from .auth import get_current_user
 from .internal_auth import require_collector_token, require_internal_control_token, require_internal_token
@@ -463,6 +463,9 @@ class DailyEnergyItem(BaseModel):
     #: いまの消費電力（W）。スマートプラグだけが返す。集計には使わず、
     #: カードに「動いているか」を出すためだけに最後の値を持つ。
     power_w: Optional[float] = None
+    #: 機器固有のID（Tapoプラグは MAC）。名前・IPが変わっても同じ機器と分かる根拠（#768）。
+    #: 旧形式の収集は送らないので任意
+    device_id: Optional[str] = None
 
     @model_validator(mode="after")
     def at_least_one_value(self):
@@ -2108,6 +2111,7 @@ async def create_daily_energy(
                 "kwh": item.kwh,
                 "cost_yen": item.cost_yen,
                 "power_w": item.power_w,
+                "device_id": item.device_id,
             }
             for item in payload.records
         ]
@@ -2228,6 +2232,50 @@ def post_energy_refetch_done(
         db.rollback()
         logger.exception("energy再取得の完了報告に失敗")
         raise HTTPException(status_code=500, detail="internal error") from e
+
+
+class EnergyLinkPayload(BaseModel):
+    #: 別名にする取得元（旧名）
+    source: str
+    #: 同じ機器として残す取得元（正規の側）
+    canonical: str
+
+
+@app.get("/api/energy/links")
+def get_energy_links(
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    """取得元の関連付けの状況と、結べそうな候補（#768）。結ぶかどうかは利用者が決める。"""
+    return energy.get_links_overview(db, get_now_jst().date())
+
+
+@app.put("/api/energy/links")
+def put_energy_link(
+    payload: EnergyLinkPayload,
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    """旧名の取得元を、同じ機器として関連付ける。履歴は消さず、集計のときに1台へ寄せる。"""
+    try:
+        energy.link_sources(db, payload.source, payload.canonical)
+    except energy_links.LinkError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return energy.get_links_overview(db, get_now_jst().date())
+
+
+@app.delete("/api/energy/links")
+def delete_energy_link(
+    source: str = Query(...),
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    """関連付けを解除する。履歴は元のまま残っているので、すぐ元の表示へ戻る。"""
+    try:
+        energy_links.unlink(db, source)
+    except energy_links.LinkError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    return energy.get_links_overview(db, get_now_jst().date())
 
 
 @app.get("/api/energy/summary")

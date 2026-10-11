@@ -16,6 +16,7 @@ import {
   type DeviceInfo,
   type EnergyBreakdown,
   type EnergyHourly,
+  type EnergyLinks,
   type EnergyKepcoImportResult,
   type EnergySourceSummary,
   type HistoryPoint,
@@ -1010,4 +1011,40 @@ export async function fetchDashboardData(
       latestByDevice.status === "rejected" &&
       airconLatest.status === "rejected",
   };
+}
+
+async function energyLinksRequest(path: string, init?: RequestInit): Promise<EnergyLinks> {
+  const res = await fetchWithAuth(path, init);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      // 本文が読めなければ既定の文言にする
+    }
+    throw new Error(detail || "取得元の関連付けを更新できませんでした");
+  }
+  return res.json() as Promise<EnergyLinks>;
+}
+
+/** 取得元の関連付けの状況と、結べそうな候補（#768） */
+export async function fetchEnergyLinks(): Promise<EnergyLinks> {
+  return energyLinksRequest("/api/energy/links");
+}
+
+/** 旧名（`source`）を、同じ機器（`canonical`）として関連付ける */
+export async function linkEnergySources(source: string, canonical: string): Promise<EnergyLinks> {
+  return energyLinksRequest("/api/energy/links", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source, canonical }),
+  });
+}
+
+/** 関連付けを解除する。履歴は消えず、すぐ元の表示へ戻る */
+export async function unlinkEnergySource(source: string): Promise<EnergyLinks> {
+  return energyLinksRequest(`/api/energy/links?source=${encodeURIComponent(source)}`, {
+    method: "DELETE",
+  });
 }
