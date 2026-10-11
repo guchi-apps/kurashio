@@ -188,7 +188,8 @@ def _update(
 def register_devices(db: Optional[Session], pairs: Iterable[Tuple[str, str]]) -> None:
     """受信した `(device_id, source)` を対応表へ反映する（機器IDが一致する改名を自動で結ぶ）。
 
-    - 初めて見る機器ID: 今回の source（すでに別名なら正規）を正規として登録
+    - 初めて見る機器ID: 今回の source（すでに別名なら正規）を正規として登録。ただし **その名前を
+      すでに別の機器IDが使っている**なら登録せず警告だけ残す（別機器の履歴を統合しない・#774）
     - 登録済みで source が違う: 別名として結ぶ。ただし **その名前がすでに別の機器の取得元**
       （別の機器IDの正規、または別の機器の別名）なら結ばない（同名の別機器・名前の使い回しを混ぜない）
     変化が無ければ書き込まない。
@@ -204,15 +205,23 @@ def register_devices(db: Optional[Session], pairs: Iterable[Tuple[str, str]]) ->
     def mutate(document: Dict[str, Dict[str, str]]) -> None:
         for device_id, source in wanted.items():
             canonical = document["devices"].get(device_id)
-            if canonical is None:
-                document["devices"][device_id] = resolve(document, source)
-                continue
-            if resolve(document, source) == canonical:
-                continue
             owner_elsewhere = any(
                 other_id != device_id and resolve(document, source) == target
                 for other_id, target in document["devices"].items()
             )
+            if canonical is None:
+                if owner_elsewhere:
+                    # 別の機器IDがすでに使っている名前（正規・別名とも）。自動では結ばず未登録のまま残す
+                    logger.warning(
+                        "機器ID %s の取得元 %s は別の機器がすでに使っているため、自動では登録しません"
+                        "（消費電力の詳細で手動確認してください）",
+                        device_id[-6:], source,
+                    )
+                    continue
+                document["devices"][device_id] = resolve(document, source)
+                continue
+            if resolve(document, source) == canonical:
+                continue
             try:
                 if owner_elsewhere:
                     raise LinkError("別の機器の取得元です")

@@ -126,6 +126,18 @@ def test_same_name_on_a_different_device_is_not_mixed(db):
     assert document["links"] == {}
 
 
+def test_new_device_reusing_an_existing_alias_is_not_registered(db):
+    # AA11 が tapo:PC → tapo:作業PC と改名（作業PC は PC の別名になる）
+    energy.upsert_records(db, [_record(D(2026, 10, 10), "tapo:PC", 1.0, "AA11")], now=NOW)
+    energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:作業PC", 0.5, "AA11")], now=NOW)
+    # 別のMAC BB22 の新規プラグが、その別名を名乗って初回送信する
+    energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:作業PC", 9.0, "BB22")], now=NOW + datetime.timedelta(minutes=1))
+
+    document = energy_links.get_document(db)
+    assert document["devices"] == {"AA11": "tapo:PC"}
+    assert document["links"] == {"tapo:作業PC": "tapo:PC"}
+
+
 def test_receiving_again_is_idempotent(db):
     clock = _Clock()
     for _ in range(3):
