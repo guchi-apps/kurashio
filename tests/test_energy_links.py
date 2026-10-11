@@ -114,19 +114,36 @@ def test_rename_is_linked_by_device_id(db):
     }
 
 
-def test_same_name_on_a_different_device_is_not_mixed(db):
+def test_same_name_on_a_different_device_does_not_overwrite_saved_rows(db):
     energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:PC", 1.0, "AA11")], now=NOW)
-    # 別の機器IDが同じ名前を名乗っても、結ばない（履歴は同じ取得元の名前を共有するが、
-    # 自動では別機器の対応表を作らない）
-    energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:冷蔵庫", 2.0, "BB22")], now=NOW)
+    # 別の機器IDが同じ日・同じ名前で送っても、保存済みの行を上書きしない（#778）
     energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:PC", 9.0, "BB22")], now=NOW + datetime.timedelta(minutes=1))
 
+    rows = db.query(database.DailyEnergyRecord).all()
+    assert {(r.source, r.kwh) for r in rows} == {("tapo:PC", 1.0), ("tapo:PC#BB22", 9.0)}
+    readings = db.query(database.EnergyReadingRecord).all()
+    assert {(r.source, r.kwh) for r in readings} == {("tapo:PC", 1.0), ("tapo:PC#BB22", 9.0)}
+
     document = energy_links.get_document(db)
-    assert document["devices"] == {"AA11": "tapo:PC", "BB22": "tapo:冷蔵庫"}
+    assert document["devices"] == {"AA11": "tapo:PC", "BB22": "tapo:PC#BB22"}
     assert document["links"] == {}
 
+    # 集計でも別々の取得元として残り、名前も区別できる
+    merged = _by_source(energy.fetch_all_rows(db, D(2026, 10, 1), D(2026, 10, 11)))
+    assert merged == {(D(2026, 10, 11), "tapo:PC"): 1.0, (D(2026, 10, 11), "tapo:PC#BB22"): 9.0}
+    assert energy.source_label("tapo:PC#BB22") == "PC（BB22）"
 
-def test_new_device_reusing_an_existing_alias_is_not_registered(db):
+
+def test_colliding_device_stays_separate_on_later_receipts(db):
+    clock = _Clock()
+    for _ in range(2):
+        energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:PC", 1.0, "AA11")], now=clock())
+        energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:PC", 9.0, "BB22")], now=clock())
+    merged = _by_source(energy.fetch_all_rows(db, D(2026, 10, 1), D(2026, 10, 11)))
+    assert merged == {(D(2026, 10, 11), "tapo:PC"): 1.0, (D(2026, 10, 11), "tapo:PC#BB22"): 9.0}
+
+
+def test_new_device_reusing_an_existing_alias_is_kept_separate(db):
     # AA11 が tapo:PC → tapo:作業PC と改名（作業PC は PC の別名になる）
     energy.upsert_records(db, [_record(D(2026, 10, 10), "tapo:PC", 1.0, "AA11")], now=NOW)
     energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:作業PC", 0.5, "AA11")], now=NOW)
@@ -134,8 +151,11 @@ def test_new_device_reusing_an_existing_alias_is_not_registered(db):
     energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:作業PC", 9.0, "BB22")], now=NOW + datetime.timedelta(minutes=1))
 
     document = energy_links.get_document(db)
-    assert document["devices"] == {"AA11": "tapo:PC"}
+    assert document["devices"] == {"AA11": "tapo:PC", "BB22": "tapo:作業PC#BB22"}
     assert document["links"] == {"tapo:作業PC": "tapo:PC"}
+    merged = _by_source(energy.fetch_all_rows(db, D(2026, 10, 1), D(2026, 10, 11)))
+    assert merged[(D(2026, 10, 11), "tapo:PC")] == 0.5
+    assert merged[(D(2026, 10, 11), "tapo:作業PC#BB22")] == 9.0
 
 
 def test_receiving_again_is_idempotent(db):
