@@ -38,6 +38,16 @@ SwiftUI + WKWebView の薄い殻です（#526）。**画面と機能はすべて
 Web側と対になる変更（新しいブリッジのメッセージなど）は Web が先に本番へ出ていないと噛み合わない。
 `install-to-iphone.sh` は既定で `main` を取り込む（`IOS_BRANCH` で変えられる）。
 
+### 署名なしのビルド確認（subpc から）
+
+Swift を変更したら、コミット前に Mac mini で「コンパイルが通るか」だけ確かめられる（署名・実機は不要）:
+
+```bash
+ios/scripts/remote-build-check.sh
+```
+
+作業ツリーの `ios/` を rsync で送り、`Kurashio` スキームを `CODE_SIGNING_ALLOWED=NO` でビルドする。
+
 ### 入れ直し（1コマンド）
 
 iPhone を Mac mini に USB で繋ぎ、ロックを解除しておく。**subpc から**:
