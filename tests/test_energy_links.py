@@ -143,6 +143,48 @@ def test_colliding_device_stays_separate_on_later_receipts(db):
     assert merged == {(D(2026, 10, 11), "tapo:PC"): 1.0, (D(2026, 10, 11), "tapo:PC#BB22"): 9.0}
 
 
+def test_same_payload_with_two_unregistered_devices_of_one_name_is_split(db):
+    day = D(2026, 10, 11)
+    # 初回の1回のPOSTに、未登録の別MACが同名で並ぶ（#782）。当日分は複合主キー衝突で落ちていた
+    energy.upsert_records(
+        db,
+        [_record(day, "tapo:PC", 1.0, "AA11"), _record(day, "tapo:PC", 9.0, "BB22")],
+        now=NOW,
+    )
+    rows = db.query(database.DailyEnergyRecord).all()
+    assert {(r.source, r.kwh) for r in rows} == {("tapo:PC", 1.0), ("tapo:PC#BB22", 9.0)}
+    readings = db.query(database.EnergyReadingRecord).all()
+    assert {(r.source, r.kwh) for r in readings} == {("tapo:PC", 1.0), ("tapo:PC#BB22", 9.0)}
+    assert energy_links.get_document(db)["devices"] == {
+        "AA11": "tapo:PC",
+        "BB22": "tapo:PC#BB22",
+    }
+
+
+def test_same_payload_past_day_does_not_overwrite_earlier_record(db):
+    day = D(2026, 10, 1)
+    energy.upsert_records(
+        db,
+        [_record(day, "tapo:PC", 1.0, "AA11"), _record(day, "tapo:PC", 9.0, "BB22")],
+    )
+    rows = db.query(database.DailyEnergyRecord).all()
+    assert {(r.source, r.kwh) for r in rows} == {("tapo:PC", 1.0), ("tapo:PC#BB22", 9.0)}
+
+
+def test_collision_source_stays_within_the_column_length(db):
+    long_source = "tapo:" + "あ" * 59  # 64文字ちょうど
+    assert len(long_source) == 64
+    energy.upsert_records(
+        db,
+        [_record(D(2026, 10, 1), long_source, 1.0, "AA11"),
+         _record(D(2026, 10, 1), long_source, 9.0, "BB22")],
+    )
+    sources = {r.source for r in db.query(database.DailyEnergyRecord).all()}
+    assert len(sources) == 2
+    assert all(len(s) <= energy_links.MAX_SOURCE_LENGTH for s in sources)
+    assert any(s.endswith("#BB22") for s in sources)
+
+
 def test_new_device_reusing_an_existing_alias_is_kept_separate(db):
     # AA11 が tapo:PC → tapo:作業PC と改名（作業PC は PC の別名になる）
     energy.upsert_records(db, [_record(D(2026, 10, 10), "tapo:PC", 1.0, "AA11")], now=NOW)
