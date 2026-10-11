@@ -980,3 +980,36 @@ export const CHART_VIEW_RANGE_LABELS: Record<ChartViewRange, string> = {
   month: "月",
   year: "年",
 };
+
+/** 取得元の関連付け（#768）。`GET /api/energy/links` の取得元1つぶん */
+export interface EnergyLinkSource {
+  source: string;
+  label: string;
+  /** 同じ機器としてまとめた先の取得元。関連付けが無ければ自分自身 */
+  canonical: string;
+  linked: boolean;
+  /** 機器ID（MAC）で同一性を確認できているか */
+  device_id_known: boolean;
+  first_date: string;
+  last_date: string;
+  days: number;
+  kwh_total: number;
+}
+
+/** 旧名と新名に分かれた履歴を、同じ機器として結べそうな組。結ぶかは利用者が決める */
+export interface EnergyLinkCandidate {
+  source: string;
+  canonical: string;
+  label: string;
+  canonical_label: string;
+  old_first_date: string;
+  old_last_date: string;
+  old_kwh_total: number;
+  new_first_date: string;
+  gap_days: number;
+}
+
+export interface EnergyLinks {
+  sources: EnergyLinkSource[];
+  candidates: EnergyLinkCandidate[];
+}

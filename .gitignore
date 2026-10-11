@@ -50,3 +50,5 @@ data/device_tokens.json
 data/device_tokens.json.lock
 data/energy_refetch.json
 data/energy_refetch.json.lock
+data/energy_links.json
+data/energy_links.json.lock
