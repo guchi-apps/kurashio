@@ -12,12 +12,15 @@
 from __future__ import annotations
 
 import datetime
+import logging
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import database, ui_settings
+from . import database, energy_links, ui_settings
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SOURCE = "aircon"
 
@@ -122,6 +125,7 @@ def upsert_records(
     """
     written = 0
     today = now.date() if now is not None else None
+    device_pairs: List[Any] = []
     for item in records:
         date = parse_date(item["date"])
         source = (item.get("source") or DEFAULT_SOURCE).strip() or DEFAULT_SOURCE
@@ -141,6 +145,8 @@ def upsert_records(
         row.power_w = item.get("power_w")
         row.updated_at = datetime.datetime.utcnow()
         written += 1
+        if item.get("device_id"):
+            device_pairs.append((item["device_id"], source))
 
         if now is not None and date == today:
             db.add(
@@ -154,7 +160,19 @@ def upsert_records(
             )
 
     db.commit()
+    _register_devices(db, device_pairs)
     return written
+
+
+def _register_devices(db: Session, pairs: Sequence[Any]) -> None:
+    """機器IDの対応表を更新する（#768）。失敗しても受信済みの記録は有効なので、受信は失敗にしない。"""
+    if not pairs:
+        return
+    try:
+        energy_links.register_devices(db, pairs)
+    except Exception:  # noqa: BLE001 - 次の受信でやり直せる
+        db.rollback()
+        logger.exception("取得元の機器IDの登録に失敗しました")
 
 
 def _fetch_rows(
@@ -163,17 +181,19 @@ def _fetch_rows(
     start: datetime.date,
     end: datetime.date,
 ) -> List[Dict[str, Any]]:
+    # 改名・関連付けで同じ機器になっている取得元をまとめて引く（#768）
+    document = energy_links.get_document(db)
     rows = (
         db.query(database.DailyEnergyRecord)
         .filter(
-            database.DailyEnergyRecord.source == source,
+            database.DailyEnergyRecord.source.in_(energy_links.members(document, source)),
             database.DailyEnergyRecord.date >= start,
             database.DailyEnergyRecord.date <= end,
         )
         .order_by(database.DailyEnergyRecord.date.asc())
         .all()
     )
-    return _serialize_rows(rows)
+    return energy_links.merge_daily_rows(_serialize_rows(rows), document)
 
 
 def _serialize_rows(rows: Sequence[Any]) -> List[Dict[str, Any]]:
@@ -209,7 +229,9 @@ def fetch_all_rows(
         )
         .all()
     )
-    return _serialize_rows(rows)
+    return energy_links.merge_daily_rows(
+        _serialize_rows(rows), energy_links.get_document(db)
+    )
 
 
 def _total(rows: Sequence[Dict[str, Any]], unit_price: float) -> Dict[str, Any]:
@@ -335,6 +357,7 @@ def get_summary(
             today - datetime.timedelta(days=history_days - 1),
         )
         rows = _fetch_rows(db, source, start, today)
+        source = energy_links.resolve(energy_links.get_document(db), source)
 
     return build_summary(rows, today, unit_price, source, history_days=history_days)
 
@@ -423,7 +446,7 @@ def build_breakdown(
             {
                 "source": row["source"],
                 "label": resolve_source_label(row["source"], source_names),
-                "default_label": source_label(row["source"]),
+                "default_label": source_label(row.get("origin") or row["source"]),
                 "today_kwh": None,
                 "today_cost_yen": None,
                 "power_w": None,
@@ -448,6 +471,9 @@ def build_breakdown(
             entry["this_month_kwh"] += float(row["kwh"])
         if entry["latest_date"] is None or row["date"] > entry["latest_date"]:
             entry["latest_date"] = row["date"]
+            # 改名した機器は、いちばん新しい記録の名前を既定の名前にする（#768）
+            entry["default_label"] = source_label(row.get("origin") or row["source"])
+            entry["label"] = resolve_source_label(row["source"], source_names)
 
     source_rows = sorted(sources.values(), key=_source_order_key)
     for entry in source_rows:
@@ -603,8 +629,129 @@ def get_breakdown(
         unit_price,
         history_days=history_days,
         kepco_daily=kepco_daily,
-        source_names=get_source_names(db),
+        source_names=_names_for_canonical(
+            get_source_names(db), energy_links.get_document(db)
+        ),
     )
+
+
+def _names_for_canonical(
+    names: Mapping[str, str], document: Dict[str, Dict[str, str]]
+) -> Dict[str, str]:
+    """別名を正規の取得元のキーへ寄せる（#768）。
+
+    旧名に付けた別名は、正規側に別名が無いときだけ引き継ぐ。**保存は書き換えない**ので、
+    関連付けを解除すれば旧名の別名がそのまま戻る。
+    """
+    merged = dict(names)
+    for alias in sorted(document["links"]):
+        canonical = energy_links.resolve(document, alias)
+        if canonical not in merged and alias in names:
+            merged[canonical] = names[alias]
+    return merged
+
+
+# --------------------------------------------------------------- 取得元の関連付け（#768）
+
+
+def link_sources(db: Session, alias: str, canonical: str) -> None:
+    """旧名 `alias` を `canonical` の別名として結ぶ。既存の取得元どうしだけ結べる。"""
+    known = {
+        row[0]
+        for row in db.query(database.DailyEnergyRecord.source).distinct().all()
+    }
+    if alias not in known or canonical not in known:
+        raise energy_links.LinkError("記録のある取得元どうしを指定してください")
+    if not (alias.startswith(TAPO_SOURCE_PREFIX) and canonical.startswith(TAPO_SOURCE_PREFIX)):
+        raise energy_links.LinkError("関連付けできるのはスマートプラグの取得元だけです")
+    energy_links.link(db, alias, canonical)
+
+
+#: 「旧名の最後の日」と「新名の最初の日」がこの日数以内なら、同じ機器の候補として出す
+CANDIDATE_MAX_GAP_DAYS = 3
+
+
+def get_links_overview(db: Session, today: datetime.date) -> Dict[str, Any]:
+    """取得元ごとの記録期間・関連付けの状況と、結べそうな候補。
+
+    **候補は提案であって根拠ではない。** 名前もIPも同一機器の証明にならないので、機器IDで
+    結べなかった旧データは自動では統合せず、利用者が期間と量を見て確かめる。
+    """
+    if database.DB_MOCK:
+        return {"sources": [], "candidates": []}
+    document = energy_links.get_document(db)
+    names = _names_for_canonical(get_source_names(db), document)
+    stats_rows = (
+        db.query(
+            database.DailyEnergyRecord.source,
+            func.min(database.DailyEnergyRecord.date),
+            func.max(database.DailyEnergyRecord.date),
+            func.count(database.DailyEnergyRecord.date),
+            func.coalesce(func.sum(database.DailyEnergyRecord.kwh), 0.0),
+        )
+        .filter(database.DailyEnergyRecord.source.like(f"{TAPO_SOURCE_PREFIX}%"))
+        .group_by(database.DailyEnergyRecord.source)
+        .all()
+    )
+    device_canonicals = set(document["devices"].values())
+    sources: List[Dict[str, Any]] = []
+    groups: Dict[str, Dict[str, Any]] = {}
+    for source, first, last, days, kwh in stats_rows:
+        canonical = energy_links.resolve(document, source)
+        sources.append(
+            {
+                "source": source,
+                "label": source_label(source),
+                "canonical": canonical,
+                "linked": canonical != source,
+                "device_id_known": source in device_canonicals,
+                "first_date": first.isoformat(),
+                "last_date": last.isoformat(),
+                "days": int(days),
+                "kwh_total": round(float(kwh or 0.0), 2),
+            }
+        )
+        group = groups.setdefault(
+            canonical, {"first": first, "last": last, "kwh": 0.0}
+        )
+        group["first"] = min(group["first"], first)
+        group["last"] = max(group["last"], last)
+        group["kwh"] += float(kwh or 0.0)
+
+    candidates: List[Dict[str, Any]] = []
+    for old, old_group in groups.items():
+        for new, new_group in groups.items():
+            if old == new or old_group["last"] >= new_group["first"]:
+                continue
+            gap = (new_group["first"] - old_group["last"]).days
+            if gap > CANDIDATE_MAX_GAP_DAYS:
+                continue
+            if old in device_canonicals and new in device_canonicals:
+                continue  # どちらも別の機器IDを持つ＝別の機器
+            probe = {
+                "devices": dict(document["devices"]),
+                "links": dict(document["links"]),
+            }
+            try:
+                energy_links._check_link(probe, old, new)
+            except energy_links.LinkError:
+                continue
+            candidates.append(
+                {
+                    "source": old,
+                    "canonical": new,
+                    "label": names.get(old) or source_label(old),
+                    "canonical_label": names.get(new) or source_label(new),
+                    "old_first_date": old_group["first"].isoformat(),
+                    "old_last_date": old_group["last"].isoformat(),
+                    "old_kwh_total": round(old_group["kwh"], 2),
+                    "new_first_date": new_group["first"].isoformat(),
+                    "gap_days": gap,
+                }
+            )
+    sources.sort(key=lambda item: item["source"])
+    candidates.sort(key=lambda item: (item["source"], item["canonical"]))
+    return {"sources": sources, "candidates": candidates}
 
 
 # --------------------------------------------------------------- 時間ごと（#300）
@@ -628,15 +775,18 @@ def _fetch_readings(
         .order_by(database.EnergyReadingRecord.recorded_at.asc())
         .all()
     )
-    return [
-        {
-            "recorded_at": row.recorded_at,
-            "source": row.source,
-            "kwh": row.kwh,
-            "cost_yen": row.cost_yen,
-        }
-        for row in rows
-    ]
+    return energy_links.merge_reading_rows(
+        (
+            {
+                "recorded_at": row.recorded_at,
+                "source": row.source,
+                "kwh": row.kwh,
+                "cost_yen": row.cost_yen,
+            }
+            for row in rows
+        ),
+        energy_links.get_document(db),
+    )
 
 
 def _value_at_or_before(

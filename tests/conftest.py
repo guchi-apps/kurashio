@@ -58,6 +58,10 @@ def data_dir(tmp_path, monkeypatch):
         tmp_path / "filament.json",
     )
     monkeypatch.setattr(
+        "backend.energy_links.FILE_PATH",
+        tmp_path / "energy_links.json",
+    )
+    monkeypatch.setattr(
         "backend.device_tokens.FILE_PATH",
         tmp_path / "device_tokens.json",
     )

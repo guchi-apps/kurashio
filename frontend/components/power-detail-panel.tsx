@@ -7,12 +7,14 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  Link2,
   RefreshCw,
   Upload,
   X,
 } from "lucide-react";
 import { fetchEnergyHourly, fetchEnergySummary, importKepcoCsv, updateUiSettings } from "@/lib/api";
 import { EnergyDateCalendar } from "@/components/energy-date-calendar";
+import { EnergyLinkSheet } from "@/components/energy-link-sheet";
 import { EnergyRefetchSheet } from "@/components/energy-refetch-sheet";
 import { EnergySourceNameSheet } from "@/components/energy-source-name-sheet";
 import { PowerSourceDetail } from "@/components/power-source-detail";
@@ -128,6 +130,7 @@ export function PowerDetailPanel({
   // 取得元（スマートプラグ）の名前を変えるシート（#335）
   const [nameSheetOpen, setNameSheetOpen] = useState(false);
   const [refetchSheetOpen, setRefetchSheetOpen] = useState(false);
+  const [linkSheetOpen, setLinkSheetOpen] = useState(false);
 
   useEffect(() => {
     if (tab !== "hourly" || !hourlyDate) return;
@@ -309,6 +312,18 @@ export function PowerDetailPanel({
                 title="データの再取得"
               >
                 <RefreshCw className="size-[18px]" strokeWidth={1.75} />
+              </button>
+            )}
+            {/* 改名で分かれた取得元の関連付け（#768）。履歴の確認が要るので設定とは別のアイコンにする */}
+            {!selectedSource && plugCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setLinkSheetOpen(true)}
+                className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                aria-label="取得元の関連付け"
+                title="取得元の関連付け"
+              >
+                <Link2 className="size-[18px]" strokeWidth={1.75} />
               </button>
             )}
             {!selectedSource && plugCount > 0 && (
@@ -707,6 +722,10 @@ export function PowerDetailPanel({
           onClose={() => setRefetchSheetOpen(false)}
           onCompleted={onKepcoImported}
         />
+      )}
+
+      {linkSheetOpen && (
+        <EnergyLinkSheet onClose={() => setLinkSheetOpen(false)} onChanged={onKepcoImported} />
       )}
 
       {/* 開いているあいだだけ描く。下書きは sources から作られるため（#335） */}

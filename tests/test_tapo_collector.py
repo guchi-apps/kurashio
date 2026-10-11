@@ -73,6 +73,27 @@ class TestBuildPayload:
             ]
         }
 
+    def test_device_id_is_sent_when_known(self):
+        """機器ID（MAC）があれば全レコードに付ける。改名しても同じ機器と分かる根拠（#768）。"""
+        readings = [
+            {
+                "name": "PC",
+                "device_id": "AABBCC112233",
+                "kwh_today": 0.4,
+                "power_w": 10.0,
+                "history": [(datetime.date(2026, 8, 21), 1.0)],
+            }
+        ]
+        payload = tapo.build_payload(readings, datetime.date(2026, 8, 22))
+        assert [r["device_id"] for r in payload["records"]] == ["AABBCC112233"] * 2
+
+    def test_device_id_is_normalized_from_mac(self):
+        class Device:
+            mac = "aa-bb-cc-11-22-33"
+
+        assert tapo._device_id(Device()) == "AABBCC112233"
+        assert tapo._device_id(object()) is None
+
     def test_reading_without_total_is_dropped(self):
         """瞬時値しか取れなかった機器は送らない。日別テーブルに入れる値が無いため。"""
         readings = [
