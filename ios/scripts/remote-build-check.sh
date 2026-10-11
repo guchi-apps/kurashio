@@ -19,9 +19,16 @@ IOS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ssh "$HOST" "mkdir -p '$WORK_DIR'"
 rsync -az --delete --exclude build --exclude DerivedData "$IOS_DIR/" "$HOST:$WORK_DIR/ios/"
 
-# 終了コードをパイプで隠さない。生成物は作業ディレクトリ内の DerivedData に閉じる
-ssh "$HOST" "cd '$WORK_DIR/ios' && xcodebuild \
-  -project Kurashio.xcodeproj -scheme Kurashio -configuration Debug \
-  -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath '$WORK_DIR/DerivedData' \
-  CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -n 8; exit \${PIPESTATUS[0]}"
+# 終了コードをパイプで隠さない。生成物は作業ディレクトリ内の DerivedData に閉じる。
+# SSH先のログインシェルは macOS 標準の zsh で、Bash固有の ${PIPESTATUS[0]} は取れず tail の成功が返ってしまう。
+# そのため Mac 側でも bash を明示し、pipefail で xcodebuild の失敗をパイプ越しに伝える（#764）。
+# スクリプトは stdin で渡す（シェルの引数クォートを二重に組まない）。
+ssh "$HOST" bash -l -s <<EOF
+set -o pipefail
+cd '$WORK_DIR/ios'
+xcodebuild \\
+  -project Kurashio.xcodeproj -scheme Kurashio -configuration Debug \\
+  -destination 'generic/platform=iOS Simulator' \\
+  -derivedDataPath '$WORK_DIR/DerivedData' \\
+  CODE_SIGNING_ALLOWED=NO build 2>&1 | tail -n 8
+EOF
