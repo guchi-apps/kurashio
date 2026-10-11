@@ -96,6 +96,34 @@ def members(document: Dict[str, Dict[str, str]], source: str) -> List[str]:
     return [canonical] + [name for name in aliases if name != canonical]
 
 
+#: 衝突時の内部 source に付ける機器IDの末尾の桁数
+COLLISION_SUFFIX_LENGTH = 6
+
+
+def storage_source(
+    document: Dict[str, Dict[str, str]], device_id: Any, source: str
+) -> str:
+    """保存に使う source（#778）。
+
+    `daily_energy` の主キーは `(date, source)` なので、**別の機器IDがすでに使っている名前**
+    （正規・別名とも）のまま保存すると、同じ日の既存行を上書きして別機器の履歴を失う。
+    その場合だけ `<source>#<機器IDの末尾>` という永続的な内部 source に振り分ける。
+    同じ機器は毎回同じ名前になるので、以後の受信・集計もこの名前で続く。
+    機器IDが無い・衝突しないときは受信した source のまま。
+    """
+    normalized = normalize_device_id(device_id)
+    if not normalized or not source:
+        return source
+    target = resolve(document, source)
+    taken = any(
+        other_id != normalized and target == owned
+        for other_id, owned in document["devices"].items()
+    )
+    if not taken:
+        return source
+    return f"{source}#{normalized[-COLLISION_SUFFIX_LENGTH:]}"
+
+
 def _check_link(document: Dict[str, Dict[str, str]], alias: str, canonical: str) -> None:
     """`alias → canonical` を足してよいか。だめなら `LinkError`。"""
     if alias == canonical:

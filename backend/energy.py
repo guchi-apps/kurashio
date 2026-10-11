@@ -54,7 +54,12 @@ def source_label(source: str) -> str:
     if source == KEPCO_OTHER_SOURCE:
         return "その他"
     if source.startswith(TAPO_SOURCE_PREFIX):
-        return source[len(TAPO_SOURCE_PREFIX) :] or source
+        name = source[len(TAPO_SOURCE_PREFIX) :]
+        # 同名の別機器を分けた内部 source（`名前#機器IDの末尾`・#778）は区別が付く形で出す
+        base, sep, suffix = name.rpartition("#")
+        if sep and base and suffix:
+            return f"{base}（{suffix}）"
+        return name or source
     return source
 
 
@@ -126,9 +131,12 @@ def upsert_records(
     written = 0
     today = now.date() if now is not None else None
     device_pairs: List[Any] = []
+    # 別の機器がすでに使っている名前は、保存の前に内部 source へ振り分ける（#778）
+    document = energy_links.get_document(db)
     for item in records:
         date = parse_date(item["date"])
         source = (item.get("source") or DEFAULT_SOURCE).strip() or DEFAULT_SOURCE
+        source = energy_links.storage_source(document, item.get("device_id"), source)
         row = (
             db.query(database.DailyEnergyRecord)
             .filter(
