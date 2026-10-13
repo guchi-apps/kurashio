@@ -344,8 +344,21 @@ extension WebViewModel {
     /// 端末（ウィジェット・Watch）が401を受けて捨てたときも、次にWebが聞いた時点で発行し直しになる
     fileprivate func notifyDeviceTokenState() {
         let hasToken = DeviceSensors.loadToken() != nil
+        // 設定シートの「ウィジェットの自動更新」（#786）が出す状態。`fetchedAt` は最後に成功した時刻（epoch秒・無ければ null）
+        let status: String
+        var fetchedAt = "null"
+        switch DeviceSensors.refreshState() {
+        case .off:
+            status = "off"
+        case .active(let last):
+            status = "active"
+            if let last { fetchedAt = String(Int(last.timeIntervalSince1970)) }
+        case .failed(let last):
+            status = "failed"
+            if let last { fetchedAt = String(Int(last.timeIntervalSince1970)) }
+        }
         webView.evaluateJavaScript(
-            "window.dispatchEvent(new CustomEvent('myroom-native-device-token-state', { detail: { hasToken: \(hasToken) } }))"
+            "window.dispatchEvent(new CustomEvent('myroom-native-device-token-state', { detail: { hasToken: \(hasToken), status: '\(status)', fetchedAt: \(fetchedAt) } }))"
         )
         // iPhoneが持っているトークンを、まだ受け取っていないWatchへも渡す（Watchアプリを後から入れた場合など）
         WatchSync.shared.setToken(DeviceSensors.loadToken())

@@ -13,6 +13,8 @@ struct KurashioEntry: TimelineEntry {
     var fourthSensorId: Int? = nil
     /// 直近の電気の操作の結果。`WidgetPressStore.resultLifetime` を過ぎると外れる（#546）
     var pressResult: WidgetPressStore.Result?
+    /// 閉じている間の自動更新が働いているか。下端の表示に使う（#786）
+    var refreshState: DeviceSensors.RefreshState = .active(lastFetched: nil)
 
     /// 室温・湿度の欄に出す値（選んだセンサー → 既定のセンサーの順に探す）
     var roomReading: SharedWidgetSnapshot.RoomReading? {
@@ -78,7 +80,7 @@ struct KurashioTimelineProvider: AppIntentTimelineProvider {
         cleared.pressResult = nil
         let expiry = result.at.addingTimeInterval(WidgetPressStore.resultLifetime)
         return Timeline(
-            entries: [current, KurashioEntry(date: expiry, snapshot: cleared.snapshot, sensorId: cleared.sensorId, secondSensorId: cleared.secondSensorId, thirdSensorId: cleared.thirdSensorId, fourthSensorId: cleared.fourthSensorId)],
+            entries: [current, KurashioEntry(date: expiry, snapshot: cleared.snapshot, sensorId: cleared.sensorId, secondSensorId: cleared.secondSensorId, thirdSensorId: cleared.thirdSensorId, fourthSensorId: cleared.fourthSensorId, refreshState: cleared.refreshState)],
             policy: policy
         )
     }
@@ -91,7 +93,8 @@ struct KurashioTimelineProvider: AppIntentTimelineProvider {
             secondSensorId: configuration.secondSensor?.id,
             thirdSensorId: configuration.thirdSensor?.id,
             fourthSensorId: configuration.fourthSensor?.id,
-            pressResult: WidgetPressStore.lastResult(now: now)
+            pressResult: WidgetPressStore.lastResult(now: now),
+            refreshState: DeviceSensors.refreshState()
         )
     }
 
