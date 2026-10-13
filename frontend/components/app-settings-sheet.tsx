@@ -2,6 +2,7 @@
 
 import { Bell, ChevronRight, LogOut, RotateCcw, X } from "lucide-react";
 import { APP_VERSION } from "@/lib/app-version";
+import { WidgetRefreshRow } from "@/components/widget-refresh-row";
 
 interface AppSettingsSheetProps {
   open: boolean;
@@ -91,6 +92,8 @@ export function AppSettingsSheet({
             </span>
           </span>
         </button>
+
+        <WidgetRefreshRow />
 
         <button
           type="button"

@@ -8,6 +8,7 @@ vi.mock("@supabase/supabase-js", () => ({ createClient: vi.fn() }));
 
 import {
   handleNativeDeviceTokenState,
+  reissueNativeDeviceToken,
   revokeNativeDeviceTokenBestEffort,
 } from "@/lib/native-device-token";
 
@@ -48,6 +49,20 @@ describe("端末用トークンの発行（#683）", () => {
     await handleNativeDeviceTokenState({ hasToken: true });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it("再設定は持っていても発行し直し、旧トークンを失効する（#786）", async () => {
+    const postMessage = installBridge();
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "t1", token: "kdt_one" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "t2", token: "kdt_two" }) })
+      .mockResolvedValue({ ok: true });
+
+    expect(await reissueNativeDeviceToken()).toBe(true);
+    expect(await reissueNativeDeviceToken()).toBe(true);
+
+    expect(postMessage).toHaveBeenLastCalledWith({ type: "deviceToken", token: "kdt_two" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/device-tokens/t1", expect.objectContaining({ method: "DELETE" }));
   });
 
   it("発行に失敗しても渡さない", async () => {

@@ -30,6 +30,7 @@ enum DeviceSensors {
     private static let suiteName = "group.com.gucchii.kurashio"
     private static let tokenKey = "deviceToken"
     private static let fetchedAtKey = "deviceSensorsFetchedAt"
+    private static let resultKey = "deviceSensorsResult"
     private static let logger = Logger(subsystem: "com.gucchii.kurashio", category: "DeviceSensors")
 
     // MARK: - 応答（`GET /api/device/sensors`）
@@ -84,11 +85,14 @@ enum DeviceSensors {
             return
         }
         defaults?.set(token, forKey: tokenKey)
+        // 発行し直したら前回の失敗は引きずらない（設定シートの「再設定する」・#786）
+        defaults?.removeObject(forKey: resultKey)
     }
 
     static func clearToken() {
         defaults?.removeObject(forKey: tokenKey)
         defaults?.removeObject(forKey: fetchedAtKey)
+        defaults?.removeObject(forKey: resultKey)
     }
 
     static func isValid(token: String) -> Bool {
@@ -118,20 +122,46 @@ enum DeviceSensors {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return .failed }
+            guard let http = response as? HTTPURLResponse else { return recordFailure() }
             if http.statusCode == 401 {
                 // 失効したトークンを持ち続けない。アプリを開くと、Webが持っていないと知って発行し直す
                 clearToken()
                 return .unauthorized
             }
-            guard http.statusCode == 200 else { return .failed }
+            guard http.statusCode == 200 else { return recordFailure() }
             let decoded = try JSONDecoder().decode(Response.self, from: data)
             defaults?.set(now.timeIntervalSince1970, forKey: fetchedAtKey)
+            defaults?.set("ok", forKey: resultKey)
             return .ok(decoded)
         } catch {
             logger.error("センサーを取得できない: \(error.localizedDescription, privacy: .public)")
-            return .failed
+            return recordFailure()
         }
+    }
+
+    /// 取れなかったことを残す。トークンは消さない（次の機会に取り直す）。ウィジェット・設定シートが理由を出すのに使う
+    private static func recordFailure() -> FetchResult {
+        defaults?.set("failed", forKey: resultKey)
+        return .failed
+    }
+
+    // MARK: - 自動更新の状態（#786）
+
+    /// 閉じている間の自動更新が働いているか。ウィジェットの下端と、アプリの設定シートに出す。
+    /// 表示するのは iPhone（ウィジェット）側の結果だけで、Watch は別端末なので読まない
+    enum RefreshState: Equatable {
+        /// トークンが無い（未発行・ログアウト・401で捨てた）。自分では更新を要求しない
+        case off
+        /// 取得は成功している。`lastFetched` は最後に成功した時刻（まだ無ければ nil）
+        case active(lastFetched: Date?)
+        /// 直近の取得が失敗した。次の機会に取り直す
+        case failed(lastFetched: Date?)
+    }
+
+    static func refreshState() -> RefreshState {
+        guard loadToken() != nil else { return .off }
+        let last = (defaults?.object(forKey: fetchedAtKey) as? Double).map { Date(timeIntervalSince1970: $0) }
+        return defaults?.string(forKey: resultKey) == "failed" ? .failed(lastFetched: last) : .active(lastFetched: last)
     }
 
     /// 次に取りにいく時刻（Timeline の `.after` に渡す）。トークンが無いときは nil（自分では要求しない）

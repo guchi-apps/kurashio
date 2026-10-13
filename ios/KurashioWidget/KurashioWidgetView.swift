@@ -13,19 +13,19 @@ struct KurashioWidgetView: View {
             if family == .systemLarge {
                 LargeContentView(
                     snapshot: snapshot, reading: reading, pressResult: entry.pressResult,
-                    updatedText: MeasuredTimeLabel.text(for: [reading], now: entry.date)
+                    updatedText: UpdateNote.make(MeasuredTimeLabel.text(for: [reading], now: entry.date), state: entry.refreshState)
                 )
             } else if family == .systemMedium {
                 let readings = entry.mediumReadings
-                MediumContentView(readings: readings, updatedText: MeasuredTimeLabel.text(for: readings, now: entry.date))
+                MediumContentView(readings: readings, updatedText: UpdateNote.make(MeasuredTimeLabel.text(for: readings, now: entry.date), state: entry.refreshState))
             } else {
                 if let second = entry.secondReading {
                     SmallDualContentView(
                         first: reading, second: second,
-                        updatedText: MeasuredTimeLabel.text(for: [reading, second], now: entry.date)
+                        updatedText: UpdateNote.make(MeasuredTimeLabel.text(for: [reading, second], now: entry.date), state: entry.refreshState)
                     )
                 } else {
-                    SmallContentView(reading: reading, updatedText: MeasuredTimeLabel.text(for: [reading], now: entry.date))
+                    SmallContentView(reading: reading, updatedText: UpdateNote.make(MeasuredTimeLabel.text(for: [reading], now: entry.date), state: entry.refreshState))
                 }
             }
         } else {
@@ -144,16 +144,35 @@ enum MeasuredTimeLabel {
     }
 }
 
+/// 下端に出す1行（#745・#786）。通常は取得時刻、閉じている間の自動更新が働いていないときは理由に差し替える
+struct UpdateNote: Equatable {
+    let text: String
+    /// 自動更新が働いていない（トークン無し・直近の取得が失敗）。色を変えて気付かせる
+    var isWarning = false
+
+    static func make(_ measured: String?, state: DeviceSensors.RefreshState) -> UpdateNote? {
+        switch state {
+        case .active:
+            return measured.map { UpdateNote(text: $0) }
+        case .off:
+            return UpdateNote(text: "自動更新オフ・アプリを開く", isWarning: true)
+        case .failed:
+            return UpdateNote(text: measured.map { "更新できません \($0)" } ?? "更新できません", isWarning: true)
+        }
+    }
+}
+
 /// 最下部の右寄せ9pt。既存の文字サイズは変えず、余白に足す
 private struct MeasuredTimeNote: View {
-    let text: String?
+    let text: UpdateNote?
 
     var body: some View {
         if let text {
-            Text(text)
+            Text(text.text)
                 .font(.system(size: 9))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(text.isWarning ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
@@ -176,7 +195,7 @@ private struct MessageView: View {
 /// Small（155×155pt相当）: 室温・湿度の2項目だけに絞る
 private struct SmallContentView: View {
     let reading: SharedWidgetSnapshot.RoomReading
-    var updatedText: String? = nil
+    var updatedText: UpdateNote? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -219,7 +238,7 @@ private struct SmallContentView: View {
 private struct SmallDualContentView: View {
     let first: SharedWidgetSnapshot.RoomReading
     let second: SharedWidgetSnapshot.RoomReading
-    var updatedText: String? = nil
+    var updatedText: UpdateNote? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -237,7 +256,7 @@ private struct SmallDualContentView: View {
 /// Medium（329×155pt相当）: 最大4地点を2×2で並べる（#614）。1台は大きく、2台は左右、3〜4台は2×2
 private struct MediumContentView: View {
     let readings: [SharedWidgetSnapshot.RoomReading]
-    var updatedText: String? = nil
+    var updatedText: UpdateNote? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -354,7 +373,7 @@ private struct LargeContentView: View {
     let snapshot: SharedWidgetSnapshot.Snapshot
     let reading: SharedWidgetSnapshot.RoomReading
     let pressResult: WidgetPressStore.Result?
-    var updatedText: String? = nil
+    var updatedText: UpdateNote? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
