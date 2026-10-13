@@ -249,6 +249,13 @@ export const NATIVE_DEVICE_TOKEN_STATE_EVENT = "myroom-native-device-token-state
 export interface NativeDeviceTokenState {
   /** アプリがトークンを持っているか。false ならWebが発行して渡す */
   hasToken: boolean;
+  /**
+   * 閉じている間の自動更新の状態（#786）。off＝トークン無し、active＝動いている、failed＝直近の取得が失敗。
+   * 古いアプリは送らないので無いことがある
+   */
+  status?: "off" | "active" | "failed";
+  /** 最後にセンサーを取れた時刻（epoch秒）。まだ無ければ null */
+  fetchedAt?: number | null;
 }
 
 /** アプリへ、トークンの有無を問い合わせる（返事は {@link NATIVE_DEVICE_TOKEN_STATE_EVENT}）。アプリの外では何もしない */

@@ -53,8 +53,11 @@ let issuing = false;
  * アプリがトークンを持っていないとき（初回・再インストール・端末が失効を検知した）に発行して渡す。
  * 持っているときは何もしない（ログインのたびに増やさない）。失敗は次の起動・状態更新に任せる。
  */
-export async function handleNativeDeviceTokenState(state: NativeDeviceTokenState): Promise<void> {
-  if (state.hasToken || issuing) return;
+export async function handleNativeDeviceTokenState(
+  state: NativeDeviceTokenState,
+  options: { force?: boolean } = {}
+): Promise<boolean> {
+  if ((state.hasToken && !options.force) || issuing) return false;
   issuing = true;
   try {
     const previousId = getStoredTokenId();
@@ -63,18 +66,26 @@ export async function handleNativeDeviceTokenState(state: NativeDeviceTokenState
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
       body: JSON.stringify({ label: TOKEN_LABEL }),
     });
-    if (!res.ok) return;
+    if (!res.ok) return false;
     const issued = (await res.json()) as { id?: string; token?: string };
-    if (!issued.id || !issued.token) return;
-    if (!sendNativeDeviceToken(issued.token)) return;
+    if (!issued.id || !issued.token) return false;
+    if (!sendNativeDeviceToken(issued.token)) return false;
     setStoredTokenId(issued.id);
     // 端末が捨てた古いトークンはサーバーに残るので、分かる範囲で失効しておく
+    // （上限10件を超えると古い順に失効するため、再設定を重ねても他の端末のトークンを巻き込まない）
     if (previousId && previousId !== issued.id) await revokeToken(previousId).catch(() => {});
+    return true;
   } catch {
     // 次回の起動・状態更新に任せる（利用者に見せるエラーは無い）
+    return false;
   } finally {
     issuing = false;
   }
+}
+
+/** 設定シートの「再設定する」（#786）。持っていても発行し直す。成功したかを返す */
+export function reissueNativeDeviceToken(): Promise<boolean> {
+  return handleNativeDeviceTokenState({ hasToken: false }, { force: true });
 }
 
 /**
