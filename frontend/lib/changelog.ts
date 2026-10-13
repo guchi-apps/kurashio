@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.43.0",
+    date: "2026-10-13",
+    changes: [
+      "iOSアプリの設定画面に「ウィジェットの自動更新」の状態が表示されるようになりました。自動更新が有効か、未設定か、失敗しているかと、最後に取得できた時刻を確認できます。未設定や失敗のときは「再設定する」ボタンで、その場で復旧できます。ウィジェット側にも更新状態が分かる表示を追加しました。",
+    ],
+  },
+  {
     version: "4.42.3",
     date: "2026-10-12",
     changes: [
