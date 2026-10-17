@@ -21,6 +21,18 @@ on:
         type: choice
         default: auto
         options: [auto, patch, minor, major]
+      # 新方式（候補作成→公開準備→本番反映）の起動入口。issue-deckの画面から渡る
+      # （guchi-apps/issue-deck#4604）。未指定（空）なら従来どおりの動き。
+      candidate_request:
+        description: "候補作成の依頼（issue-deckが渡す。手動実行では空のまま）"
+        required: false
+        type: string
+        default: ""
+      finalize_request:
+        description: "公開準備の依頼（issue-deckが渡す。手動実行では空のまま）"
+        required: false
+        type: string
+        default: ""
   # バンプPRがdevelopへマージされバージョンが変わったときに再起動して、develop→mainのPRを
   # 自動作成する。通常のフィーチャーpushでは変わらないため起動しない。
   push:
@@ -34,11 +46,13 @@ concurrency:
 
 jobs:
   release:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-release-develop-to-main.yml@workflows/v50
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-release-develop-to-main.yml@workflows/v52
     with:
       # pushトリガー（バンプPRのマージ）で起動したときは`inputs`自体が無いため空文字を渡す。
       # そちらの実行はdevelop→mainのPR作成だけを行い、上げ幅を使わない。
       bump-kind: ${{ github.event_name == 'workflow_dispatch' && inputs.bump_kind || '' }}
+      candidate-request: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_request || '' }}
+      finalize-request: ${{ github.event_name == 'workflow_dispatch' && inputs.finalize_request || '' }}
       # ルートのpackage.jsonはバージョン管理用scriptだけで version を持たない。実体は
       # frontend/package.json（deploy.yml も ./frontend/package.json を読む）。
       version-file: frontend/package.json
