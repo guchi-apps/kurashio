@@ -31,7 +31,7 @@ MYROOM_API_URL=https://myroom.gucchii.com/api/sensor
 GitHub Secret（`INTERNAL_API_KEY`・`INTERNAL_CONTROL_API_KEY` 等）を追加・更新しても、本番VPSの `.env` は自動では書き換わらない。
 
 `.env` を書いているのは `Deploy to Production`（`.github/workflows/deploy.yml`）の
-`Restart Backend Service` ステップにある `sync_env_var` で、**これはデプロイのときにしか走らない**。
+`Send environment variables` ステップが送った値を、VPS の `app-deploy-gate` が書き込む処理で（#803）、**これはデプロイのときにしか走らない**。
 つまり値が `.env` に入るのは「Secret を登録した**後**に走ったデプロイ」からで、
 登録より前のデプロイが最後のままなら本番のプロセスには入っていない。
 

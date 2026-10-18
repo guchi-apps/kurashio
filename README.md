@@ -1041,7 +1041,7 @@ cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/myroom --k
 
 | フィールド名 | 内容 |
 |-------------|------|
-| `host` | サーバーのホスト名または IP（GitHub Actions の SSH / rsync 用） |
+| `host` | サーバーのホスト名または IP（GitHub Actions の SSH 用） |
 | `username` | SSH ユーザー名 |
 | `ssh-port` | SSH ポート番号 |
 
@@ -1101,7 +1101,7 @@ python3 /tmp/virtualenv.pyz venv
 
 #### 1-4. 本番サーバーの `.env`
 
-rsync では `.env` を転送しません。サーバー上の `.env` には、デプロイで同期しない設定も残します。
+配布物には `.env` を含めません。gate はデプロイで送った変数の行だけを更新するので、サーバー上の `.env` には、デプロイで同期しない設定も残ります。
 
 | 環境変数 | 管理方法 |
 |----------|----------|
@@ -1139,10 +1139,10 @@ rsync では `.env` を転送しません。サーバー上の `.env` には、�
 
 1. `frontend/package.json` のバージョンから Git タグ（`v*`）を作成
 2. フロントエンドのビルド（`npm run build` → `frontend/out` に静的出力）
-3. ファイルの転送 (`rsync`)
-4. GitHub の secret / variable から `SUPABASE_URL` / `ALLOWED_GOOGLE_EMAILS` / `SENSOR_WEBHOOK_URL` / `LOGIN_WEBHOOK_URL` / `GARBAGE_NOTION_*` / `CLEANING_NOTION_*` / `INTERNAL_API_KEY` / `INTERNAL_CONTROL_API_KEY` / DB 接続情報をサーバー `.env` に同期（対応は「1-4. 本番サーバーの `.env`」の表）
-5. DB マイグレーション (`migrate_db.py`)
-6. バックエンドの依存関係更新と PM2 による再起動（`pm2 restart` では cwd が変わらないため、毎回 `delete` → `start`）
+3. 配布物（tar.gz）の作成と、VPS の `app-deploy-gate` への転送（`upload`）。鍵はこのアプリ専用の `SSH_PRIVATE_KEY`（#803）
+4. GitHub の secret / variable から `SUPABASE_URL` / `SENSOR_WEBHOOK_URL` / `LOGIN_WEBHOOK_URL` / `GARBAGE_NOTION_*` / `CLEANING_NOTION_*` / `INTERNAL_API_KEY` / `INTERNAL_CONTROL_API_KEY` / DB 接続情報などを gate へ送り（`env`）、gate がサーバー `.env` に同期（対応は「1-4. 本番サーバーの `.env`」の表）
+5. gate が置き場（`/home/github-user/apps/myroom`）へ展開し、配布物の `deploy/gate-install.sh` が venv の用意・依存関係の更新・DB マイグレーション（`migrate_db.py`）・PM2 による再起動（`pm2 restart` では cwd が変わらないため、毎回 `delete` → `start`）を行う（`deploy`）
+6. gate が `127.0.0.1:8000/api/app-version` の `sha` とデプロイしたコミットの一致を確かめる
 7. **デプロイ成功後** GitHub Release を作成
 8. CI 用 Webhook へデプロイ・リリース結果を Signaly 通知
 
