@@ -62,6 +62,8 @@ jobs:
     # SUPABASE_* はorganizationの共通値。
     #
     # このブロックは scripts/generate-workflow-env-block.sh で生成する（guchi-apps/issue-deck#1307）。
+    # SSH_PRIVATE_KEY はorganization共通の SERVER_SSH_PRIVATE_KEY ではなく、このアプリ専用の鍵（#803）。
+    # TARGET_DIR は app-deploy-gate が置き場を固定するため使わなくなった。
     env:
       DB_ADMIN_PASSWORD: ${{ secrets.SHARED_DB_MIGRATE_PASSWORD }}
       DB_ADMIN_USER: ${{ secrets.SHARED_DB_MIGRATE_USER }}
@@ -72,7 +74,7 @@ jobs:
       HOST: ${{ secrets.SERVER_HOST }}
       SHARED_TOKEN_API_URL: ${{ vars.APP_BASE_URL }}
       SSH_PORT: ${{ secrets.SERVER_SSH_PORT }}
-      SSH_PRIVATE_KEY: ${{ secrets.SERVER_SSH_PRIVATE_KEY }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
       SUPABASE_URL: ${{ vars.SUPABASE_PROJECT_URL }}
       USERNAME: ${{ secrets.SERVER_USERNAME }}
@@ -91,7 +93,6 @@ jobs:
       SENSOR_WEBHOOK_URL: ${{ secrets.SENSOR_WEBHOOK_URL }}
       SHARED_TOKEN_API_SECRET: ${{ secrets.SHARED_TOKEN_API_SECRET }}
       SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
-      TARGET_DIR: ${{ secrets.TARGET_DIR }}
       VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
       VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
       VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
@@ -120,6 +121,54 @@ jobs:
           npm ci
           npm run build
 
+      # 配布物（tar.gz）を作る。以前の rsync と同じものを除外する（.git・.github・.env・venv・
+      # __pycache__・*.pyc・frontend の node_modules / .next / .env）。
+      #
+      # **frontend/out/_next/ を先頭に格納する（#450）。** tar は格納順に展開するため、こうすると
+      # out/index.html・out/version.json より先にJS/CSSのチャンクが置かれる。逆だと、その数秒に開いた
+      # 画面（更新検知の自動リロードを含む）がまだ無いチャンクを読みに行き「Application error」になる。
+      # frontend/out/ は deploy/gate-keep で前回配布物の削除から外し、上書きする（以前の rsync と同じ）。
+      # 古いチャンクが残って開いたままの古い画面を壊さず、前回の HTML を先に消さないのでページが無い時間もできない。
+      #
+      # app-deploy-gate はシンボリックリンク・特殊ファイルを含む配布物を拒否するため、ここでも確かめる。
+      - name: Build deploy archive
+        run: |
+          set -euo pipefail
+          test -d frontend/out/_next
+          archive="${RUNNER_TEMP}/deploy.tar"
+          rm -f "$archive" "${archive}.gz"
+          tar -cf "$archive" frontend/out/_next
+          tar -rf "$archive" \
+            --exclude='./frontend/out/_next' \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.env' \
+            --exclude='venv' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='frontend/node_modules' \
+            --exclude='frontend/.next' \
+            --exclude='frontend/.env' \
+            --exclude='frontend-react/node_modules' \
+            --exclude='frontend-react/.env' \
+            .
+          gzip -n "$archive"
+          # head や grep -q で途中から読むのをやめると、pipefail のもとで tar が SIGPIPE で落ちる。
+          # 一覧は最後まで読んでから判定する。
+          bad="$(tar -tvzf "${archive}.gz" | awk '$1 !~ /^[-d]/')"
+          if [ -n "$bad" ]; then
+            echo "::error::配布物にシンボリックリンクまたは特殊ファイルが含まれています（app-deploy-gate が拒否します）"
+            printf '%s\n' "$bad"
+            exit 1
+          fi
+          first="$(tar -tzf "${archive}.gz" | awk 'NR == 1')"
+          case "$first" in
+            frontend/out/_next*) ;;
+            *) echo "::error::配布物の先頭が frontend/out/_next ではありません（${first}）"; exit 1 ;;
+          esac
+          echo "DEPLOY_ARCHIVE=${archive}.gz" >> "$GITHUB_ENV"
+          ls -l "${archive}.gz"
+
       - name: Install SSH Key
         uses: shimataro/ssh-key-action@v2
         with:
@@ -130,36 +179,16 @@ jobs:
       - name: Add Known Hosts
         run: ssh-keyscan -p "${SSH_PORT}" -H "${HOST}" >> ~/.ssh/known_hosts
 
-      - name: Deploy with rsync
-        run: |
-          ssh -p "${SSH_PORT}" -o StrictHostKeyChecking=no "${USERNAME}@${HOST}" "mkdir -p ${TARGET_DIR}/frontend/out"
+      # **VPSのgate（/usr/local/sbin/app-deploy-gate。guchi-apps/vps#275・#305）へ渡す**（#803）。
+      # 鍵はこのアプリ専用で、VPSのauthorized_keysのcommand=がgateのアプリ名（myroom。置き場
+      # /home/github-user/apps/myroom）を固定する。任意のシェルコマンドは実行できず、upload・env・deployの
+      # 3語だけが通る。旧配布物の削除（deploy/gate-keep に書いた frontend/out/ は除く）・展開・.env更新はgateが行い、
+      # venv・pip install・migrate_db.py・pm2 の再起動は配布物の deploy/gate-install.sh が行う。
+      # 稼働版の照合（.env の APP_COMMIT_SHA と 127.0.0.1:8000/api/app-version の sha）もgateが行う。
+      - name: Upload archive
+        run: ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" upload < "${DEPLOY_ARCHIVE}"
 
-          # 先に JS/CSS チャンクだけを送る（#450）。rsync は同じ階層のファイルを
-          # サブディレクトリの中身より先に送るため、1回で送ると out/index.html と
-          # out/version.json が out/_next/ より先に届く。その数秒に開くと、新しいHTML
-          # （または更新を検知した自動リロード）がまだ無いチャンクを読みに行き、
-          # 「Application error」の白い画面になる。古いチャンクは消さないので、
-          # 先に置いても開いている古い画面は壊れない
-          rsync -rlDz \
-            -e "ssh -p ${SSH_PORT} -o StrictHostKeyChecking=no" \
-            ./frontend/out/_next/ "${USERNAME}@${HOST}:${TARGET_DIR}/frontend/out/_next/"
-
-          rsync -rlDvz \
-            -e "ssh -p ${SSH_PORT} -o StrictHostKeyChecking=no" \
-            --exclude '.git' \
-            --exclude '.github' \
-            --exclude '.env' \
-            --exclude 'venv' \
-            --exclude '__pycache__' \
-            --exclude '*.pyc' \
-            --exclude 'frontend/node_modules' \
-            --exclude 'frontend/.next' \
-            --exclude 'frontend/.env' \
-            --exclude 'frontend-react/node_modules' \
-            --exclude 'frontend-react/.env' \
-            ./ "${USERNAME}@${HOST}:${TARGET_DIR}/"
-
-      - name: Restart Backend Service
+      - name: Send environment variables
         env:
           SUPABASE_URL: ${{ env.SUPABASE_URL }}
           # Auth サーバー（/auth/v1/user）への問い合わせに使う公開キー（#724）。フロントと同じ値で秘密ではない。
@@ -194,6 +223,7 @@ jobs:
           VAPID_SUBJECT: ${{ env.VAPID_SUBJECT }}
           # iOSアプリ（ios/・#526）向けのAPNs通知（#527）。空でもデプロイは通り、
           # apns_notify.is_configured() が false のまま機能全体が無効になるだけ。
+          # APNS_AUTH_KEY は .p8 の中身を base64 で1行にした値（apns_notify._auth_key_pem() が戻す）。
           APNS_AUTH_KEY: ${{ env.APNS_AUTH_KEY }}
           APNS_KEY_ID: ${{ env.APNS_KEY_ID }}
           APNS_TEAM_ID: ${{ env.APNS_TEAM_ID }}
@@ -209,154 +239,79 @@ jobs:
           COLLECTOR_API_KEY: ${{ env.COLLECTOR_API_KEY }}
           # マイグレーション専用ユーザー（DDL権限あり）。アプリ用ユーザーはCRUD権限しか
           # 持たず、テーブルを追加するマイグレーションが CREATE command denied で落ちる（#193）。
+          # .env へは書かず、MIGRATE_DATABASE_URL に組み立てて送る（gateは .env へ書かずに
+          # deploy/gate-install.sh へだけ渡す）。
           DB_ADMIN_USER: ${{ env.DB_ADMIN_USER }}
           DB_ADMIN_PASSWORD: ${{ env.DB_ADMIN_PASSWORD }}
           # デプロイしたコミット（#798）。.env へ書いてバックエンドの /api/app-version が返し、
-          # 下のヘルスチェックで稼働版がこのコミットと一致するまで成功にしない。
+          # gate が稼働版がこのコミットと一致するまで成功にしない（guchi-apps/vps#298）。
           APP_COMMIT_SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
           if ! printf '%s' "$APP_COMMIT_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
             echo "::error::APP_COMMIT_SHA が40桁のコミットSHAではありません: '${APP_COMMIT_SHA}'"
             exit 1
           fi
-          b64() { printf '%s' "$1" | base64 -w 0; }
-          SUPABASE_URL_B64=$(b64 "$SUPABASE_URL")
-          SUPABASE_PUBLISHABLE_KEY_B64=$(b64 "$SUPABASE_PUBLISHABLE_KEY")
-          AIRCON_EMAIL_B64=$(b64 "$AIRCON_EMAIL")
-          AIRCON_PASSWORD_B64=$(b64 "$AIRCON_PASSWORD")
-          SENSOR_WEBHOOK_URL_B64=$(b64 "$SENSOR_WEBHOOK_URL")
-          LOGIN_WEBHOOK_URL_B64=$(b64 "$LOGIN_WEBHOOK_URL")
-          GARBAGE_NOTION_TOKEN_B64=$(b64 "$GARBAGE_NOTION_TOKEN")
-          GARBAGE_NOTION_DATA_SOURCE_ID_B64=$(b64 "$GARBAGE_NOTION_DATA_SOURCE_ID")
-          CLEANING_NOTION_TOKEN_B64=$(b64 "$CLEANING_NOTION_TOKEN")
-          CLEANING_NOTION_DATA_SOURCE_ID_B64=$(b64 "$CLEANING_NOTION_DATA_SOURCE_ID")
-          INTERNAL_API_KEY_B64=$(b64 "$INTERNAL_API_KEY")
-          INTERNAL_CONTROL_API_KEY_B64=$(b64 "$INTERNAL_CONTROL_API_KEY")
-          SHARED_TOKEN_API_URL_B64=$(b64 "$SHARED_TOKEN_API_URL")
-          SHARED_TOKEN_API_SECRET_B64=$(b64 "$SHARED_TOKEN_API_SECRET")
-          NATURE_REMO_TOKEN_B64=$(b64 "$NATURE_REMO_TOKEN")
-          VAPID_PRIVATE_KEY_B64=$(b64 "$VAPID_PRIVATE_KEY")
-          VAPID_PUBLIC_KEY_B64=$(b64 "$VAPID_PUBLIC_KEY")
-          VAPID_SUBJECT_B64=$(b64 "$VAPID_SUBJECT")
-          APNS_AUTH_KEY_B64=$(b64 "$APNS_AUTH_KEY")
-          APNS_KEY_ID_B64=$(b64 "$APNS_KEY_ID")
-          APNS_TEAM_ID_B64=$(b64 "$APNS_TEAM_ID")
-          APNS_BUNDLE_ID_B64=$(b64 "$APNS_BUNDLE_ID")
-          APNS_ENVIRONMENT_B64=$(b64 "$APNS_ENVIRONMENT")
-          DB_USER_B64=$(b64 "$DB_USER")
-          DB_PASSWORD_B64=$(b64 "$DB_PASSWORD")
-          DB_HOST_B64=$(b64 "$DB_HOST")
-          DB_PORT_B64=$(b64 "$DB_PORT")
-          DB_NAME_B64=$(b64 "$DB_NAME")
-          COLLECTOR_API_KEY_B64=$(b64 "$COLLECTOR_API_KEY")
-          DB_MOCK_B64=$(b64 "false")
-          DB_ADMIN_USER_B64=$(b64 "$DB_ADMIN_USER")
-          DB_ADMIN_PASSWORD_B64=$(b64 "$DB_ADMIN_PASSWORD")
-          APP_COMMIT_SHA_B64=$(b64 "$APP_COMMIT_SHA")
-          ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" bash -s << EOF
-            set -e
-            echo "Current directory: \$(pwd)"
-            cd ${TARGET_DIR}
-            echo "Working directory: \$(pwd)"
+          # マイグレーション専用ユーザーの接続先。ユーザー・パスワードはURLエンコードして埋める
+          # （deploy/gate-install.sh がデコードする）。専用ユーザーが未設定なら空のまま送り、
+          # 従来どおり migrate_db.py がアプリ用ユーザーへフォールバックする。
+          MIGRATE_DATABASE_URL=""
+          if [ -n "${DB_ADMIN_USER}" ]; then
+            enc() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$1"; }
+            MIGRATE_DATABASE_URL="mysql://$(enc "$DB_ADMIN_USER"):$(enc "$DB_ADMIN_PASSWORD")@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+          fi
+          # gateは標準入力を1行1変数（KEY=VALUE）で受けるため、改行を含む値は送れない。
+          for name in SUPABASE_URL SUPABASE_PUBLISHABLE_KEY AIRCON_EMAIL AIRCON_PASSWORD SENSOR_WEBHOOK_URL \
+            LOGIN_WEBHOOK_URL GARBAGE_NOTION_TOKEN GARBAGE_NOTION_DATA_SOURCE_ID CLEANING_NOTION_TOKEN \
+            CLEANING_NOTION_DATA_SOURCE_ID INTERNAL_API_KEY INTERNAL_CONTROL_API_KEY SHARED_TOKEN_API_URL \
+            SHARED_TOKEN_API_SECRET NATURE_REMO_TOKEN VAPID_PRIVATE_KEY VAPID_PUBLIC_KEY VAPID_SUBJECT \
+            APNS_AUTH_KEY APNS_KEY_ID APNS_TEAM_ID APNS_BUNDLE_ID APNS_ENVIRONMENT DB_USER DB_PASSWORD \
+            DB_HOST DB_PORT DB_NAME COLLECTOR_API_KEY MIGRATE_DATABASE_URL APP_COMMIT_SHA; do
+            case "${!name}" in
+              *$'\n'*|*$'\r'*) echo "::error::${name} が改行を含むためgateへ送れません（1行の値にしてください）"; exit 1 ;;
+            esac
+          done
+          # 待受ポートはシークレットではなく設定値として平文で持つ（ecosystem.config.js の 8000 と同じ）。
+          # gate は PORT を必須にし、稼働版の照合で 127.0.0.1:<PORT>/api/app-version を叩く。
+          {
+            printf '%s\n' "NODE_ENV=production" "PORT=8000"
+            printf '%s\n' "APP_COMMIT_SHA=${APP_COMMIT_SHA}"
+            printf '%s\n' "MIGRATE_DATABASE_URL=${MIGRATE_DATABASE_URL}"
+            printf '%s\n' "SUPABASE_URL=${SUPABASE_URL}"
+            printf '%s\n' "SUPABASE_PUBLISHABLE_KEY=${SUPABASE_PUBLISHABLE_KEY}"
+            printf '%s\n' "AIRCON_EMAIL=${AIRCON_EMAIL}"
+            printf '%s\n' "AIRCON_PASSWORD=${AIRCON_PASSWORD}"
+            printf '%s\n' "SENSOR_WEBHOOK_URL=${SENSOR_WEBHOOK_URL}"
+            printf '%s\n' "LOGIN_WEBHOOK_URL=${LOGIN_WEBHOOK_URL}"
+            printf '%s\n' "GARBAGE_NOTION_TOKEN=${GARBAGE_NOTION_TOKEN}"
+            printf '%s\n' "GARBAGE_NOTION_DATA_SOURCE_ID=${GARBAGE_NOTION_DATA_SOURCE_ID}"
+            printf '%s\n' "CLEANING_NOTION_TOKEN=${CLEANING_NOTION_TOKEN}"
+            printf '%s\n' "CLEANING_NOTION_DATA_SOURCE_ID=${CLEANING_NOTION_DATA_SOURCE_ID}"
+            printf '%s\n' "INTERNAL_API_KEY=${INTERNAL_API_KEY}"
+            printf '%s\n' "INTERNAL_CONTROL_API_KEY=${INTERNAL_CONTROL_API_KEY}"
+            printf '%s\n' "SHARED_TOKEN_API_URL=${SHARED_TOKEN_API_URL}"
+            printf '%s\n' "SHARED_TOKEN_API_SECRET=${SHARED_TOKEN_API_SECRET}"
+            printf '%s\n' "NATURE_REMO_TOKEN=${NATURE_REMO_TOKEN}"
+            printf '%s\n' "VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}"
+            printf '%s\n' "VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}"
+            printf '%s\n' "VAPID_SUBJECT=${VAPID_SUBJECT}"
+            printf '%s\n' "APNS_AUTH_KEY=${APNS_AUTH_KEY}"
+            printf '%s\n' "APNS_KEY_ID=${APNS_KEY_ID}"
+            printf '%s\n' "APNS_TEAM_ID=${APNS_TEAM_ID}"
+            printf '%s\n' "APNS_BUNDLE_ID=${APNS_BUNDLE_ID}"
+            printf '%s\n' "APNS_ENVIRONMENT=${APNS_ENVIRONMENT}"
+            printf '%s\n' "DB_USER=${DB_USER}"
+            printf '%s\n' "DB_PASSWORD=${DB_PASSWORD}"
+            printf '%s\n' "DB_HOST=${DB_HOST}"
+            printf '%s\n' "DB_PORT=${DB_PORT}"
+            printf '%s\n' "DB_NAME=${DB_NAME}"
+            printf '%s\n' "COLLECTOR_API_KEY=${COLLECTOR_API_KEY}"
+            # 本番は常に実DB（.env に固定で書く）
+            printf '%s\n' "DB_MOCK=false"
+          } | ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" env
 
-            sync_env_var() {
-              key="\$1"
-              value="\$(printf '%s' "\$2" | base64 -d)"
-              touch .env
-              if grep -q "^\${key}=" .env; then
-                grep -v "^\${key}=" .env > .env.tmp && mv .env.tmp .env
-              fi
-              printf '%s=%s\n' "\$key" "\$value" >> .env
-            }
-
-            sync_env_var SUPABASE_URL '${SUPABASE_URL_B64}'
-            sync_env_var SUPABASE_PUBLISHABLE_KEY '${SUPABASE_PUBLISHABLE_KEY_B64}'
-            sync_env_var AIRCON_EMAIL '${AIRCON_EMAIL_B64}'
-            sync_env_var AIRCON_PASSWORD '${AIRCON_PASSWORD_B64}'
-            sync_env_var SENSOR_WEBHOOK_URL '${SENSOR_WEBHOOK_URL_B64}'
-            sync_env_var LOGIN_WEBHOOK_URL '${LOGIN_WEBHOOK_URL_B64}'
-            sync_env_var GARBAGE_NOTION_TOKEN '${GARBAGE_NOTION_TOKEN_B64}'
-            sync_env_var GARBAGE_NOTION_DATA_SOURCE_ID '${GARBAGE_NOTION_DATA_SOURCE_ID_B64}'
-            sync_env_var CLEANING_NOTION_TOKEN '${CLEANING_NOTION_TOKEN_B64}'
-            sync_env_var CLEANING_NOTION_DATA_SOURCE_ID '${CLEANING_NOTION_DATA_SOURCE_ID_B64}'
-            sync_env_var INTERNAL_API_KEY '${INTERNAL_API_KEY_B64}'
-            sync_env_var INTERNAL_CONTROL_API_KEY '${INTERNAL_CONTROL_API_KEY_B64}'
-            sync_env_var SHARED_TOKEN_API_URL '${SHARED_TOKEN_API_URL_B64}'
-            sync_env_var SHARED_TOKEN_API_SECRET '${SHARED_TOKEN_API_SECRET_B64}'
-            sync_env_var NATURE_REMO_TOKEN '${NATURE_REMO_TOKEN_B64}'
-            sync_env_var VAPID_PRIVATE_KEY '${VAPID_PRIVATE_KEY_B64}'
-            sync_env_var VAPID_PUBLIC_KEY '${VAPID_PUBLIC_KEY_B64}'
-            sync_env_var VAPID_SUBJECT '${VAPID_SUBJECT_B64}'
-            sync_env_var APNS_AUTH_KEY '${APNS_AUTH_KEY_B64}'
-            sync_env_var APNS_KEY_ID '${APNS_KEY_ID_B64}'
-            sync_env_var APNS_TEAM_ID '${APNS_TEAM_ID_B64}'
-            sync_env_var APNS_BUNDLE_ID '${APNS_BUNDLE_ID_B64}'
-            sync_env_var APNS_ENVIRONMENT '${APNS_ENVIRONMENT_B64}'
-            sync_env_var DB_USER '${DB_USER_B64}'
-            sync_env_var DB_PASSWORD '${DB_PASSWORD_B64}'
-            sync_env_var DB_HOST '${DB_HOST_B64}'
-            sync_env_var DB_PORT '${DB_PORT_B64}'
-            sync_env_var DB_NAME '${DB_NAME_B64}'
-            sync_env_var COLLECTOR_API_KEY '${COLLECTOR_API_KEY_B64}'
-            sync_env_var DB_MOCK '${DB_MOCK_B64}'
-            sync_env_var APP_COMMIT_SHA '${APP_COMMIT_SHA_B64}'
-
-            bash deployment/ensure_venv.sh
-
-            echo "Ensuring pip is installed..."
-            ./venv/bin/python3 -m ensurepip || true
-
-            if ! ./venv/bin/python3 -m pip --version > /dev/null 2>&1; then
-                echo "Downloading get-pip.py..."
-                curl -sS https://bootstrap.pypa.io/get-pip.py | ./venv/bin/python3
-            fi
-
-            echo "Installing dependencies..."
-            ./venv/bin/python3 -m pip install --upgrade pip
-            ./venv/bin/python3 -m pip install -r requirements.txt
-
-            if [ -f "migrate_db.py" ]; then
-                echo "Running migrations..."
-                # DDLはマイグレーション専用ユーザーで実行する。常時稼働するバックエンドには
-                # DDL権限を渡さないため、.env には書かずこの1コマンドの間だけ環境変数で渡す。
-                # 値が空ならmigrate_db.py側でアプリ用ユーザーにフォールバックする。
-                DB_ADMIN_USER="\$(printf '%s' '${DB_ADMIN_USER_B64}' | base64 -d)" \\
-                DB_ADMIN_PASSWORD="\$(printf '%s' '${DB_ADMIN_PASSWORD_B64}' | base64 -d)" \\
-                ./venv/bin/python3 migrate_db.py
-            fi
-
-            echo "Managing PM2 process..."
-            pm2 delete myroom-backend 2>/dev/null || true
-            pm2 delete insight-backend 2>/dev/null || true
-            pm2 start ecosystem.config.js
-            pm2 save
-
-            # 起動できたかを確認してからデプロイを成功にする。固定のsleep 1回だと、
-            # 起動が間に合わないだけで赤くなる／即死していても緑で終わる（#205）。
-            # 2秒間隔で最大30回（60秒）待つ。
-            #
-            # 応答があるだけでは成功にせず、/api/app-version の sha がデプロイした
-            # コミット（APP_COMMIT_SHA）と一致するまで待つ（#798）。古いプロセスが
-            # 残って応答しているだけの状態を成功と取り違えないため。issue-deck の
-            # 新方式リリースは、この照合があることを稼働確認の証拠として読む。
-            echo "Health check (expecting sha ${APP_COMMIT_SHA})..."
-            LIVE_SHA=""
-            for i in \$(seq 1 30); do
-              LIVE_SHA="\$(curl -fsS "http://127.0.0.1:8000/api/app-version" 2>/dev/null \\
-                | ./venv/bin/python3 -c 'import json, sys; print(json.load(sys.stdin).get("sha") or "")' 2>/dev/null \\
-                || true)"
-              if [ "\$LIVE_SHA" = "${APP_COMMIT_SHA}" ]; then
-                echo "Deployment successful (running ${APP_COMMIT_SHA})."
-                exit 0
-              fi
-              sleep 2
-            done
-
-            echo "Health check failed after 60s: /api/app-version returned sha '\$LIVE_SHA', expected '${APP_COMMIT_SHA}'."
-            pm2 describe myroom-backend || true
-            pm2 logs myroom-backend --lines 50 --nostream || true
-            exit 1
-          EOF
+      - name: Deploy and restart
+        run: ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" deploy
 
   release:
     runs-on: ubuntu-latest

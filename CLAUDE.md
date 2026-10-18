@@ -114,13 +114,18 @@ envファイルに入っていない。** 別ポートで立てるなら
 
 ### デプロイ直後の「Application error」（#450）
 
-**rsync は同じ階層のファイルをサブディレクトリの中身より先に送る。** 1回の rsync で送ると
+**（#803より前の）rsync は同じ階層のファイルをサブディレクトリの中身より先に送る。** 1回の rsync で送ると
 `out/index.html`・`out/version.json` が `out/_next/` のチャンクより先に届き、その数秒に開くと
 （更新検知の自動リロードも含む）まだ無いチャンクが404になって、描画中に `Failed to load chunk ...`
 が投げられる。`app/global-error.tsx` が無かったため、Next.js 既定の英語の白い画面が出ていた。
 
-- `deploy.yml` は **`frontend/out/_next/` を先に送ってから全体を送る。** 1回にまとめ直さないこと。
-  rsync に `--delete` は付けていないので、古いチャンクは残り、開きっぱなしの古い画面も壊れない
+- `deploy.yml` は **`frontend/out/_next/` を配布物（tar）の先頭に格納する**（#803で rsync から
+  app-deploy-gate へ移した。gate は格納順に展開するので、チャンクが HTML より先に置かれる）。
+  `Build deploy archive` が先頭の要素を確かめているので、並べ直さないこと
+- **`deploy/gate-keep` に `frontend/out/` を書き、フロントの書き出しを丸ごと前回配布物の削除から外す。** gate は
+  前回の配布物のファイルを消してから展開するが、このファイルに書いたパスは消さずに上書きする（以前の rsync の
+  「`--delete` なし」と同じ）。古いチャンクが残って開きっぱなしの古い画面も壊れず、前回の `index.html` を先に
+  消さないのでページが無い時間もできない。引き換えに、削除したページの HTML も残り続ける（従来どおり）
 - `app/global-error.tsx` はチャンクの失敗なら1回だけ自動で読み込み直す（`lib/chunk-reload.ts`。
   60秒以内の2回目は読み込み直さず、再読み込みボタンを出す）。それ以外の例外もボタンの画面に倒す
 - Service Worker の画面遷移の控えは**成功した応答だけ・URLごと**に残す（以前は再起動中の 502/503 も
@@ -900,9 +905,10 @@ POST し直している（`daily_energy` は同じ `(date, source)` を上書き
 
 ## data/ 配下のファイルはデプロイで上書きされる
 
-**`deploy.yml` の rsync は `data` を除外していない。** リポジトリに含まれる
+**`deploy.yml` の配布物（tar）は `data` を除外していない。** リポジトリに含まれる
 `data/*.json`（`remote.json`・`garbage.json` など）は、デプロイのたびに**リポジトリの中身で
-本番が上書きされる**。
+本番が上書きされる**（app-deploy-gate が前回の配布物のファイルを消してから展開する。#803）。
+配布物に入っていない実行時のファイル（`.gitignore` 済みの `data/*.json` など）と `venv/`・`.env` は消されない。
 
 - **利用者が画面から書き換えるものを `data/` に置かない。** 書けたように見えても次のデプロイで消える
   （#262。`data/remote.json` は `"groups": []` のままリポジトリにあり、本番の「電気の操作」カードが
@@ -966,9 +972,10 @@ secret / variable で、1Passwordは「人が管理する唯一の正」とし�
   **後者は個人アカウントのセッションが必要**（サービスアカウントではGitHubへ書き込めない）
 - `OP_SERVICE_ACCOUNT_TOKEN` のrepository secretは残してある。使うのは上記の同期のときだけで、
   デプロイでは使わない
-- **secretの値は必ず1行に収める。** `deploy.yml`の`sync_env_var`は`printf '%s=%s\n'`で本番の
-  `.env`へ書くため、改行を含む値（PEM・秘密鍵・JSON）を入れると`.env`の書式そのものが壊れ、
-  python-dotenvが2行目以降を**別のキー**として読む（#337でVAPID秘密鍵に実際に該当した）。
+- **secretの値は必ず1行に収める。** app-deploy-gate（#803）は標準入力の`KEY=VALUE`を1行1変数で受けるため、
+  改行を含む値（PEM・秘密鍵・JSON）は送れない（`deploy.yml`の`Send environment variables`が`::error::`で止める）。
+  以前の`sync_env_var`でも`.env`の書式そのものが壊れ、
+  python-dotenvが2行目以降を**別のキー**として読んだ（#337でVAPID秘密鍵に実際に該当した）。
   複数行になる値は、base64などの1行の表現に直してから1Passwordへ入れること
 - **`provision-secret.sh --from-stdin` へ値をパイプで渡さない。** 必ずファイルへ書いて
   `< ファイル` でリダイレクトする（#343）。スクリプトは値を読んだあともstdinをそのまま
@@ -978,32 +985,45 @@ secret / variable で、1Passwordは「人が管理する唯一の正」とし�
   出すが、権限とは無関係**（`op whoami`は通る）。通常ファイル・端末・`/dev/null`がstdinなら
   opはこの解釈をしない。手順は`README.md`の「VAPID 鍵の初回登録」を参照
 
+## 本番デプロイはapp-deploy-gateを通す（#803）
+
+`deploy.yml` の `deploy` ジョブは、organization共通の `SERVER_SSH_PRIVATE_KEY`（任意のシェルを実行できる）ではなく、
+**このアプリ専用の鍵**（マニフェストの `SSH_PRIVATE_KEY`＝`op://apps/kurashio/deploy-ssh-key`）で VPS の
+`app-deploy-gate`（guchi-apps/vps#275・#305）へ入り、`upload`（`ssh … upload < deploy.tar.gz`）→
+`env`（標準入力に `KEY=VALUE` を1行1変数）→ `deploy` の3語だけを送る。**SSH先でシェルのコマンドは実行できない。**
+
+- **gate のアプリ名は `myroom`**（置き場 `/home/github-user/apps/myroom`。VPS の `authorized_keys` の `command=` が固定する）。
+  リポジトリ名（kurashio）でも PM2 のプロセス名（`myroom-backend`）でもない。`TARGET_DIR` は使わなくなった
+- 展開・前回配布物の削除・`.env` の更新は gate が行い、**venv の用意・`pip install -r requirements.txt`・
+  `migrate_db.py`・`pm2 delete myroom-backend`/`insight-backend` → `pm2 start ecosystem.config.js` → `pm2 save` は
+  配布物の `deploy/gate-install.sh` が行う**（gate はこのファイルがあると Node.js 用の手順の代わりにこれを実行する）。
+  SSH先の手順を増やすときはここへ足す。`deployment/`（設定の雛形）とは別のディレクトリ
+- **`DB_ADMIN_USER`/`DB_ADMIN_PASSWORD` は `.env` へ書かない**（#193）。ワークフローがURLエンコードして
+  `MIGRATE_DATABASE_URL`（`mysql://<user>:<pass>@<host>:<port>/<db>`）に組み立てて送り、gate は `.env` へ書かずに
+  `gate-install.sh` へだけ渡す。`gate-install.sh` がデコードして `migrate_db.py` の1コマンドの間だけ渡す。
+  専用ユーザーが未設定なら空で送り、`migrate_db.py` がアプリ用ユーザーへフォールバックする
+- `.env` へ送る値を足すときは `Send environment variables` の env・改行チェックの `for name in`・`printf` の3か所に足す。
+  `NODE_ENV=production`・`PORT=8000`（gate の必須。`ecosystem.config.js` の 8000 と揃える）・`DB_MOCK=false` は平文で送る
+- 配布物は `Build deploy archive` が tar で作る。以前の rsync と同じもの（`.git`・`.github`・`.env`・`venv`・
+  `__pycache__`・`*.pyc`・`frontend/node_modules`・`frontend/.next`）を除外し、**シンボリックリンクが入ると止める**
+  （gate が拒否するため。リポジトリの `venv/` は壊れたリンクを含むので必ず除外する）
+- gate は配布物を umask 077 で展開する。Apache はファイルを直接読まず `127.0.0.1:8000` へ転送するだけなので影響しない
+
 ## デプロイ後のヘルスチェック
 
-`deploy.yml` の `Restart Backend Service` は `pm2 save` のあとに
-`http://127.0.0.1:8000/api/health` を **2秒間隔・最大30回（60秒）** 叩き、成功したら `exit 0`、
-60秒たっても成功しなければ `pm2 describe` / `pm2 logs` を出して `exit 1` する。
-**固定の `sleep` 1回に戻さないこと**（起動が間に合わないだけで赤くなる／即死していても緑で終わる。#205）。
-
-**成功の条件は「応答がある」ではなく「稼働版がデプロイしたコミットと一致する」**（#798）。
-ヘルスチェックは `/api/health` ではなく `http://127.0.0.1:8000/api/app-version` を叩き、返る `sha` が
-`APP_COMMIT_SHA`（`${{ github.sha }}`。同じステップで `.env` へ書く）と一致するまで成功にしない。
-issue-deck の新方式リリースは、対象コミットの `deploy.yml` に `APP_COMMIT_SHA` と `/api/app-version` の
-両方が実体として現れることを「照合付き」の判定に使うため、**この照合を `/api/health` へ戻さないこと**
-（戻すと本番へ公開した候補が「稼働確認が停止（証拠未設定）」で止まる）。
+**稼働版の照合は gate が行う**（#803。それまでは `deploy.yml` の SSH 先のループが行っていた。#205・#798）。
+`.env` に `APP_COMMIT_SHA`（`${{ github.sha }}`。`Send environment variables` が送る）があると、gate は
+`deploy/gate-install.sh` の後に `http://127.0.0.1:8000/api/app-version` の `sha` が一致するまで最大60秒待ち、
+一致しなければデプロイを失敗にする。応答があるだけ（古いプロセスが残っている）では成功にならない。
+issue-deck の新方式リリースは、対象コミットの `deploy.yml` が `APP_COMMIT_SHA` を gate へ送り `deploy` を呼ぶことを
+「照合付き」の判定に使うため、**この形を崩さないこと**（崩すと本番へ公開した候補が「稼働確認が停止（証拠未設定）」で止まる）。
 
 - `/api/app-version` は認証の外で、`{"version": <frontend/package.json の version>, "sha": <APP_COMMIT_SHA または null>}`
-  を `Cache-Control: no-store` で返す（`backend/main.py`）。`frontend/package.json` はリポジトリごと rsync されるため本番にもある
-- フロント（`frontend/out`）は同じジョブの rsync で再起動より前に配り、同じバックエンドのプロセスがディスクから
-  返すため、照合はバックエンドで代表させている。rsync が失敗すればジョブはそこで止まり、照合まで進まない
-
-**このステップのヒアドキュメントは `<< EOF`（クォート無し）。** リモートで評価してほしい
-`$` はすべて `\$` でエスケープする。忘れるとGitHub Actionsのランナー側で展開され、
-リモートには展開済みの文字列が渡る（`\$(seq 1 30)` を素で書くとループが壊れる）。
-
-**リモートが実際に受け取る文字列は、ローカルで確認できる。** `run:` を取り出して
-`ssh ... bash -s <<` を `cat <<` へ差し替えて実行すれば、展開後のスクリプトがそのまま出る。
-`bash -n` に通せば構文も確認できる。
+  を `Cache-Control: no-store` で返す（`backend/main.py`）。`frontend/package.json` は配布物に入るため本番にもある
+- フロント（`frontend/out`）は同じ配布物で再起動より前に置かれ、同じバックエンドのプロセスがディスクから
+  返すため、照合はバックエンドで代表させている
+- 失敗したときの `pm2 logs` はワークフローのログには出ない（gate の外では何も実行できない）。VPS で
+  `sudo -u github-user pm2 logs myroom-backend --lines 50 --nostream` を見る
 
 ## 本番デプロイが起動しないとき
 
