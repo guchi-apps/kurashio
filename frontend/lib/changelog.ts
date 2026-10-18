@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.43.3",
+    date: "2026-10-19",
+    changes: [
+      "ウィジェットが自動更新されなくなる不具合を修正しました。",
+    ],
+  },
+  {
     version: "4.43.0",
     date: "2026-10-13",
     changes: [
