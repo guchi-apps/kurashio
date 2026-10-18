@@ -127,7 +127,8 @@ jobs:
       # **frontend/out/_next/ を先頭に格納する（#450）。** tar は格納順に展開するため、こうすると
       # out/index.html・out/version.json より先にJS/CSSのチャンクが置かれる。逆だと、その数秒に開いた
       # 画面（更新検知の自動リロードを含む）がまだ無いチャンクを読みに行き「Application error」になる。
-      # 古いチャンクは deploy/gate-keep で前回配布物の削除から外し、開いたままの古い画面を壊さない。
+      # frontend/out/ は deploy/gate-keep で前回配布物の削除から外し、上書きする（以前の rsync と同じ）。
+      # 古いチャンクが残って開いたままの古い画面を壊さず、前回の HTML を先に消さないのでページが無い時間もできない。
       #
       # app-deploy-gate はシンボリックリンク・特殊ファイルを含む配布物を拒否するため、ここでも確かめる。
       - name: Build deploy archive
@@ -181,7 +182,7 @@ jobs:
       # **VPSのgate（/usr/local/sbin/app-deploy-gate。guchi-apps/vps#275・#305）へ渡す**（#803）。
       # 鍵はこのアプリ専用で、VPSのauthorized_keysのcommand=がgateのアプリ名（myroom。置き場
       # /home/github-user/apps/myroom）を固定する。任意のシェルコマンドは実行できず、upload・env・deployの
-      # 3語だけが通る。旧配布物の削除（deploy/gate-keep に書いたパスは除く）・展開・.env更新はgateが行い、
+      # 3語だけが通る。旧配布物の削除（deploy/gate-keep に書いた frontend/out/ は除く）・展開・.env更新はgateが行い、
       # venv・pip install・migrate_db.py・pm2 の再起動は配布物の deploy/gate-install.sh が行う。
       # 稼働版の照合（.env の APP_COMMIT_SHA と 127.0.0.1:8000/api/app-version の sha）もgateが行う。
       - name: Upload archive
