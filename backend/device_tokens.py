@@ -87,8 +87,11 @@ def _lock_row(db: Session) -> database.AppSetting:
 
 
 def _read(db: Optional[Session]) -> List[Dict[str, Any]]:
-    if database.DB_MOCK or db is None:
+    if database.DB_MOCK:
         return _normalize(atomic_json.read_json(FILE_PATH, None))
+    if db is None:
+        # 本番で db を渡し忘れたときにリポジトリのファイルを正として読まない（#802）
+        return []
     row = (
         db.query(database.AppSetting)
         .filter(database.AppSetting.setting_key == SETTING_KEY)
