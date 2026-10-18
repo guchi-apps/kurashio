@@ -589,6 +589,10 @@ Watch・iPhoneウィジェットが、アプリ（WebView）を開いていな�
 - DBにはハッシュだけを持つ（`app_settings` の `device_tokens`・マイグレーション無し）。平文は発行応答でしか返らない。
   `DELETE /api/device-tokens/{id}` で端末単位に失効できる。**このトークンで通るのは `GET /api/device/sensors` だけ**で、
   書き込み・設定の口は足さない（内部APIの書き込みは2種類までの方針と同じ考え方）
+- **照合（`verify_token`）には必ず DB セッションを渡す。** 当初 `require_device_token` が渡しておらず、本番では
+  DB_MOCK 用のファイルを読んで**すべて401**になっていた（#802）。端末は401でトークンを捨てるため、閉じて最初の取得で
+  設定シートが「未設定」へ戻り、ウィジェットは自分で更新しなくなる。DB_MOCK のテストだけでは拾えないので、
+  `tests/test_device_tokens.py` に DB（SQLite）経路のテストを置いている
 - **CO2の段階はバックエンドが返す**（`co2Level`）。しきい値は `backend/main.py` と `frontend/lib/device-metrics.ts` の2か所に
   なるが、`tests/test_device_tokens.py` が両者の一致を照合する。Swiftはこれまでどおり色を当てるだけ
 - **更新間隔は約15分**（ウィジェットの Timeline policy・Watchのバックグラウンド更新。実際の実行はOS任せ）

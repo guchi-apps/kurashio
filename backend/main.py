@@ -994,10 +994,17 @@ class DeviceTokenCreate(BaseModel):
     label: str = ""
 
 
-def require_device_token(authorization: Optional[str] = Header(default=None)) -> None:
-    """端末用の読み取りトークン（`device_tokens`）。ユーザーJWT・内部APIキーでは通らない。"""
+def require_device_token(
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(database.get_db),
+) -> None:
+    """端末用の読み取りトークン（`device_tokens`）。ユーザーJWT・内部APIキーでは通らない。
+
+    **`db` を必ず渡すこと。** 本番の保存先は `app_settings` で、渡さないと照合する相手が無く
+    すべて401になる（ウィジェットが401でトークンを捨て、閉じている間の更新が止まった・#802）。
+    """
     scheme, _, value = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or not device_tokens.verify_token(value.strip()):
+    if scheme.lower() != "bearer" or not device_tokens.verify_token(value.strip(), db):
         raise HTTPException(status_code=401, detail="Invalid device token")
 
 

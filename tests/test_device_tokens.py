@@ -1,6 +1,10 @@
 import re
 from pathlib import Path
 
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 
 def _issue(authed_client):
     response = authed_client.post("/api/device-tokens", json={"label": "Apple Watch"})
@@ -80,3 +84,41 @@ def test_issue_reports_evicted_tokens_and_list_has_no_last_used(authed_client):
     listing = authed_client.get("/api/device-tokens").json()["tokens"]
     assert len(listing) == MAX_TOKENS
     assert all("last_used_at" not in t for t in listing)
+
+
+@pytest.fixture
+def db_mode_client(authed_client, tmp_path, monkeypatch):
+    """本番と同じく `app_settings`（DB）へ保存する経路。DB_MOCK のファイル経路だけでは #802 を拾えない。"""
+    from backend import database, main
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'device_tokens.db'}")
+    database.AppSetting.__table__.create(engine)
+    factory = sessionmaker(bind=engine)
+
+    def get_db():
+        session = factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    monkeypatch.setattr(database, "DB_MOCK", False)
+    # センサー一覧の組み立ては別のテーブルを読むので、ここでは照合だけを見る
+    monkeypatch.setattr(main, "_build_room_state_sensors", lambda db: [])
+    main.app.dependency_overrides[database.get_db] = get_db
+    try:
+        yield authed_client
+    finally:
+        del main.app.dependency_overrides[database.get_db]
+        engine.dispose()
+
+
+def test_issued_token_reads_sensors_in_db_mode(db_mode_client):
+    """発行したトークンで、閉じている間の取得（ウィジェット・Watch）が通る（#802）。"""
+    issued = _issue(db_mode_client)
+    headers = {"Authorization": f"Bearer {issued['token']}"}
+    assert db_mode_client.get("/api/device/sensors", headers=headers).status_code == 200
+
+    assert db_mode_client.delete(f"/api/device-tokens/{issued['id']}").status_code == 200
+    assert db_mode_client.get("/api/device/sensors", headers=headers).status_code == 401
+
