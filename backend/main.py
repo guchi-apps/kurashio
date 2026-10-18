@@ -1,6 +1,6 @@
 from fastapi import BackgroundTasks, Header, FastAPI, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 import asyncio
 import contextlib
 import json
@@ -931,6 +931,36 @@ def _build_room_state_payload(db: Optional[Session]) -> dict:
 @app.head("/api/health")
 async def health_check():
     return {"status": "ok", "db_mock": database.DB_MOCK}
+
+
+#: 稼働版の版番号の出どころ。デプロイは frontend/package.json もリポジトリごと rsync するため、
+#: deploy.yml の tag ジョブ（`v<version>` を付ける）と同じファイルを読む。
+FRONTEND_PACKAGE_JSON = os.path.join(os.path.dirname(__file__), "../frontend/package.json")
+
+
+def _read_app_version() -> Optional[str]:
+    try:
+        with open(FRONTEND_PACKAGE_JSON, encoding="utf-8") as f:
+            version = json.load(f).get("version")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return version if isinstance(version, str) and version else None
+
+
+@app.get("/api/app-version")
+async def app_version():
+    """稼働中の版とコミットを返す（#798）。
+
+    deploy.yml が再起動後にこの `sha` と `APP_COMMIT_SHA`（デプロイしたコミット）の一致を
+    確かめ、issue-deck の新方式リリースがそれを稼働確認の証拠として読む。認証の外に置くのは
+    デプロイ中のヘルスチェックがトークンを持たないため（返すのは公開リポジトリの版とSHAだけ）。
+    古い値を返すとデプロイ直後の照合を誤らせるため、キャッシュさせない。
+    """
+    sha = os.environ.get("APP_COMMIT_SHA", "").strip() or None
+    return JSONResponse(
+        {"version": _read_app_version(), "sha": sha},
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/sensors/status")
