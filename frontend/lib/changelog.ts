@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.44.0",
+    date: "2026-10-20",
+    changes: [
+      "消費電力の日別グラフを横にスクロールして、過去の日にさかのぼって見られるようになりました。",
+    ],
+  },
+  {
     version: "4.43.3",
     date: "2026-10-19",
     changes: [

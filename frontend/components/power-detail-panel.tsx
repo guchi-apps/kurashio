@@ -12,11 +12,18 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { fetchEnergyHourly, fetchEnergySummary, importKepcoCsv, updateUiSettings } from "@/lib/api";
+import {
+  fetchEnergyBreakdown,
+  fetchEnergyHourly,
+  fetchEnergySummary,
+  importKepcoCsv,
+  updateUiSettings,
+} from "@/lib/api";
 import { EnergyDateCalendar } from "@/components/energy-date-calendar";
 import { EnergyLinkSheet } from "@/components/energy-link-sheet";
 import { EnergyRefetchSheet } from "@/components/energy-refetch-sheet";
 import { EnergySourceNameSheet } from "@/components/energy-source-name-sheet";
+import { PowerDailyChart } from "@/components/power-daily-chart";
 import { PowerSourceDetail } from "@/components/power-source-detail";
 import { SettingsIconButton } from "@/components/ui/settings-icon-button";
 import {
@@ -29,10 +36,11 @@ import {
   KEPCO_OTHER_COLOR,
   KEPCO_OTHER_LABEL,
   KEPCO_OTHER_SOURCE,
+  ENERGY_DAILY_CHART_HISTORY_DAYS,
   buildEnergyDailyRows,
   buildEnergyHourlyColumns,
   buildEnergySourceColors,
-  buildEnergyStackColumns,
+  buildEnergyStackColumnsFrom,
   buildEnergyStackSegments,
   energyRowRatio,
   formatEnergyDate,
@@ -41,11 +49,13 @@ import {
   formatKwh,
   formatYen,
   hasEnergyKepcoOther,
+  mergeEnergyDailyHistory,
   pickRenamableEnergySources,
   shiftEnergyDate,
 } from "@/lib/energy";
 import type {
   EnergyBreakdown,
+  EnergyBreakdownDay,
   EnergyHourly,
   EnergyKepcoImportResult,
   EnergySourceSummary,
@@ -64,8 +74,13 @@ interface PowerDetailPanelProps {
   onSourceNamesSaved: () => void;
 }
 
-/** 「その他」が何かの説明。日別・時間ごとのどちらの一覧の下にも同じものを出す（#319） */
-function KepcoOtherNote() {
+/**
+ * 「その他」が何かの説明。日別・時間ごとのどちらの一覧の下にも同じものを出す（#319）。
+ *
+ * 日別では、CSVの範囲外の日には「その他」が積まれないことも添える（#810）。
+ * KEPCOのCSVは直近1か月強しか落とせないので、グラフを過去へ動かすと棒が急に低くなる。
+ */
+function KepcoOtherNote({ daily = false }: { daily?: boolean }) {
   return (
     <p className="text-[11px] leading-relaxed text-muted-foreground">
       <span
@@ -74,6 +89,7 @@ function KepcoOtherNote() {
         aria-hidden
       />
       {KEPCO_OTHER_LABEL} = KEPCO実測（家全体）− エアコン・スマートプラグ実測
+      {daily && "。CSVを取り込んでいない日は機器の実測だけで、「その他」は積まれません"}
     </p>
   );
 }
@@ -160,6 +176,26 @@ export function PowerDetailPanel({
   const [kepcoError, setKepcoError] = useState<string | null>(null);
   const [kepcoResult, setKepcoResult] = useState<EnergyKepcoImportResult | null>(null);
 
+  // 日別グラフで過去へ遡るための1年ぶん（#810）。親の breakdown は30日ぶんしか無い。
+  // 取れるまでは30日ぶんで描き、失敗しても30日ぶんのまま出し続ける
+  const [dailyHistory, setDailyHistory] = useState<EnergyBreakdownDay[] | null>(null);
+  const [dailyHistoryVersion, setDailyHistoryVersion] = useState(0);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetchEnergyBreakdown(ENERGY_DAILY_CHART_HISTORY_DAYS)
+      .then((data) => {
+        if (!cancelled) setDailyHistory(data.daily);
+      })
+      .catch(() => {
+        // 30日ぶんのグラフは出せているので、ここでは何も出さない
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, dailyHistoryVersion]);
+
   const handleKepcoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // 同じファイルを続けて選び直せるようにする
@@ -173,6 +209,8 @@ export function PowerDetailPanel({
       // 日別（親が持つ breakdown）と時間ごとの両方を取り直す。
       // どちらのタブから取り込んでも、閉じずにもう一方へ切り替えれば反映済みになる。
       onKepcoImported();
+      // 直近は親の breakdown を優先して描くが、1年ぶんにも「その他」が入るので取り直す（#810）
+      setDailyHistoryVersion((version) => version + 1);
       if (hourlyDate) {
         const refreshed = await fetchEnergyHourly(hourlyDate);
         setHourly(refreshed);
@@ -225,7 +263,21 @@ export function PowerDetailPanel({
 
   const sources = breakdown?.sources ?? [];
   const colors = buildEnergySourceColors(sources);
-  const columns = buildEnergyStackColumns(breakdown);
+  // 凡例と色を揃えるため、取得元と色は親の30日ぶんから決める（1年ぶんには撤去したプラグも入り得る）
+  const columns = buildEnergyStackColumnsFrom(
+    mergeEnergyDailyHistory(breakdown?.daily ?? [], dailyHistory),
+    sources,
+    colors
+  );
+  // 左端の一言。1年ぶんが届く前は、その先にまだ記録があるかどうか分からないので出さない
+  const historyStart = todayIso
+    ? shiftEnergyDate(todayIso, -(ENERGY_DAILY_CHART_HISTORY_DAYS - 1))
+    : null;
+  const dailyChartStartNote = !dailyHistory
+    ? null
+    : historyStart && columns[0] && columns[0].date <= historyStart
+      ? "これより前は表示していません"
+      : "ここより前の記録はありません";
   const rows = buildEnergyDailyRows(breakdown?.daily ?? []);
   const hourlyColumns = buildEnergyHourlyColumns(hourly, sources, colors);
   const hourlyRows = hourlyColumns.filter((column) => column.kwh != null);
@@ -566,34 +618,10 @@ export function PowerDetailPanel({
             )}
 
             {tab === "daily" && columns.length > 1 && (
-              <div className="flex flex-col gap-2">
-                <div className="flex h-[110px] items-end gap-[3px]">
-                  {columns.map((column) => (
-                    <div
-                      key={column.date}
-                      className="flex min-w-0 flex-1 flex-col justify-end gap-[1.5px]"
-                      style={{ height: `${Math.max(4, column.ratio * 100)}%` }}
-                      title={`${formatEnergyDate(column.date)} ${formatKwh(column.kwh)}`}
-                    >
-                      {column.segments.map((segment) => (
-                        <span
-                          key={segment.source}
-                          className="block min-h-px rounded-[1.5px]"
-                          style={{
-                            height: `${segment.share * 100}%`,
-                            backgroundColor: segment.color,
-                          }}
-                        />
-                      ))}
-                    </div>
-                  ))}
-                </div>
-                <div className="flex justify-between border-t pt-1.5 text-[10.5px] text-muted-foreground tabular-nums">
-                  <span>{formatEnergyDate(columns[0].date)}</span>
-                  <span>日別（記録のある日だけ）</span>
-                  <span>{formatEnergyDate(columns[columns.length - 1].date)}</span>
-                </div>
-              </div>
+              <PowerDailyChart
+                columns={columns}
+                startNote={dailyChartStartNote}
+              />
             )}
 
             {sources.length > 0 && (
@@ -694,7 +722,7 @@ export function PowerDetailPanel({
                     </div>
                   ))
                 )}
-                {dailyHasKepcoOther && <KepcoOtherNote />}
+                {dailyHasKepcoOther && <KepcoOtherNote daily />}
               </div>
             )}
             </div>
