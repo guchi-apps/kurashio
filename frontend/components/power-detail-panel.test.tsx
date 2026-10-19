@@ -69,6 +69,17 @@ describe("PowerDetailPanel", () => {
     // 「その他」の色は機器の配色とは別に固定してある
     expect(html).toContain("#95a5a6");
     expect(html).toContain("その他 = KEPCO実測（家全体）− エアコン・スマートプラグ実測");
+    // 日別ではCSVの範囲外の日に「その他」が無いことも添える（#810）
+    expect(html).toContain("CSVを取り込んでいない日は機器の実測だけ");
+  });
+
+  it("日別グラフは横スクロールで、見えている期間と合計を出す（#810）", () => {
+    const html = render(WITHOUT_OTHER);
+    expect(html).toContain("左右にスクロールすると過去の日へ移動します");
+    expect(html).toContain("8/21〜8/22");
+    expect(html).toContain("記録のある2日・3.4 kWh");
+    // 開いた直後は右端（最新）なので「最新へ」は隠れている
+    expect(html).toMatch(/aria-hidden="true" tabindex="-1"[^>]*>最新へ/);
   });
 
   it("「その他」が1日も無ければ注記を出さない（#319）", () => {

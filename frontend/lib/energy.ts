@@ -249,17 +249,109 @@ export function buildEnergyStackColumns(
   breakdown: EnergyBreakdown | null
 ): EnergyStackColumn[] {
   if (!breakdown) return [];
-  const colors = buildEnergySourceColors(breakdown.sources);
-  const max = Math.max(...breakdown.daily.map((day) => day.kwh), 0);
+  return buildEnergyStackColumnsFrom(
+    breakdown.daily,
+    breakdown.sources,
+    buildEnergySourceColors(breakdown.sources)
+  );
+}
 
-  return breakdown.daily
+/**
+ * `buildEnergyStackColumns` の、日別・取得元・色を別々に渡す版。
+ *
+ * 詳細シートの横スクロールのグラフ（#810）は1年ぶんの `daily` を描くが、取得元と色は
+ * 凡例と揃えるため親の30日ぶんの `sources` から決める。`ratio` の基準は渡した全期間の
+ * 最大値なので、スクロールしても棒の高さは変わらない。
+ */
+export function buildEnergyStackColumnsFrom(
+  daily: readonly EnergyBreakdownDay[],
+  sources: readonly EnergySourceRow[],
+  colors: Record<string, string>
+): EnergyStackColumn[] {
+  const max = Math.max(...daily.map((day) => day.kwh), 0);
+  return daily
     .filter((day) => day.kwh > 0)
     .map((day) => ({
       date: day.date,
       kwh: day.kwh,
       ratio: max > 0 ? day.kwh / max : 0,
-      segments: buildEnergyStackSegments(day, breakdown.sources, colors),
+      segments: buildEnergyStackSegments(day, sources, colors),
     }));
+}
+
+/** 詳細シートの日別グラフで遡る日数（#810）。`/api/energy/breakdown` の上限は400 */
+export const ENERGY_DAILY_CHART_HISTORY_DAYS = 365;
+
+/**
+ * 親が持つ直近の日別（ダッシュボードの更新・CSVの取り込みで新しくなる）と、
+ * 詳細シートが開いたときに取った1年ぶんを1本につなぐ（#810）。
+ *
+ * **直近の範囲は常に `recent` を使い、`history` はそれより前の日だけを補う。**
+ * 1年ぶんは開いたときに1度取るだけなので、重なる日まで使うと、開いているあいだの
+ * 更新や取り込んだ「その他」がグラフに出なくなる。
+ */
+export function mergeEnergyDailyHistory(
+  recent: readonly EnergyBreakdownDay[],
+  history: readonly EnergyBreakdownDay[] | null
+): EnergyBreakdownDay[] {
+  const sortedRecent = [...recent].sort((a, b) => a.date.localeCompare(b.date));
+  if (!history || history.length === 0) return sortedRecent;
+  const recentStart = sortedRecent[0]?.date;
+  const older = history
+    .filter((day) => recentStart == null || day.date < recentStart)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  return [...older, ...sortedRecent];
+}
+
+export interface EnergyDailyTick {
+  /** `"10月"`（月の変わり目）か `"10/15"` */
+  label: string;
+  /** 月の変わり目。目盛りを強調する */
+  month: boolean;
+}
+
+/**
+ * 横スクロールの日別グラフの目盛り（#810）。棒と同じ並びで、ラベルの無い棒は `null`。
+ *
+ * 棒は記録のある日だけなので、日付ではなく「直前の棒からどこを跨いだか」で決める。
+ * 月が変わった棒（と左端の棒）に月、同じ月の中で8日・15日・22日を跨いだ棒に日付を付ける。
+ * 棒の間隔は12px前後なので、毎日付けると文字が重なる。
+ */
+export function buildEnergyDailyTicks(
+  columns: readonly { date: string }[]
+): (EnergyDailyTick | null)[] {
+  return columns.map((column, index) => {
+    const [, month, day] = column.date.split("-").map(Number);
+    const prev = index > 0 ? columns[index - 1].date.split("-").map(Number) : null;
+    if (!prev || prev[1] !== month) return { label: `${month}月`, month: true };
+    const week = Math.min(3, Math.floor((day - 1) / 7));
+    const prevWeek = Math.min(3, Math.floor((prev[2] - 1) / 7));
+    if (week > prevWeek) return { label: `${month}/${day}`, month: false };
+    return null;
+  });
+}
+
+/**
+ * 横スクロールの位置から、画面に半分以上入っている棒の範囲を返す（#810）。
+ *
+ * `leading` は先頭の棒より左にある幅（「ここより前の記録はありません」など）、
+ * `step` は棒1本ぶんの幅（棒＋間隔）。棒が1本も入っていなければ `null`。
+ */
+export function energyVisibleColumnRange(
+  scrollLeft: number,
+  viewportWidth: number,
+  leading: number,
+  step: number,
+  count: number
+): { first: number; last: number } | null {
+  if (count === 0 || step <= 0) return null;
+  const first = Math.max(0, Math.round((scrollLeft - leading) / step));
+  const last = Math.min(
+    count - 1,
+    Math.round((scrollLeft + viewportWidth - leading) / step) - 1
+  );
+  if (first > last) return null;
+  return { first, last };
 }
 
 export interface EnergySingleColumn {
