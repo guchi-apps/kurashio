@@ -7,8 +7,12 @@ import {
   buildEnergyHourlyColumns,
   buildEnergySingleColumns,
   buildEnergySourceColors,
+  buildEnergyDailyTicks,
   buildEnergyStackColumns,
+  buildEnergyStackColumnsFrom,
   buildEnergyStackSegments,
+  energyVisibleColumnRange,
+  mergeEnergyDailyHistory,
   energyMonthOf,
   energyRowRatio,
   energySourceRatio,
@@ -495,5 +499,63 @@ describe("日付のカレンダー（#330）", () => {
     expect(formatEnergyMonthLabel("2026-09")).toBe("2026年9月");
     // 「今日の月かどうか」は文字列の大小で判定できる
     expect(energyMonthOf("2026-09-02") < energyMonthOf("2026-10-01")).toBe(true);
+  });
+});
+
+describe("日別グラフの横スクロール（#810）", () => {
+  const day = (date: string, kwh: number, extra: Record<string, number> = {}) => ({
+    date,
+    kwh,
+    cost_yen: kwh * 31,
+    by_source: { aircon: kwh, ...extra },
+  });
+
+  it("直近の範囲は親の値を使い、1年ぶんはそれより前の日だけを補う", () => {
+    const recent = [day("2026-10-18", 2), day("2026-10-19", 3, { kepco_other: 1 })];
+    // 1年ぶんは開いたときの値。取り込み前なので 10/19 に「その他」が無い
+    const history = [day("2026-10-17", 1), day("2026-10-18", 9), day("2026-10-19", 3)];
+    const merged = mergeEnergyDailyHistory(recent, history);
+    expect(merged.map((d) => d.date)).toEqual(["2026-10-17", "2026-10-18", "2026-10-19"]);
+    expect(merged[1].kwh).toBe(2);
+    expect(merged[2].by_source.kepco_other).toBe(1);
+  });
+
+  it("1年ぶんが無ければ直近だけを日付順で返す", () => {
+    const recent = [day("2026-10-19", 3), day("2026-10-18", 2)];
+    expect(mergeEnergyDailyHistory(recent, null).map((d) => d.date)).toEqual([
+      "2026-10-18",
+      "2026-10-19",
+    ]);
+  });
+
+  it("棒の高さは渡した全期間の最大値が基準になる", () => {
+    const columns = buildEnergyStackColumnsFrom(
+      [day("2026-06-01", 8), day("2026-10-19", 2)],
+      [],
+      {}
+    );
+    expect(columns.map((c) => c.ratio)).toEqual([1, 0.25]);
+  });
+
+  it("目盛りは左端・月の変わり目に月、8日・15日・22日を跨いだ棒に日付を付ける", () => {
+    const dates = ["2026-09-28", "2026-09-30", "2026-10-01", "2026-10-07", "2026-10-09", "2026-10-15", "2026-10-29", "2026-10-31"];
+    expect(buildEnergyDailyTicks(dates.map((date) => ({ date })))).toEqual([
+      { label: "9月", month: true },
+      null,
+      { label: "10月", month: true },
+      null,
+      { label: "10/9", month: false },
+      { label: "10/15", month: false },
+      // 22日の棒が無くても、跨いだ次の棒に付ける
+      { label: "10/29", month: false },
+      null,
+    ]);
+  });
+
+  it("スクロール位置から、画面に半分以上入っている棒の範囲を返す", () => {
+    // 100本・1本12px・左に60pxの一言。右端（scrollLeft = 60 + 1200 - 360）では最後の30本
+    expect(energyVisibleColumnRange(900, 360, 60, 12, 100)).toEqual({ first: 70, last: 99 });
+    expect(energyVisibleColumnRange(0, 360, 60, 12, 100)).toEqual({ first: 0, last: 24 });
+    expect(energyVisibleColumnRange(0, 360, 0, 12, 0)).toBeNull();
   });
 });
