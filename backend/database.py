@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, Float, DateTime, Date, String, Text
+from sqlalchemy import create_engine, UniqueConstraint, Column, Integer, Float, DateTime, Date, String, Text
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 import random
@@ -187,6 +187,30 @@ class UtilityBillRecord(Base):
         default=datetime.datetime.utcnow,
         onupdate=datetime.datetime.utcnow,
     )
+
+
+class UtilityBillImport(Base):
+    """`utility_bills` の行を、どのメール由来で取り込んだかの出典（#814）。
+
+    1通のメールに電気とガスが載ることがあるので、出典は (メールID, 種別, 契約) で一意にする。
+    メール本文・お客さま番号は持たない。
+    """
+
+    __tablename__ = "utility_bill_imports"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_message_id", "kind", "contract_key", name="uq_utility_bill_imports_source"
+        ),
+    )
+
+    import_id = Column(Integer, primary_key=True, autoincrement=True)
+    source_message_id = Column(String(255), nullable=False)
+    kind = Column(String(16), nullable=False)
+    contract_key = Column(String(32), nullable=False)
+    billing_month = Column(Date, nullable=False)
+    source_label = Column(String(64), nullable=True)
+    confidence = Column(Float, nullable=True)
+    imported_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
 
 class DisplayEntity(Base):

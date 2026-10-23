@@ -16,8 +16,11 @@
 from __future__ import annotations
 
 import datetime
+import math
+import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import database, energy
@@ -127,6 +130,291 @@ def upsert_records(
 
     db.commit()
     return written
+
+
+# ------------------------------------------------ 安全な取込（AIDE・#814）
+#
+# `upsert_records`（収集）は同じ (月, 種別, 契約) を無言で上書きする。こちらは**書き足すだけ**で、
+# 既にある行は絶対に変えない。値が違えば `conflict` として返し、直すかどうかは人が決める。
+
+#: 取込が受ける種別。水道は手入力だけ
+IMPORT_KINDS = (KIND_ELECTRICITY, KIND_GAS)
+IMPORT_UNITS = {KIND_ELECTRICITY: "kWh", KIND_GAS: "m3"}
+CONTRACT_KEY_PATTERN = re.compile(r"^(?:[0-9a-f]{12}|default)$")
+MAX_IMPORT_AMOUNT_YEN = 1_000_000
+MAX_IMPORT_USAGE = 100_000
+#: 使用量の一致は小数1桁の丸め（メールの表記）で見る
+USAGE_TOLERANCE = 0.05
+
+STATUS_CREATED = "created"
+STATUS_DUPLICATE = "duplicate"
+STATUS_CONFLICT = "conflict"
+
+_UNIT_ALIASES = {"kwh": "kWh", "m3": "m3", "m³": "m3", "㎥": "m3"}
+
+
+def normalize_usage_unit(kind: str, unit: Any) -> Optional[str]:
+    """単位の揺れ（`m³`・`㎥`・`M3`・`kwh`）を正規形へ。種別に合わない単位は ValueError。"""
+    text = str(unit or "").strip()
+    if not text:
+        return None
+    normalized = _UNIT_ALIASES.get(text.lower())
+    if normalized is None or normalized != IMPORT_UNITS[kind]:
+        raise ValueError(f"Invalid usage_unit for {kind}: {unit}")
+    return normalized
+
+
+def validate_import(item: Dict[str, Any]) -> Dict[str, Any]:
+    """取込の入力を検証して正規化する。誤りは ValueError（API側で422）。"""
+    kind = normalize_kind(item.get("kind"), IMPORT_KINDS)
+    month = parse_billing_month(item["billing_month"])
+    contract_key = str(item.get("contract_key") or "")
+    if not CONTRACT_KEY_PATTERN.match(contract_key):
+        raise ValueError("Invalid contract_key")
+    amount = item.get("amount_yen")
+    if isinstance(amount, bool) or not isinstance(amount, int):
+        raise ValueError("Invalid amount_yen")
+    if amount < 0 or amount > MAX_IMPORT_AMOUNT_YEN:
+        raise ValueError("Invalid amount_yen")
+    usage = item.get("usage_value")
+    if usage is not None and (usage < 0 or usage > MAX_IMPORT_USAGE):
+        raise ValueError("Invalid usage_value")
+    unit = normalize_usage_unit(kind, item.get("usage_unit"))
+    if usage is not None and unit is None:
+        unit = IMPORT_UNITS[kind]
+    if usage is None:
+        unit = None
+    message_id = str(item.get("source_message_id") or "").strip()
+    if not message_id or len(message_id) > 255:
+        raise ValueError("Invalid source_message_id")
+    confidence = item.get("confidence")
+    if confidence is not None and not 0 <= confidence <= 1:
+        raise ValueError("Invalid confidence")
+    return {
+        "billing_month": month,
+        "kind": kind,
+        "contract_key": contract_key,
+        "amount_yen": amount,
+        "usage_value": usage,
+        "usage_unit": unit,
+        "plan_name": (item.get("plan_name") or None),
+        "received_at": item.get("received_at"),
+        "source_message_id": message_id,
+        "source_label": (item.get("source_label") or None),
+        "confidence": confidence,
+    }
+
+
+def _iso(value: Optional[datetime.datetime]) -> Optional[str]:
+    return value.isoformat() if value else None
+
+
+def serialize_record(row: Any) -> Dict[str, Any]:
+    """照会・取込の応答に載せる請求1件。
+
+    `revision` は `updated_at` のISO文字列。MySQL の DATETIME は小数秒を持たないので、
+    同じ秒内の更新は区別できない。将来の更新APIが照合に使うなら粗い点に注意する。
+    """
+    return {
+        "billing_month": format_billing_month(row.billing_month),
+        "kind": row.kind,
+        "contract_key": row.contract_key,
+        "plan_name": row.plan_name,
+        "amount_yen": row.amount_yen,
+        "usage_value": row.usage_value,
+        "usage_unit": row.usage_unit,
+        "received_at": _iso(row.received_at),
+        "updated_at": _iso(row.updated_at),
+        "revision": _iso(row.updated_at),
+    }
+
+
+def serialize_source(imp: Any) -> Optional[Dict[str, Any]]:
+    if imp is None:
+        return None
+    return {
+        "source_message_id": imp.source_message_id,
+        "source_label": imp.source_label,
+        "confidence": imp.confidence,
+        "imported_at": _iso(imp.imported_at),
+        "import_id": imp.import_id,
+    }
+
+
+def _find_bill(db: Session, month: datetime.date, kind: str, contract_key: str):
+    return (
+        db.query(database.UtilityBillRecord)
+        .filter(
+            database.UtilityBillRecord.billing_month == month,
+            database.UtilityBillRecord.kind == kind,
+            database.UtilityBillRecord.contract_key == contract_key,
+        )
+        .first()
+    )
+
+
+def _find_import_by_source(db: Session, message_id: str, kind: str, contract_key: str):
+    return (
+        db.query(database.UtilityBillImport)
+        .filter(
+            database.UtilityBillImport.source_message_id == message_id,
+            database.UtilityBillImport.kind == kind,
+            database.UtilityBillImport.contract_key == contract_key,
+        )
+        .first()
+    )
+
+
+def _find_import_for_bill(db: Session, month: datetime.date, kind: str, contract_key: str):
+    return (
+        db.query(database.UtilityBillImport)
+        .filter(
+            database.UtilityBillImport.billing_month == month,
+            database.UtilityBillImport.kind == kind,
+            database.UtilityBillImport.contract_key == contract_key,
+        )
+        .order_by(database.UtilityBillImport.import_id.asc())
+        .first()
+    )
+
+
+def get_record(
+    db: Session,
+    kind: str,
+    contract_key: str,
+    billing_month: Any = None,
+    source_message_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """請求1件と出典を引く。月・種別・契約か、出典・種別・契約で。無ければ None。"""
+    imp = None
+    if billing_month is not None:
+        month = parse_billing_month(billing_month)
+    else:
+        imp = _find_import_by_source(db, source_message_id or "", kind, contract_key)
+        if imp is None:
+            return None
+        month = imp.billing_month
+    row = _find_bill(db, month, kind, contract_key)
+    if row is None:
+        return None
+    if imp is None:
+        imp = _find_import_for_bill(db, month, kind, contract_key)
+    return {"record": serialize_record(row), "source": serialize_source(imp)}
+
+
+def list_contracts(db: Session, kind: str) -> List[Dict[str, Any]]:
+    """契約候補。`utility_bills` の既存行から作る（お客さま番号は持っていないので返さない）。"""
+    rows = (
+        db.query(database.UtilityBillRecord)
+        .filter(database.UtilityBillRecord.kind == kind)
+        .order_by(database.UtilityBillRecord.billing_month.desc())
+        .all()
+    )
+    seen: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        if row.contract_key == MANUAL_CONTRACT_KEY or row.contract_key in seen:
+            continue
+        seen[row.contract_key] = {
+            "contract_key": row.contract_key,
+            "plan_name": row.plan_name,
+            "latest_billing_month": format_billing_month(row.billing_month),
+        }
+    return list(seen.values())
+
+
+def _same_usage(a: Optional[float], b: Optional[float]) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    return math.isclose(a, b, abs_tol=USAGE_TOLERANCE)
+
+
+def diff_fields(row: Any, item: Dict[str, Any]) -> List[str]:
+    """既存行と入力で食い違う主要項目名（金額・使用量・単位）。"""
+    fields = []
+    if row.amount_yen != item["amount_yen"]:
+        fields.append("amount_yen")
+    if not _same_usage(row.usage_value, item["usage_value"]):
+        fields.append("usage_value")
+    if (row.usage_unit or None) != item["usage_unit"] and not (
+        row.usage_value is None and item["usage_value"] is None
+    ):
+        fields.append("usage_unit")
+    return fields
+
+
+def _result(status: str, row: Any, imp: Any, fields: Optional[List[str]] = None):
+    result: Dict[str, Any] = {
+        "status": status,
+        "record": serialize_record(row) if row is not None else None,
+        "source": serialize_source(imp),
+    }
+    if fields is not None:
+        result["fields"] = fields
+    return result
+
+
+def import_bill(db: Session, raw: Dict[str, Any]) -> Dict[str, Any]:
+    """請求を1件、上書きせずに登録する。判定は上から:
+
+    1. 出典が別の月に結び付いている → conflict
+    2. (月, 種別, 契約) の行が無い → 請求行と出典行を1トランザクションで insert → created
+    3. 行がある → 主要項目が一致で duplicate、違えば conflict（どちらも何も書かない）
+
+    同時実行で先に書かれたときは主キー／UNIQUE の IntegrityError を rollback して再読込し、
+    1・3へ倒す。
+    """
+    item = validate_import(raw)
+    month, kind, key = item["billing_month"], item["kind"], item["contract_key"]
+    message_id = item["source_message_id"]
+
+    for _ in range(3):
+        imp = _find_import_by_source(db, message_id, kind, key)
+        if imp is not None and imp.billing_month != month:
+            other = _find_bill(db, imp.billing_month, kind, key)
+            return _result(STATUS_CONFLICT, other, imp, ["source"])
+
+        row = _find_bill(db, month, kind, key)
+        if row is not None:
+            fields = diff_fields(row, item)
+            if fields:
+                return _result(STATUS_CONFLICT, row, _find_import_for_bill(db, month, kind, key), fields)
+            return _result(STATUS_DUPLICATE, row, _find_import_for_bill(db, month, kind, key))
+
+        try:
+            now = datetime.datetime.utcnow()
+            received_at = item["received_at"]
+            if isinstance(received_at, datetime.datetime) and received_at.tzinfo:
+                received_at = received_at.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+            row = database.UtilityBillRecord(
+                billing_month=month,
+                kind=kind,
+                contract_key=key,
+                plan_name=item["plan_name"],
+                amount_yen=item["amount_yen"],
+                usage_value=item["usage_value"],
+                usage_unit=item["usage_unit"],
+                received_at=received_at,
+                updated_at=now,
+            )
+            db.add(row)
+            if imp is None:
+                imp = database.UtilityBillImport(
+                    source_message_id=message_id,
+                    kind=kind,
+                    contract_key=key,
+                    billing_month=month,
+                    source_label=item["source_label"],
+                    confidence=item["confidence"],
+                    imported_at=now,
+                )
+                db.add(imp)
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            continue
+        return _result(STATUS_CREATED, row, imp)
+
+    raise RuntimeError("bill import kept conflicting with concurrent writes")
 
 
 def validate_manual_water(

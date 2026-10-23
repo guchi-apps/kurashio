@@ -14,8 +14,8 @@ from dotenv import load_dotenv
 from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_links, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
 from . import access
 from .auth import get_current_user
-from .internal_auth import require_collector_token, require_internal_control_token, require_internal_token
-from pydantic import BaseModel, ConfigDict, model_validator
+from .internal_auth import require_collector_token, require_internal_bills_write_token, require_internal_control_token, require_internal_token
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 load_dotenv()
 
@@ -507,6 +507,30 @@ class UtilityBillItem(BaseModel):
         """
         bills.parse_billing_month(self.billing_month)
         bills.normalize_kind(self.kind)
+        return self
+
+
+class InternalBillImport(BaseModel):
+    """AIDE からの月次請求の取込1件（#814）。余計な項目は黙って捨てず422で返す。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    billing_month: str
+    kind: str
+    contract_key: str
+    amount_yen: int
+    usage_value: Optional[float] = None
+    usage_unit: Optional[str] = None
+    plan_name: Optional[str] = Field(default=None, max_length=64)
+    received_at: Optional[datetime.datetime] = None
+    source_message_id: str
+    source_label: Optional[str] = Field(default=None, max_length=64)
+    confidence: Optional[float] = None
+
+    @model_validator(mode="after")
+    def check_values(self):
+        # DB_MOCK では保存まで行かないので、入力の誤りはここで弾く
+        bills.validate_import(self.model_dump())
         return self
 
 
@@ -2456,6 +2480,78 @@ def create_bambu_state(
     if usage is not None:
         response["filament"] = _apply_bambu_filament_usage(usage, db)
     return response
+
+
+def _internal_bills_kind(kind: str) -> str:
+    try:
+        return bills.normalize_kind(kind, bills.IMPORT_KINDS)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail="invalid kind") from e
+
+
+@app.get("/api/internal/bills/contracts")
+def get_internal_bill_contracts(
+    kind: str,
+    db: Session = Depends(database.get_db),
+    _: None = Depends(require_internal_token),
+):
+    """月次請求の契約候補（AIDE向け・読み取り専用・#814）。お客さま番号は返さない。"""
+    kind = _internal_bills_kind(kind)
+    if database.DB_MOCK or db is None:
+        return {"contracts": []}
+    return {"contracts": bills.list_contracts(db, kind)}
+
+
+@app.get("/api/internal/bills/record")
+def get_internal_bill_record(
+    kind: str,
+    contract_key: str,
+    billing_month: Optional[str] = None,
+    source_message_id: Optional[str] = None,
+    db: Session = Depends(database.get_db),
+    _: None = Depends(require_internal_token),
+):
+    """月次請求を1件、月か出典（メールID）で引く。無ければ 404 `not_found`（#814）。"""
+    kind = _internal_bills_kind(kind)
+    if (billing_month is None) == (source_message_id is None):
+        raise HTTPException(
+            status_code=422,
+            detail="specify exactly one of billing_month or source_message_id",
+        )
+    try:
+        found = (
+            None
+            if database.DB_MOCK or db is None
+            else bills.get_record(db, kind, contract_key, billing_month, source_message_id)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail="invalid billing_month") from e
+    if found is None:
+        raise HTTPException(status_code=404, detail="not_found")
+    return found
+
+
+@app.post("/api/internal/bills/import")
+def import_internal_bill(
+    payload: InternalBillImport,
+    db: Session = Depends(database.get_db),
+    _: None = Depends(require_internal_bills_write_token),
+):
+    """月次請求を上書きせずに1件登録する（AIDE向け・専用トークン・#814）。
+
+    `created` / `duplicate` / `conflict` を200で返し、既にある行は書き換えない。
+    ログ・応答にメール本文・お客さま番号・トークンは出さない。
+    """
+    if database.DB_MOCK or db is None:
+        return {"status": "mock_ok"}
+    try:
+        return bills.import_bill(db, payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except Exception as e:
+        db.rollback()
+        logger.exception("月次請求の取込に失敗")
+        raise HTTPException(status_code=500, detail="internal error") from e
 
 
 @app.post("/api/bills")
