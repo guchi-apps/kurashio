@@ -650,7 +650,17 @@ DDLもデータの一括書き換えも要らず、本番の権限問題（上�
 読み取り用・操作用のどちらでも通らない。電気・ガスだけ受け（`water`・`manual` は422）、**既存の行は書き換えず**
 `created` / `duplicate` / `conflict` を返す。出典は `utility_bill_imports`（`UNIQUE(source_message_id, kind, contract_key)`）。
 `duplicate`/`conflict` では出典行も足さない。`revision` は `updated_at` のISO文字列で、MySQLでは秒精度。
-照会（`/api/internal/bills/contracts`・`/record`）は読み取り用トークン。既存の `POST /api/bills`（無認証・上書き）は変えていない。
+照会（`/api/internal/bills/contracts`・`/record`）は読み取り用トークン。既存の `POST /api/bills`（無認証・サブPC日次収集）は上書きする作りのまま
+だが、**出典（`utility_bill_imports`）が記録された行は `bills.upsert_records()` が飛ばす**（#817。AIDEが `created` で作った行を守る。
+出典の無い既存行に対する `duplicate`/`conflict` は出典行を足さないので、その行は従来どおり収集が上書きし得る）。
+
+- **トークンの登録（公開後の作業・手作業）。** `MYROOM_INTERNAL_BILLS_WRITE_API_KEY` は issue-deck の共有トークンで、
+  環境変数・マニフェストのフォールバックは持たない。**未登録の間は取込が常に503**（照会は読み取り用トークンで動く）。
+  issue-deck の設定画面か `POST /api/shared-tokens`（`value` を省略すると自動生成。応答の `generatedValue` は1回だけ）で
+  同名を登録し、AIDE（利用元）が同じ名前で `GET` して Bearer に載せる。myroom は `GET` で読むので再起動は要らない（成功値は10分、失敗は30秒キャッシュするため、登録直後は最長10分ほど503が続くことがある）
+- **ローテーション。** `PUT /api/shared-tokens` で値を上書きする（issue-deck側は旧値が即失効。myroom側は最長10分、旧値も通る）。
+  読み取り用・操作用とは別の値にする
+- 登録後は AIDE から `POST /api/internal/bills/import` を1件通し、`created`（再送で `duplicate`）を確認する
 
 - **エアコンの内部APIは画面用と同じ処理を通す。** `main.py` の `_read_aircon_state()` /
   `_apply_aircon_command()` を画面用（ユーザーJWT）と内部API（操作用トークン）の両方が呼ぶ。
