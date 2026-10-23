@@ -99,6 +99,10 @@ def upsert_records(
 
     送り直しても増えない。メールは何度読んでも同じ内容なので、収集スクリプトは
     受信箱に残っているぶんを毎回そのまま送ってよい。
+
+    **安全取込（`import_bill`）が出典を記録した行は上書きしない**（#817）。AIDEが先に作った
+    確定請求を、日次の収集が同じ契約・月・種別で置き換えると、取込が返した
+    `created` / `duplicate` / `conflict` と実DBの内容が食い違うため。取込済みの行を直すのは人。
     """
     written = 0
     for item in records:
@@ -120,6 +124,8 @@ def upsert_records(
                 billing_month=month, kind=kind, contract_key=contract_key
             )
             db.add(row)
+        elif _find_import_for_bill(db, month, kind, contract_key) is not None:
+            continue
         row.plan_name = item.get("plan_name")
         row.amount_yen = int(item["amount_yen"])
         row.usage_value = item.get("usage_value")

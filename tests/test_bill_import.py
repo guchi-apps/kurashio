@@ -216,3 +216,35 @@ def test_legacy_upsert_still_overwrites(env):
                 [{"billing_month": "2026-08", "kind": "gas", "contract_key": KEY, "amount_yen": amount}],
             )
     assert [r[3] for r in rows(factory)] == [200]
+
+
+def test_legacy_upsert_does_not_overwrite_imported_row(env):
+    """安全取込が出典を記録した行は、日次の収集（旧upsert）が送り直しても変わらない（#817）。"""
+    from backend import bills
+
+    client, factory = env
+    post(client)
+    before = rows(factory)
+    with factory() as db:
+        written = bills.upsert_records(
+            db,
+            [{"billing_month": "2026-08", "kind": "gas", "contract_key": KEY, "amount_yen": 999999}],
+        )
+    assert written == 0
+    assert rows(factory) == before
+
+
+def test_legacy_upsert_still_writes_other_rows_next_to_imported(env):
+    from backend import bills
+
+    client, factory = env
+    post(client)
+    with factory() as db:
+        written = bills.upsert_records(
+            db,
+            [
+                {"billing_month": "2026-08", "kind": "gas", "contract_key": KEY, "amount_yen": 1},
+                {"billing_month": "2026-07", "kind": "gas", "contract_key": KEY, "amount_yen": 777},
+            ],
+        )
+    assert written == 1
