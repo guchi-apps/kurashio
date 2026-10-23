@@ -644,6 +644,14 @@ DDLもデータの一括書き換えも要らず、本番の権限問題（上�
 いた（#419）が、#439 で「上の2つ」へ広げた。**3つ目の書き込み（名前の変更・ボタンの登録・設定の書き換え
 など）を足すときは、同じ判断（範囲を広げてよいか）をやり直すこと。**
 
+**月次請求の取込（`POST /api/internal/bills/import`・#814）は、この判断をやり直したうえで足した例外。**
+`INTERNAL_CONTROL_API_KEY` ではなく**専用の共有トークン `MYROOM_INTERNAL_BILLS_WRITE_API_KEY`**
+（`internal_auth.require_internal_bills_write_token`。環境変数フォールバック・マニフェスト行なし。未発行は503）で通し、
+読み取り用・操作用のどちらでも通らない。電気・ガスだけ受け（`water`・`manual` は422）、**既存の行は書き換えず**
+`created` / `duplicate` / `conflict` を返す。出典は `utility_bill_imports`（`UNIQUE(source_message_id, kind, contract_key)`）。
+`duplicate`/`conflict` では出典行も足さない。`revision` は `updated_at` のISO文字列で、MySQLでは秒精度。
+照会（`/api/internal/bills/contracts`・`/record`）は読み取り用トークン。既存の `POST /api/bills`（無認証・上書き）は変えていない。
+
 - **エアコンの内部APIは画面用と同じ処理を通す。** `main.py` の `_read_aircon_state()` /
   `_apply_aircon_command()` を画面用（ユーザーJWT）と内部API（操作用トークン）の両方が呼ぶ。
   検証・現在値との混合（`aircon_control.merge_command`）・失敗のステータスと文言（404・422・429 と

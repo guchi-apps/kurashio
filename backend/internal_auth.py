@@ -15,6 +15,9 @@ ops-dashboard の `OPS_API_TOKEN`（`requireSessionOrApiToken`）と同じ形。
 
 - `INTERNAL_API_KEY` … 読み取り専用（`GET /api/internal/room-state`）
 - `INTERNAL_CONTROL_API_KEY` … 操作専用（`/api/internal/remote/…`・#419、`/api/internal/aircon/…`・#439）
+- `MYROOM_INTERNAL_BILLS_WRITE_API_KEY`（共有トークンのみ・環境変数フォールバックなし） … 月次請求の安全取込
+  （`POST /api/internal/bills/import`・#814）。内部APIの3つ目の書き込みで、上書きせず
+  `created` / `duplicate` / `conflict` を返す・電気とガスだけ受ける、という範囲で許している
 - `COLLECTOR_API_KEY` … サブPCの収集専用（消費電力の再取得 `/api/energy/refetch/request`・`/done`・#714）。
   共有トークンは使わず環境変数だけ。既存の2つのキーの用途は広げていない
 
@@ -47,6 +50,9 @@ COLLECTOR_ENV_VAR_NAME = "COLLECTOR_API_KEY"
 # issue-deck の共有トークン名（#525）。取れなければ上の環境変数へフォールバックする
 SHARED_TOKEN_NAME = "MYROOM_INTERNAL_API_KEY"
 CONTROL_SHARED_TOKEN_NAME = "MYROOM_INTERNAL_CONTROL_API_KEY"
+# 月次請求の取込専用（#814）。環境変数フォールバックは持たず、未発行の間は 503
+BILLS_WRITE_SHARED_TOKEN_NAME = "MYROOM_INTERNAL_BILLS_WRITE_API_KEY"
+BILLS_WRITE_ENV_LABEL = BILLS_WRITE_SHARED_TOKEN_NAME
 
 
 def _read_token(env_var_name: str, shared_token_name: str) -> Optional[str]:
@@ -130,3 +136,17 @@ def require_collector_token(
     読み取り用・操作用のどちらのトークンでも通らない。未設定なら無認証へ落とさず 503。
     """
     _check_bearer(authorization, COLLECTOR_ENV_VAR_NAME, get_collector_api_key())
+
+
+def require_internal_bills_write_token(
+    authorization: Optional[str] = Header(default=None),
+) -> None:
+    """月次請求の取込向けの依存（共有トークン `MYROOM_INTERNAL_BILLS_WRITE_API_KEY`・#814）。
+
+    読み取り用・操作用のどちらのトークンでも通らない。未発行なら 503。
+    """
+    _check_bearer(
+        authorization,
+        BILLS_WRITE_ENV_LABEL,
+        get_shared_token(BILLS_WRITE_SHARED_TOKEN_NAME) or None,
+    )
