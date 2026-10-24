@@ -22,6 +22,13 @@ interface PowerDailyChartProps {
   columns: EnergyStackColumn[];
   /** 左端（いちばん古い棒の左）に出す一言。読み込み中など、まだ言えないときは `null` */
   startNote: string | null;
+  /** 棒の領域の高さ（px） */
+  height?: number;
+  /**
+   * 見えている棒の日付の範囲が変わったとき（#822）。棒が画面に収まっていて
+   * スクロールが起きていないあいだは `null`（全期間を見せている扱い）
+   */
+  onViewChange?: (range: { start: string; end: string } | null) => void;
 }
 
 interface ViewState {
@@ -33,11 +40,17 @@ interface ViewState {
 
 /**
  * 消費電力の日別の積み上げ棒グラフ。左右にスクロールして過去の日へ移動できる（#810）。
+ * 推移ページ（`/energy`・#822）で使う。詳細シートは `PowerFixedChart` の30日固定。
  *
  * 棒の幅は固定で、開いた時点は右端（最新の日）を見せる。左に日が足されても
  * （1年ぶんが届いたとき）右端からの距離を保つので、見ている棒が飛ばない。
  */
-export function PowerDailyChart({ columns, startNote }: PowerDailyChartProps) {
+export function PowerDailyChart({
+  columns,
+  startNote,
+  height = 110,
+  onViewChange,
+}: PowerDailyChartProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const firstBarRef = useRef<HTMLDivElement>(null);
   /** 右端からの距離。棒が増えたときにこの距離を保つ */
@@ -67,6 +80,12 @@ export function PowerDailyChart({ columns, startNote }: PowerDailyChartProps) {
           }
         : null
     );
+    // 棒が画面に収まっている（スクロールできない）なら全期間を見せている
+    onViewChange?.(
+      range && maxLeft > END_TOLERANCE
+        ? { start: columns[range.first].date, end: columns[range.last].date }
+        : null
+    );
   };
 
   // 棒の数が変わったら、右端からの距離を保つ位置へ置き直す（開いた直後は右端）
@@ -74,7 +93,11 @@ export function PowerDailyChart({ columns, startNote }: PowerDailyChartProps) {
     const el = scrollerRef.current;
     if (!el) return;
     el.scrollLeft = el.scrollWidth - el.clientWidth - fromRightRef.current;
-  }, [columns.length]);
+    // 位置が変わらなければ scroll は来ないが、棒の並び（機器の絞り込み・#822）は変わっている
+    const frame = requestAnimationFrame(readView);
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- readView は毎レンダー作り直される
+  }, [columns]);
 
   // 画面の幅が変わると見えている範囲も変わるが、scroll は来ない
   useEffect(() => {
@@ -156,7 +179,10 @@ export function PowerDailyChart({ columns, startNote }: PowerDailyChartProps) {
         >
           <div className="relative flex w-max min-w-full justify-end gap-[3px]">
             {startNote && (
-              <div className="flex h-[110px] shrink-0 items-center whitespace-nowrap pr-2.5 text-[10px] text-muted-foreground">
+              <div
+                className="flex shrink-0 items-center whitespace-nowrap pr-2.5 text-[10px] text-muted-foreground"
+                style={{ height }}
+              >
                 {startNote}
               </div>
             )}
@@ -169,7 +195,7 @@ export function PowerDailyChart({ columns, startNote }: PowerDailyChartProps) {
                   className="flex shrink-0 flex-col"
                   style={{ width: BAR_WIDTH }}
                 >
-                  <div className="flex h-[110px] flex-col justify-end">
+                  <div className="flex flex-col justify-end" style={{ height }}>
                     <div
                       className="flex flex-col justify-end gap-[1.5px]"
                       style={{ height: `${Math.max(4, column.ratio * 100)}%` }}
@@ -202,20 +228,26 @@ export function PowerDailyChart({ columns, startNote }: PowerDailyChartProps) {
                 </div>
               );
             })}
-            <div className="pointer-events-none absolute inset-x-0 top-[110px] border-t" aria-hidden />
+            <div
+              className="pointer-events-none absolute inset-x-0 border-t"
+              style={{ top: height }}
+              aria-hidden
+            />
           </div>
         </div>
         {/* 続きがある側の端を薄くぼかす */}
         <div
-          className={`pointer-events-none absolute left-0 top-0 h-[110px] w-[18px] bg-linear-to-r from-card to-transparent transition-opacity motion-reduce:transition-none ${
+          className={`pointer-events-none absolute left-0 top-0 w-[18px] bg-linear-to-r from-card to-transparent transition-opacity motion-reduce:transition-none ${
             atStart ? "opacity-0" : "opacity-100"
           }`}
+          style={{ height }}
           aria-hidden
         />
         <div
-          className={`pointer-events-none absolute right-0 top-0 h-[110px] w-[18px] bg-linear-to-l from-card to-transparent transition-opacity motion-reduce:transition-none ${
+          className={`pointer-events-none absolute right-0 top-0 w-[18px] bg-linear-to-l from-card to-transparent transition-opacity motion-reduce:transition-none ${
             atEnd ? "opacity-0" : "opacity-100"
           }`}
+          style={{ height }}
           aria-hidden
         />
       </div>

@@ -842,6 +842,20 @@ POST し直している（`daily_energy` は同じ `(date, source)` を上書き
   混ぜると取り込んだ範囲によって「先月」の金額が動く。**タイルの合計と日別行の合計は
   一致しない**が、これは意図した状態
 
+## 消費電力の日別グラフはシートが30日固定、遡るのは推移ページ（#822）
+
+**詳細シート（`power-detail-panel.tsx`）の日別グラフは `PowerFixedChart` で、親の30日ぶんを幅いっぱいに固定で描く。**
+グラフ全体が `/energy`（`components/energy-history-page.tsx`）へのリンクで、横スクロールの `PowerDailyChart`（#810）は
+このページだけが使う。シートで1年ぶんを取り直す処理は持たない（ページが `/api/energy/breakdown?days=365` を自分で取る）。
+
+- **ページの配色は `orderEnergySourcesForColors()` を通す。** サーバーの `sources` は「エアコン → 今月の使用量 → 名前」の順なので、
+  1年ぶんには撤去したプラグが今月0kWhで混ざり、名前順で直近の機器のあいだに割り込む。そのまま配色するとシートと色がずれる
+- **絞り込みの一覧は `buildEnergyFilterItems()` で `by_source` のキーからも拾う。** 「その他」（KEPCO差分）は `sources` に入らないため、
+  `sources` だけで作ると外せない線が残る。「だけ」は押した1行だけを残す（「その他」も外れる）
+- 絞り込みの状態は保存しない（`hidden_devices` とは別物）。取得元ごとの金額は無いので、絞り込み中の金額は使用量の割合で按分した目安
+- `PowerDailyChart` に渡す `columns` は `useMemo` で固定すること。`onViewChange` は棒の並びが変わるたびに呼ばれるので、
+  毎レンダー作り直すと「範囲を通知 → 親が再描画 → 新しい columns → また通知」が止まらなくなる
+
 ## 取得元の表示名は「別名」で持ち、`source` は変えない（消費電力）
 
 **`daily_energy` の主キーは `(date, source)` で、`source` そのものが表示名の出どころ**

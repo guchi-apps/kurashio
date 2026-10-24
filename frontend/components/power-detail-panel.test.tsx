@@ -73,13 +73,14 @@ describe("PowerDetailPanel", () => {
     expect(html).toContain("CSVを取り込んでいない日は機器の実測だけ");
   });
 
-  it("日別グラフは横スクロールで、見えている期間と合計を出す（#810）", () => {
+  it("日別グラフは30日固定で、押すと推移ページへ移る（#822）", () => {
     const html = render(WITHOUT_OTHER);
-    expect(html).toContain("左右にスクロールすると過去の日へ移動します");
-    expect(html).toContain("8/21〜8/22");
-    expect(html).toContain("記録のある2日・3.4 kWh");
-    // 開いた直後は右端（最新）なので「最新へ」は隠れている
-    expect(html).toMatch(/aria-hidden="true" tabindex="-1"[^>]*>最新へ/);
+    expect(html).toContain('href="/energy"');
+    expect(html).toContain("推移を見る");
+    expect(html).toContain("8/21〜8/22・3.4 kWh");
+    // 横スクロールと「最新へ」は推移ページへ移した
+    expect(html).not.toContain("左右にスクロール");
+    expect(html).not.toContain("最新へ");
   });
 
   it("「その他」が1日も無ければ注記を出さない（#319）", () => {
