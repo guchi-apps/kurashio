@@ -247,3 +247,35 @@ def test_mock_mode_validates_but_does_not_store(env, monkeypatch):
     monkeypatch.setattr(database, "DB_MOCK", True)
     assert post(client).json() == {"status": "mock_ok"}
     assert post(client, body(records=[])).status_code == 422
+
+
+@pytest.mark.parametrize("other_kwh, expected", [(0.9, "conflict"), (0.3, "created")])
+def test_concurrent_manual_import_between_check_and_insert(env, monkeypatch, other_kwh, expected):
+    """突き合わせのあと commit までに手動取込が同じ行を書いても、500にせず読み直して判定する。"""
+    from backend import database, kepco_internal
+
+    client, factory = env
+    original = kepco_internal._load
+    calls = {"n": 0}
+
+    def load_then_interleave(db, start, end):
+        result = original(db, start, end)
+        calls["n"] += 1
+        if calls["n"] == 1:
+            with factory() as other:
+                other.add(
+                    database.KepcoHourlyUsageRecord(
+                        date=datetime.date(2026, 10, 1), hour=0, kwh=other_kwh
+                    )
+                )
+                other.commit()
+        return result
+
+    monkeypatch.setattr(kepco_internal, "_load", load_then_interleave)
+    response = post(client)
+    assert response.status_code == 200
+    assert response.json()["status"] == expected
+    assert calls["n"] == 2
+    rows = stored(factory)
+    assert rows[("2026-10-01", 0)] == other_kwh
+    assert len(rows) == (1 if expected == "conflict" else 48)
