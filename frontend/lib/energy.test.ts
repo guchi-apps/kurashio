@@ -12,7 +12,10 @@ import {
   buildEnergyStackColumnsFrom,
   buildEnergyStackSegments,
   energyVisibleColumnRange,
-  mergeEnergyDailyHistory,
+  buildEnergyFilterItems,
+  filterEnergyDailyBySources,
+  orderEnergySourcesForColors,
+  sumEnergyBySource,
   energyMonthOf,
   energyRowRatio,
   energySourceRatio,
@@ -29,7 +32,12 @@ import {
   shiftEnergyDate,
   shiftEnergyMonth,
 } from "@/lib/energy";
-import type { EnergyBreakdown, EnergyHourly, EnergySourceRow } from "@/lib/types";
+import type {
+  EnergyBreakdown,
+  EnergyBreakdownDay,
+  EnergyHourly,
+  EnergySourceRow,
+} from "@/lib/types";
 
 function buildSourceRow(overrides: Partial<EnergySourceRow> = {}): EnergySourceRow {
   return {
@@ -510,24 +518,6 @@ describe("日別グラフの横スクロール（#810）", () => {
     by_source: { aircon: kwh, ...extra },
   });
 
-  it("直近の範囲は親の値を使い、1年ぶんはそれより前の日だけを補う", () => {
-    const recent = [day("2026-10-18", 2), day("2026-10-19", 3, { kepco_other: 1 })];
-    // 1年ぶんは開いたときの値。取り込み前なので 10/19 に「その他」が無い
-    const history = [day("2026-10-17", 1), day("2026-10-18", 9), day("2026-10-19", 3)];
-    const merged = mergeEnergyDailyHistory(recent, history);
-    expect(merged.map((d) => d.date)).toEqual(["2026-10-17", "2026-10-18", "2026-10-19"]);
-    expect(merged[1].kwh).toBe(2);
-    expect(merged[2].by_source.kepco_other).toBe(1);
-  });
-
-  it("1年ぶんが無ければ直近だけを日付順で返す", () => {
-    const recent = [day("2026-10-19", 3), day("2026-10-18", 2)];
-    expect(mergeEnergyDailyHistory(recent, null).map((d) => d.date)).toEqual([
-      "2026-10-18",
-      "2026-10-19",
-    ]);
-  });
-
   it("棒の高さは渡した全期間の最大値が基準になる", () => {
     const columns = buildEnergyStackColumnsFrom(
       [day("2026-06-01", 8), day("2026-10-19", 2)],
@@ -557,5 +547,70 @@ describe("日別グラフの横スクロール（#810）", () => {
     expect(energyVisibleColumnRange(900, 360, 60, 12, 100)).toEqual({ first: 70, last: 99 });
     expect(energyVisibleColumnRange(0, 360, 60, 12, 100)).toEqual({ first: 0, last: 24 });
     expect(energyVisibleColumnRange(0, 360, 0, 12, 0)).toBeNull();
+  });
+});
+
+describe("推移ページの絞り込み（#822）", () => {
+  const row = (source: string, label: string, latest: string, thisMonth = 0) => ({
+    source,
+    label,
+    default_label: label,
+    today_kwh: null,
+    today_cost_yen: null,
+    power_w: null,
+    power_updated_at: null,
+    this_month_kwh: thisMonth,
+    latest_date: latest,
+  });
+  const days: EnergyBreakdownDay[] = [
+    { date: "2026-10-18", kwh: 4, cost_yen: 120, by_source: { aircon: 1, "tapo:冷蔵庫": 1, kepco_other: 2 } },
+    { date: "2026-10-19", kwh: 3, cost_yen: 90, by_source: { aircon: 2, "tapo:冷蔵庫": 1 } },
+  ];
+
+  it("撤去したプラグは後ろへ回し、詳細シート（30日ぶん）と同じ色にする", () => {
+    // 今月0kWhの2台は名前順で並ぶので、撤去した「tapo:A」が直近の「tapo:B」より前に来る
+    const sources = [
+      row("aircon", "エアコン", "2026-10-19", 30),
+      row("tapo:A", "A", "2026-05-01"),
+      row("tapo:B", "B", "2026-10-10"),
+    ];
+    const ordered = orderEnergySourcesForColors(sources, "2026-09-20");
+    expect(ordered.map((r) => r.source)).toEqual(["aircon", "tapo:B", "tapo:A"]);
+    const recentOnly = buildEnergySourceColors([sources[0], sources[2]]);
+    expect(buildEnergySourceColors(ordered)["tapo:B"]).toBe(recentOnly["tapo:B"]);
+  });
+
+  it("「その他」は sources に無くても by_source から拾い、最後に1行足す", () => {
+    const sources = [row("aircon", "エアコン", "2026-10-19"), row("tapo:冷蔵庫", "冷蔵庫", "2026-10-19")];
+    const items = buildEnergyFilterItems(sources, days, buildEnergySourceColors(sources));
+    expect(items.map((i) => i.label)).toEqual(["エアコン", "冷蔵庫", "その他"]);
+    expect(items[2].color).toBe("#95a5a6");
+    // 1日も積まれていなければ出さない
+    expect(buildEnergyFilterItems(sources, [days[1]], {}).map((i) => i.source)).not.toContain(
+      "kepco_other"
+    );
+  });
+
+  it("外した取得元は使用量から抜き、金額は割合で按分する", () => {
+    const filtered = filterEnergyDailyBySources(days, new Set(["kepco_other", "tapo:冷蔵庫"]));
+    expect(filtered[0]).toEqual({ date: "2026-10-18", kwh: 1, cost_yen: 30, by_source: { aircon: 1 } });
+    expect(filtered[1].kwh).toBe(2);
+    expect(filtered[1].cost_yen).toBeCloseTo(60);
+    // 何も外していなければ金額をそのまま使う
+    expect(filterEnergyDailyBySources(days, new Set())).toEqual(days);
+  });
+
+  it("絞り込むと棒の高さは残った取得元の最大値で描き直す", () => {
+    const filtered = filterEnergyDailyBySources(days, new Set(["aircon", "kepco_other"]));
+    const columns = buildEnergyStackColumnsFrom(filtered, [], {});
+    expect(columns.map((c) => c.ratio)).toEqual([1, 1]);
+  });
+
+  it("取得元ごとの合計は範囲の両端を含む", () => {
+    expect(sumEnergyBySource(days, { start: "2026-10-19", end: "2026-10-19" })).toEqual({
+      aircon: 2,
+      "tapo:冷蔵庫": 1,
+    });
+    expect(sumEnergyBySource(days, null).aircon).toBe(3);
   });
 });

@@ -279,28 +279,111 @@ export function buildEnergyStackColumnsFrom(
     }));
 }
 
-/** 詳細シートの日別グラフで遡る日数（#810）。`/api/energy/breakdown` の上限は400 */
+/**
+ * 推移ページ（`/energy`・#822）で遡る日数。`/api/energy/breakdown` の上限は400。
+ * 詳細シートは親の30日ぶんを固定で描き、遡るのはこのページだけ
+ */
 export const ENERGY_DAILY_CHART_HISTORY_DAYS = 365;
 
+/** 詳細シートの固定グラフと、推移ページの配色で「直近」とみなす日数（#822） */
+export const ENERGY_RECENT_DAYS = 30;
+
 /**
- * 親が持つ直近の日別（ダッシュボードの更新・CSVの取り込みで新しくなる）と、
- * 詳細シートが開いたときに取った1年ぶんを1本につなぐ（#810）。
+ * 推移ページの配色に使う取得元の並び（#822）。
  *
- * **直近の範囲は常に `recent` を使い、`history` はそれより前の日だけを補う。**
- * 1年ぶんは開いたときに1度取るだけなので、重なる日まで使うと、開いているあいだの
- * 更新や取り込んだ「その他」がグラフに出なくなる。
+ * サーバーは「エアコン → 今月の使用量 → 名前」で並べるため、1年ぶんの `sources` には
+ * 撤去したプラグが今月0kWhで混ざり、名前順で直近の機器のあいだに割り込むことがある。
+ * そのまま `buildEnergySourceColors` に通すと詳細シート（30日ぶん）と色がずれるので、
+ * `recentStart` 以降に記録がある機器を先に、残りを後ろへ回す（それぞれの中の順は保つ）。
  */
-export function mergeEnergyDailyHistory(
-  recent: readonly EnergyBreakdownDay[],
-  history: readonly EnergyBreakdownDay[] | null
+export function orderEnergySourcesForColors<T extends Pick<EnergySourceRow, "latest_date">>(
+  sources: readonly T[],
+  recentStart: string
+): T[] {
+  const isRecent = (row: T) => row.latest_date != null && row.latest_date >= recentStart;
+  return [...sources.filter(isRecent), ...sources.filter((row) => !isRecent(row))];
+}
+
+export interface EnergyFilterItem {
+  source: string;
+  label: string;
+  color: string;
+}
+
+/**
+ * 推移ページで表示・非表示を選べる取得元の一覧（#822）。
+ *
+ * 機器は `sources` の順。「その他」（KEPCO実測との差分）は `sources` に入らないが
+ * `by_source` には来るので、`daily` に1日でも積まれていれば最後に1行足す。
+ * `sources` に無い他のキーも同じく後ろへ回す（積み上げで黙って消えないように）。
+ */
+export function buildEnergyFilterItems(
+  sources: readonly EnergySourceRow[],
+  daily: readonly EnergyBreakdownDay[],
+  colors: Record<string, string>
+): EnergyFilterItem[] {
+  const known = new Set(sources.map((row) => row.source));
+  const extra: string[] = [];
+  for (const day of daily) {
+    for (const [source, kwh] of Object.entries(day.by_source)) {
+      if (!known.has(source) && kwh > 0 && !extra.includes(source)) extra.push(source);
+    }
+  }
+  // 「その他」は機器のあとの最後に固定する
+  extra.sort((a, b) => Number(a === KEPCO_OTHER_SOURCE) - Number(b === KEPCO_OTHER_SOURCE));
+  return [
+    ...sources.map((row) => ({
+      source: row.source,
+      label: row.label,
+      color: colors[row.source] ?? "#95a5a6",
+    })),
+    ...extra.map((source) => ({
+      source,
+      label: source === KEPCO_OTHER_SOURCE ? KEPCO_OTHER_LABEL : source,
+      color: source === KEPCO_OTHER_SOURCE ? KEPCO_OTHER_COLOR : colors[source] ?? "#95a5a6",
+    })),
+  ];
+}
+
+/**
+ * 外した取得元を抜いた日別（#822）。`kwh` は残った取得元の合計で、
+ * `cost_yen` はその日の金額を使用量の割合で按分した目安（取得元ごとの金額は持っていない）。
+ *
+ * 1つも外していなければ元の日別をそのまま返す（金額を按分し直さない）。
+ */
+export function filterEnergyDailyBySources(
+  daily: readonly EnergyBreakdownDay[],
+  hidden: ReadonlySet<string>
 ): EnergyBreakdownDay[] {
-  const sortedRecent = [...recent].sort((a, b) => a.date.localeCompare(b.date));
-  if (!history || history.length === 0) return sortedRecent;
-  const recentStart = sortedRecent[0]?.date;
-  const older = history
-    .filter((day) => recentStart == null || day.date < recentStart)
-    .sort((a, b) => a.date.localeCompare(b.date));
-  return [...older, ...sortedRecent];
+  if (hidden.size === 0) return [...daily];
+  return daily.map((day) => {
+    const bySource = Object.fromEntries(
+      Object.entries(day.by_source).filter(([source]) => !hidden.has(source))
+    );
+    const kwh = Object.values(bySource).reduce((sum, value) => sum + value, 0);
+    const allKwh = Object.values(day.by_source).reduce((sum, value) => sum + value, 0);
+    return {
+      ...day,
+      kwh,
+      cost_yen: allKwh > 0 ? (day.cost_yen * kwh) / allKwh : 0,
+      by_source: bySource,
+    };
+  });
+}
+
+/** `start`〜`end`（両端を含む）の日の、取得元ごとの使用量（#822）。`null` なら全期間 */
+export function sumEnergyBySource(
+  daily: readonly EnergyBreakdownDay[],
+  range: { start: string; end: string } | null
+): Record<string, number> {
+  const totals: Record<string, number> = {};
+  for (const day of daily) {
+    if (range && (day.date < range.start || day.date > range.end)) continue;
+    for (const [source, kwh] of Object.entries(day.by_source)) {
+      totals[source] = (totals[source] ?? 0) + kwh;
+    }
+  }
+  return totals;
 }
 
 export interface EnergyDailyTick {
