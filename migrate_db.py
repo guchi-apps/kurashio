@@ -371,6 +371,28 @@ def migrate():
                 """))
                 print("Table 'utility_bills' created.")
 
+            # 月次請求の出典（#814）。1通のメールに電気・ガスが載るので (メールID, 種別, 契約) で一意。
+            print("Checking if 'utility_bill_imports' table exists...")
+            if _table_exists(conn, "utility_bill_imports"):
+                print("Table 'utility_bill_imports' already exists.")
+            else:
+                print("Creating table 'utility_bill_imports'...")
+                conn.execute(text("""
+                    CREATE TABLE utility_bill_imports (
+                        import_id INT NOT NULL AUTO_INCREMENT,
+                        source_message_id VARCHAR(255) NOT NULL,
+                        kind VARCHAR(16) NOT NULL,
+                        contract_key VARCHAR(32) NOT NULL,
+                        billing_month DATE NOT NULL,
+                        source_label VARCHAR(64) NULL,
+                        confidence FLOAT NULL,
+                        imported_at DATETIME NOT NULL,
+                        PRIMARY KEY (import_id),
+                        UNIQUE KEY uq_utility_bill_imports_source (source_message_id, kind, contract_key)
+                    )
+                """))
+                print("Table 'utility_bill_imports' created.")
+
             # KEPCO「みるでん」CSVからの時間ごと実測（家全体、#302）。energy_readings と違い
             # 累計スナップショットではなく、その時間帯の実測値をそのまま持つ。
             print("Checking if 'kepco_hourly_usage' table exists...")
