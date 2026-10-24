@@ -11,10 +11,10 @@ from typing import Any, Dict, List, Optional
 import datetime
 import random
 from dotenv import load_dotenv
-from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_links, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
+from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_links, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, kepco_internal, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
 from . import access
 from .auth import get_current_user
-from .internal_auth import require_collector_token, require_internal_bills_write_token, require_internal_control_token, require_internal_token
+from .internal_auth import require_collector_token, require_internal_bills_write_token, require_internal_control_token, require_internal_kepco_write_token, require_internal_token
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 load_dotenv()
@@ -532,6 +532,26 @@ class InternalBillImport(BaseModel):
         # DB_MOCK では保存まで行かないので、入力の誤りはここで弾く
         bills.validate_import(self.model_dump())
         return self
+
+
+class InternalKepcoHourlyRecord(BaseModel):
+    """関西電力の時間別kWhの1時間ぶん（#823）。`hour` は 0..23（0 = 0-1時）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    date: str
+    hour: int = Field(strict=True)
+    kwh: float = Field(strict=True)
+
+
+class InternalKepcoHourlyImport(BaseModel):
+    """AIDE からの時間別kWhの取込（#823）。CSVの先頭行（お客さま番号・住所）は受けない。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    period_start: str
+    period_end: str
+    records: List[InternalKepcoHourlyRecord] = Field(max_length=kepco_internal.MAX_RECORDS)
 
 
 class UtilityBillPayload(BaseModel):
@@ -2410,6 +2430,52 @@ async def import_kepco_hourly_csv(
         db.rollback()
         logger.exception("kepco importの保存に失敗")
         raise HTTPException(status_code=500, detail="internal error") from e
+
+
+@app.post("/api/internal/energy/kepco-hourly/import")
+def import_internal_kepco_hourly(
+    payload: InternalKepcoHourlyImport,
+    db: Session = Depends(database.get_db),
+    _: None = Depends(require_internal_kepco_write_token),
+):
+    """関西電力の時間別kWhを上書きせずに取り込む（AIDE向け・専用トークン・#823）。
+
+    `created` / `unchanged` / `conflict` を200で返す。既存の値と違う時間が1つでもあれば
+    何も書かない（訂正は画面の手動取込で本人が行う）。
+    """
+    today = get_now_jst().date()
+    try:
+        kepco_internal.validate_import(payload.model_dump(), today)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    if database.DB_MOCK or db is None:
+        return {"status": "mock_ok"}
+    try:
+        return kepco_internal.import_hourly(db, payload.model_dump(), today, now=get_now_jst())
+    except Exception as e:
+        db.rollback()
+        logger.exception("関西電力の時間別kWhの取込に失敗")
+        raise HTTPException(status_code=500, detail="internal error") from e
+
+
+@app.get("/api/internal/energy/kepco-hourly")
+def get_internal_kepco_hourly(
+    start: str,
+    end: str,
+    db: Session = Depends(database.get_db),
+    _: None = Depends(require_internal_token),
+):
+    """保存済みの時間別kWhを期間で返す（AIDE向け・読み取り専用・#823）。
+
+    取込の応答を受け取れなかったときに、件数と値で結果を判別するための口。記録の無い時間は
+    `missing` に並べ、0では埋めない。
+    """
+    try:
+        return kepco_internal.query_hourly(
+            None if database.DB_MOCK else db, start, end, get_now_jst().date()
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
 
 def _handle_bambu_events(events: List[Any]) -> None:

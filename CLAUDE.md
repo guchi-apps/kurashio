@@ -662,6 +662,24 @@ DDLもデータの一括書き換えも要らず、本番の権限問題（上�
   読み取り用・操作用とは別の値にする
 - 登録後は AIDE から `POST /api/internal/bills/import` を1件通し、`created`（再送で `duplicate`）を確認する
 
+**関西電力の時間別kWhの取込（`POST /api/internal/energy/kepco-hourly/import`・#823）も、同じ判断をやり直して足した例外。**
+専用の共有トークン `MYROOM_INTERNAL_KEPCO_WRITE_API_KEY`（`internal_auth.require_internal_kepco_write_token`。月次請求とは別の値・
+環境変数フォールバックなし・未発行は503）で通す。処理は `backend/kepco_internal.py`。
+
+- **受けるのは `period_start`・`period_end`・`records[{date, hour, kwh}]` だけ**（`extra="forbid"`）。CSVの先頭行（お客さま番号・住所）は
+  AIDE側で落として送らせる。期間は最長62日・未来日不可、`hour` は 0..23 の整数、`kwh` は有限の 0〜100、期間外・重複は422
+- **既存の値を書き換えない。** 1時間でも保存値と違えば `conflict`（差分を返し、新しい時間も含めて1件も書かない）。差が無ければ
+  無い時間だけを1トランザクションで足して `created`、全件同じなら `unchanged`。丸め差（0.0005以内）は同値とみなす。
+  **訂正はログインした本人が画面の手動CSV取込（`/api/energy/kepco/import`・上書き型）で行う**。手動取込と同じ `(date, hour)` の行なので二重計上は起きない。
+  **内部APIに上書き（`replace` など）を足さないこと**——無人の経路で既存値を書き換えられる範囲が広がる。裏返しとして、AIDEが入れた値も
+  手動取込は差分を知らせずに置き換える（本人の操作なので意図した形）
+- 突き合わせから commit までに手動取込が同じ行を入れると主キーが衝突するが、`IntegrityError` を rollback して読み直し、
+  `conflict` / `unchanged` に倒す（500にしない）
+- **欠けた時間を0で埋めない。** 公開前の空欄は送らせないだけで、応答の `missing` に並べる
+- 照会 `GET /api/internal/energy/kepco-hourly?start=&end=` は読み取り用トークン。件数・日別合計・各時間の値・`missing` を返すので、
+  取込の応答を受け取れなかったときはこれで結果を判別する
+- トークンの登録・ローテーションは上の月次請求と同じ手順（issue-deck の共有トークンへ同名で登録）
+
 - **エアコンの内部APIは画面用と同じ処理を通す。** `main.py` の `_read_aircon_state()` /
   `_apply_aircon_command()` を画面用（ユーザーJWT）と内部API（操作用トークン）の両方が呼ぶ。
   検証・現在値との混合（`aircon_control.merge_command`）・失敗のステータスと文言（404・422・429 と
