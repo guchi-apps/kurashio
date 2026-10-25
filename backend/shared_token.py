@@ -34,7 +34,10 @@ REQUEST_TIMEOUT_SECONDS = 5
 
 # name -> (value, 次に取り直してよい時刻)。value が None は「まだ一度も取れていない」
 _cache: Dict[str, Tuple[Optional[str], float]] = {}
+# _lock はキャッシュ・名前ごとのロック表の読み書きだけに使う。通信はこれを持たずに行う
 _lock = threading.Lock()
+# 同じ名前の二重取得を避けるための、名前ごとのロック
+_name_locks: Dict[str, threading.Lock] = {}
 
 
 def _now() -> float:
@@ -45,6 +48,7 @@ def clear_cache() -> None:
     """キャッシュを空にする（テスト用）。"""
     with _lock:
         _cache.clear()
+        _name_locks.clear()
 
 
 def forget(name: str) -> None:
@@ -95,11 +99,20 @@ def get_shared_token(
         cached = _cache.get(name)
         if cached is not None and _now() < cached[1]:
             return cached[0]
+        name_lock = _name_locks.setdefault(name, threading.Lock())
+
+    # 通信は全トークン共通の _lock の外で、名前ごとのロックだけを持って行う
+    with name_lock:
+        with _lock:
+            cached = _cache.get(name)
+            if cached is not None and _now() < cached[1]:
+                return cached[0]
         try:
             value = do_fetch(name, url, secret)
         except Exception as exc:  # noqa: BLE001 - 失敗の種類だけを残す
             previous = cached[0] if cached else None
-            _cache[name] = (previous, _now() + FAILURE_RETRY_SECONDS)
+            with _lock:
+                _cache[name] = (previous, _now() + FAILURE_RETRY_SECONDS)
             logger.warning(
                 "共有トークン %s の取得に失敗しました（%s）。%s",
                 name,
@@ -107,5 +120,6 @@ def get_shared_token(
                 "直前の値を使います" if previous else "環境変数へフォールバックします",
             )
             return previous
-        _cache[name] = (value, _now() + CACHE_TTL_SECONDS)
+        with _lock:
+            _cache[name] = (value, _now() + CACHE_TTL_SECONDS)
         return value
