@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.46.1",
+    date: "2026-10-25",
+    changes: [
+      "消費電力の取得元の関連付けで、すでに関連付けた行の「機器IDで確認済み」が正しく表示されるようになりました。",
+    ],
+  },
+  {
     version: "4.46.0",
     date: "2026-10-25",
     changes: [
