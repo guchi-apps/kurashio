@@ -34,6 +34,15 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.46.0",
+    date: "2026-10-25",
+    changes: [
+      "消費電力に「推移」ページが加わり、過去の日別の使用量を最大1年分まで遡って見られるようになりました。機器ごとの絞り込みもできます。",
+      "消費電力の詳細シートの日別グラフは、直近30日が幅いっぱいに表示されるようになりました。タップすると推移ページへ進みます。",
+      "解除した取得元の関連付けが、あとから自動で結び直されてしまう不具合を直しました。",
+    ],
+  },
+  {
     version: "4.44.0",
     date: "2026-10-20",
     changes: [

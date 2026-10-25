@@ -13,7 +13,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  fetchEnergyBreakdown,
   fetchEnergyHourly,
   fetchEnergySummary,
   importKepcoCsv,
@@ -23,7 +22,7 @@ import { EnergyDateCalendar } from "@/components/energy-date-calendar";
 import { EnergyLinkSheet } from "@/components/energy-link-sheet";
 import { EnergyRefetchSheet } from "@/components/energy-refetch-sheet";
 import { EnergySourceNameSheet } from "@/components/energy-source-name-sheet";
-import { PowerDailyChart } from "@/components/power-daily-chart";
+import { PowerFixedChart } from "@/components/power-fixed-chart";
 import { PowerSourceDetail } from "@/components/power-source-detail";
 import { SettingsIconButton } from "@/components/ui/settings-icon-button";
 import {
@@ -36,7 +35,6 @@ import {
   KEPCO_OTHER_COLOR,
   KEPCO_OTHER_LABEL,
   KEPCO_OTHER_SOURCE,
-  ENERGY_DAILY_CHART_HISTORY_DAYS,
   buildEnergyDailyRows,
   buildEnergyHourlyColumns,
   buildEnergySourceColors,
@@ -49,13 +47,11 @@ import {
   formatKwh,
   formatYen,
   hasEnergyKepcoOther,
-  mergeEnergyDailyHistory,
   pickRenamableEnergySources,
   shiftEnergyDate,
 } from "@/lib/energy";
 import type {
   EnergyBreakdown,
-  EnergyBreakdownDay,
   EnergyHourly,
   EnergyKepcoImportResult,
   EnergySourceSummary,
@@ -176,26 +172,6 @@ export function PowerDetailPanel({
   const [kepcoError, setKepcoError] = useState<string | null>(null);
   const [kepcoResult, setKepcoResult] = useState<EnergyKepcoImportResult | null>(null);
 
-  // 日別グラフで過去へ遡るための1年ぶん（#810）。親の breakdown は30日ぶんしか無い。
-  // 取れるまでは30日ぶんで描き、失敗しても30日ぶんのまま出し続ける
-  const [dailyHistory, setDailyHistory] = useState<EnergyBreakdownDay[] | null>(null);
-  const [dailyHistoryVersion, setDailyHistoryVersion] = useState(0);
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    fetchEnergyBreakdown(ENERGY_DAILY_CHART_HISTORY_DAYS)
-      .then((data) => {
-        if (!cancelled) setDailyHistory(data.daily);
-      })
-      .catch(() => {
-        // 30日ぶんのグラフは出せているので、ここでは何も出さない
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, dailyHistoryVersion]);
-
   const handleKepcoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // 同じファイルを続けて選び直せるようにする
@@ -209,8 +185,6 @@ export function PowerDetailPanel({
       // 日別（親が持つ breakdown）と時間ごとの両方を取り直す。
       // どちらのタブから取り込んでも、閉じずにもう一方へ切り替えれば反映済みになる。
       onKepcoImported();
-      // 直近は親の breakdown を優先して描くが、1年ぶんにも「その他」が入るので取り直す（#810）
-      setDailyHistoryVersion((version) => version + 1);
       if (hourlyDate) {
         const refreshed = await fetchEnergyHourly(hourlyDate);
         setHourly(refreshed);
@@ -263,21 +237,12 @@ export function PowerDetailPanel({
 
   const sources = breakdown?.sources ?? [];
   const colors = buildEnergySourceColors(sources);
-  // 凡例と色を揃えるため、取得元と色は親の30日ぶんから決める（1年ぶんには撤去したプラグも入り得る）
+  // 親の30日ぶんを固定で描く。過去へ遡るのは推移ページ（/energy・#822）
   const columns = buildEnergyStackColumnsFrom(
-    mergeEnergyDailyHistory(breakdown?.daily ?? [], dailyHistory),
+    [...(breakdown?.daily ?? [])].sort((a, b) => a.date.localeCompare(b.date)),
     sources,
     colors
   );
-  // 左端の一言。1年ぶんが届く前は、その先にまだ記録があるかどうか分からないので出さない
-  const historyStart = todayIso
-    ? shiftEnergyDate(todayIso, -(ENERGY_DAILY_CHART_HISTORY_DAYS - 1))
-    : null;
-  const dailyChartStartNote = !dailyHistory
-    ? null
-    : historyStart && columns[0] && columns[0].date <= historyStart
-      ? "これより前は表示していません"
-      : "ここより前の記録はありません";
   const rows = buildEnergyDailyRows(breakdown?.daily ?? []);
   const hourlyColumns = buildEnergyHourlyColumns(hourly, sources, colors);
   const hourlyRows = hourlyColumns.filter((column) => column.kwh != null);
@@ -617,12 +582,7 @@ export function PowerDetailPanel({
               </div>
             )}
 
-            {tab === "daily" && columns.length > 1 && (
-              <PowerDailyChart
-                columns={columns}
-                startNote={dailyChartStartNote}
-              />
-            )}
+            {tab === "daily" && columns.length > 1 && <PowerFixedChart columns={columns} />}
 
             {sources.length > 0 && (
               <div className="flex flex-wrap gap-x-1 gap-y-1 text-xs text-muted-foreground">

@@ -662,6 +662,24 @@ DDLもデータの一括書き換えも要らず、本番の権限問題（上�
   読み取り用・操作用とは別の値にする
 - 登録後は AIDE から `POST /api/internal/bills/import` を1件通し、`created`（再送で `duplicate`）を確認する
 
+**関西電力の時間別kWhの取込（`POST /api/internal/energy/kepco-hourly/import`・#823）も、同じ判断をやり直して足した例外。**
+専用の共有トークン `MYROOM_INTERNAL_KEPCO_WRITE_API_KEY`（`internal_auth.require_internal_kepco_write_token`。月次請求とは別の値・
+環境変数フォールバックなし・未発行は503）で通す。処理は `backend/kepco_internal.py`。
+
+- **受けるのは `period_start`・`period_end`・`records[{date, hour, kwh}]` だけ**（`extra="forbid"`）。CSVの先頭行（お客さま番号・住所）は
+  AIDE側で落として送らせる。期間は最長62日・未来日不可、`hour` は 0..23 の整数、`kwh` は有限の 0〜100、期間外・重複は422
+- **既存の値を書き換えない。** 1時間でも保存値と違えば `conflict`（差分を返し、新しい時間も含めて1件も書かない）。差が無ければ
+  無い時間だけを1トランザクションで足して `created`、全件同じなら `unchanged`。丸め差（0.0005以内）は同値とみなす。
+  **訂正はログインした本人が画面の手動CSV取込（`/api/energy/kepco/import`・上書き型）で行う**。手動取込と同じ `(date, hour)` の行なので二重計上は起きない。
+  **内部APIに上書き（`replace` など）を足さないこと**——無人の経路で既存値を書き換えられる範囲が広がる。裏返しとして、AIDEが入れた値も
+  手動取込は差分を知らせずに置き換える（本人の操作なので意図した形）
+- 突き合わせから commit までに手動取込が同じ行を入れると主キーが衝突するが、`IntegrityError` を rollback して読み直し、
+  `conflict` / `unchanged` に倒す（500にしない）
+- **欠けた時間を0で埋めない。** 公開前の空欄は送らせないだけで、応答の `missing` に並べる
+- 照会 `GET /api/internal/energy/kepco-hourly?start=&end=` は読み取り用トークン。件数・日別合計・各時間の値・`missing` を返すので、
+  取込の応答を受け取れなかったときはこれで結果を判別する
+- トークンの登録・ローテーションは上の月次請求と同じ手順（issue-deck の共有トークンへ同名で登録）
+
 - **エアコンの内部APIは画面用と同じ処理を通す。** `main.py` の `_read_aircon_state()` /
   `_apply_aircon_command()` を画面用（ユーザーJWT）と内部API（操作用トークン）の両方が呼ぶ。
   検証・現在値との混合（`aircon_control.merge_command`）・失敗のステータスと文言（404・422・429 と
@@ -842,6 +860,20 @@ POST し直している（`daily_energy` は同じ `(date, source)` を上書き
   混ぜると取り込んだ範囲によって「先月」の金額が動く。**タイルの合計と日別行の合計は
   一致しない**が、これは意図した状態
 
+## 消費電力の日別グラフはシートが30日固定、遡るのは推移ページ（#822）
+
+**詳細シート（`power-detail-panel.tsx`）の日別グラフは `PowerFixedChart` で、親の30日ぶんを幅いっぱいに固定で描く。**
+グラフ全体が `/energy`（`components/energy-history-page.tsx`）へのリンクで、横スクロールの `PowerDailyChart`（#810）は
+このページだけが使う。シートで1年ぶんを取り直す処理は持たない（ページが `/api/energy/breakdown?days=365` を自分で取る）。
+
+- **ページの配色は `orderEnergySourcesForColors()` を通す。** サーバーの `sources` は「エアコン → 今月の使用量 → 名前」の順なので、
+  1年ぶんには撤去したプラグが今月0kWhで混ざり、名前順で直近の機器のあいだに割り込む。そのまま配色するとシートと色がずれる
+- **絞り込みの一覧は `buildEnergyFilterItems()` で `by_source` のキーからも拾う。** 「その他」（KEPCO差分）は `sources` に入らないため、
+  `sources` だけで作ると外せない線が残る。「だけ」は押した1行だけを残す（「その他」も外れる）
+- 絞り込みの状態は保存しない（`hidden_devices` とは別物）。取得元ごとの金額は無いので、絞り込み中の金額は使用量の割合で按分した目安
+- `PowerDailyChart` に渡す `columns` は `useMemo` で固定すること。`onViewChange` は棒の並びが変わるたびに呼ばれるので、
+  毎レンダー作り直すと「範囲を通知 → 親が再描画 → 新しい columns → また通知」が止まらなくなる
+
 ## 取得元の表示名は「別名」で持ち、`source` は変えない（消費電力）
 
 **`daily_energy` の主キーは `(date, source)` で、`source` そのものが表示名の出どころ**
@@ -879,6 +911,7 @@ POST し直している（`daily_energy` は同じ `(date, source)` を上書き
 - **足し算しない。** 同じ `(日付, 正規)` が旧名・新名の両方にあるのは、同じ累計が二重に届いただけ。
   `merge_daily_rows` は `updated_at` が新しい行を採り、空の項目だけ古い行で補う（再実行しても同じ）。
   時間ごとのスナップショットは1本の時系列に並べて差分を取る
+- **解除した組み合わせは結び直さない**（#827）。`unlink()` は機器IDで結ばれた別名を外すとき `declined`（`<機器ID>|<別名>`）に印を残し、`register_devices()` がその組み合わせを飛ばす。残さないと次の受信（5分以内）で自動の別名が復活する。利用者が `link()` で結び直せば印は外れる
 - **機器IDが無い旧データは自動で結ばない。** `GET /api/energy/links` の候補は提案であって根拠ではなく、
   消費電力の詳細の「取得元の関連付け」で期間・量を見て利用者が結ぶ。同名の別機器（別の機器ID）は
   自動では結ばない

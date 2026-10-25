@@ -8,7 +8,8 @@
 対応表（`app_settings` の `energy_links` 1行。DDLなし・DB_MOCKは `data/energy_links.json`）
 
     {"devices": {"<device_id>": "<正規 source>"},   # 機器IDの根拠で自動登録
-     "links":   {"<別名 source>": "<正規 source>"}}  # 同一機器の根拠（自動）または利用者の確認（手動）
+     "links":   {"<別名 source>": "<正規 source>"},  # 同一機器の根拠（自動）または利用者の確認（手動）
+     "declined": {"<device_id>|<別名 source>": "1"}}  # 利用者が解除した組み合わせ。自動では結び直さない（#827）
 
 - 別名は常に**正規の側**へ向ける。正規同士は結ばない（連鎖・循環を作らない）。読み替えは念のため
   固定回数で打ち切る
@@ -40,6 +41,10 @@ SETTING_KEY = "energy_links"
 #: 読み替えを辿る最大段数。正常なら1段で終わる（別名→正規）
 MAX_HOPS = 8
 
+def declined_key(device_id: str, source: str) -> str:
+    return f"{device_id}|{source}"
+
+
 #: 機器IDの最大長（MACを正規化した値の想定。異常に長い値は捨てる）
 MAX_DEVICE_ID_LENGTH = 64
 
@@ -60,10 +65,10 @@ def normalize_device_id(value: Any) -> Optional[str]:
 
 def normalize_document(raw: Any) -> Dict[str, Dict[str, str]]:
     """読み込んだ値を `{"devices": {...}, "links": {...}}` の形へ。壊れた項目は落とす。"""
-    document: Dict[str, Dict[str, str]] = {"devices": {}, "links": {}}
+    document: Dict[str, Dict[str, str]] = {"devices": {}, "links": {}, "declined": {}}
     if not isinstance(raw, dict):
         return document
-    for key in ("devices", "links"):
+    for key in ("devices", "links", "declined"):
         section = raw.get(key)
         if not isinstance(section, dict):
             continue
@@ -268,6 +273,8 @@ def register_devices(db: Optional[Session], pairs: Iterable[Tuple[str, str]]) ->
                 continue
             if resolve(document, source) == canonical:
                 continue
+            if declined_key(device_id, source) in document["declined"]:
+                continue  # 利用者が解除した組み合わせは結び直さない（#827）
             try:
                 if owner_elsewhere:
                     raise LinkError("別の機器の取得元です")
@@ -284,7 +291,10 @@ def register_devices(db: Optional[Session], pairs: Iterable[Tuple[str, str]]) ->
     # 変化が無い受信（ほとんどの5分ごとの送信）では、ロックも書き込みもしない
     if all(
         current["devices"].get(device_id) is not None
-        and resolve(current, source) == current["devices"][device_id]
+        and (
+            resolve(current, source) == current["devices"][device_id]
+            or declined_key(device_id, source) in current["declined"]
+        )
         for device_id, source in wanted.items()
     ):
         return
@@ -297,17 +307,27 @@ def link(db: Optional[Session], alias: str, canonical: str) -> Dict[str, Dict[st
     def mutate(document: Dict[str, Dict[str, str]]) -> None:
         _check_link(document, alias, canonical)
         document["links"][alias] = canonical
+        # 利用者が改めて結んだので、過去の「結ばない」印は外す
+        for key in [k for k in document["declined"] if k.endswith("|" + alias)]:
+            del document["declined"][key]
 
     return _update(db, mutate)
 
 
 def unlink(db: Optional[Session], alias: str) -> Dict[str, Dict[str, str]]:
-    """関連付けを外す。機器IDで登録した正規の対応（`devices`）は変えない。"""
+    """関連付けを外す。機器IDで登録した正規の対応（`devices`）は変えない。
+
+    機器IDで結ばれた別名は、外した組み合わせを `declined` に残す（残さないと次の受信で結び直される・#827）。
+    """
 
     def mutate(document: Dict[str, Dict[str, str]]) -> None:
         if alias not in document["links"]:
             raise LinkError("その取得元は関連付けられていません")
+        canonical = resolve(document, alias)
         del document["links"][alias]
+        for device_id, owned in document["devices"].items():
+            if owned == canonical:
+                document["declined"][declined_key(device_id, alias)] = "1"
 
     return _update(db, mutate)
 
