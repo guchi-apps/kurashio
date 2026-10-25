@@ -1934,7 +1934,7 @@ def update_ui_settings(
     return ui_settings.save_settings(updates, db=db)
 
 @app.post("/api/sensor")
-async def create_sensor_data(
+def create_sensor_data(
     data: SensorData,
     device: int = 1,
     device_name: Optional[str] = Query(None, description="初回登録時の表示名（省略可）"),
@@ -2132,7 +2132,7 @@ def get_aircon_daily_stats(
     return daily_stats
 
 @app.post("/api/aircon")
-async def create_aircon_data(
+def create_aircon_data(
     data: AirconData,
     db: Session = Depends(database.get_db),
 ):
@@ -2171,7 +2171,7 @@ async def create_aircon_data(
 
 
 @app.post("/api/energy")
-async def create_daily_energy(
+def create_daily_energy(
     payload: DailyEnergyPayload,
     db: Session = Depends(database.get_db),
     authorization: Optional[str] = Header(default=None),
@@ -2429,6 +2429,11 @@ async def import_kepco_hourly_csv(
     if database.DB_MOCK:
         return {"status": "mock_ok", **kepco_import.summarize(records)}
 
+    # 同期のDB処理はイベントループを止めないようスレッドへ逃がす（#829）
+    return await asyncio.to_thread(_save_kepco_hourly, db, records)
+
+
+def _save_kepco_hourly(db: Session, records: list) -> dict:
     try:
         result = kepco_import.upsert_kepco_hourly(db, records, now=get_now_jst())
         return {"status": "ok", **result}
@@ -2627,7 +2632,7 @@ def import_internal_bill(
 
 
 @app.post("/api/bills")
-async def create_utility_bills(
+def create_utility_bills(
     payload: UtilityBillPayload,
     db: Session = Depends(database.get_db),
 ):
