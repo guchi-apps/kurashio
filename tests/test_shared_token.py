@@ -107,3 +107,34 @@ def test_内部APIは共有トークンを優先し_取れなければ環境変�
     with pytest.raises(HTTPException) as exc:
         internal_auth.require_internal_token("Bearer env-read")
     assert exc.value.status_code == 401
+
+
+def test_別名のトークン取得は通信中の取得に待たされない(monkeypatch):
+    import threading
+
+    from backend import shared_token
+
+    monkeypatch.setenv(shared_token.SECRET_ENV_VAR, "s")
+    monkeypatch.setenv(shared_token.URL_ENV_VAR, "http://example.invalid")
+    shared_token.clear_cache()
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow(name, url, secret):
+        started.set()
+        release.wait(5)
+        return "slow-value"
+
+    result = {}
+    t = threading.Thread(
+        target=lambda: result.update(a=shared_token.get_shared_token("a", slow))
+    )
+    t.start()
+    assert started.wait(2)
+    try:
+        assert shared_token.get_shared_token("b", lambda n, u, s: "fast") == "fast"
+    finally:
+        release.set()
+        t.join()
+    assert result["a"] == "slow-value"
+    shared_token.clear_cache()
