@@ -143,6 +143,18 @@ def require_collector_token(
     _check_bearer(authorization, COLLECTOR_ENV_VAR_NAME, get_collector_api_key())
 
 
+def has_valid_collector_token(authorization: Optional[str]) -> bool:
+    """Bearer が収集専用トークンと一致するか。通らなくても例外にしない（#828）。
+
+    未設定・不一致・Bearer なしはすべて False。`/api/energy` が `device_id` を受けるかの判定に使う。
+    """
+    expected = get_collector_api_key()
+    scheme, _, token = (authorization or "").partition(" ")
+    if expected is None or scheme.lower() != "bearer" or not token:
+        return False
+    return _token_matches(token, expected)
+
+
 def require_internal_bills_write_token(
     authorization: Optional[str] = Header(default=None),
 ) -> None:

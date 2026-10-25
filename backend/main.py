@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_links, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, kepco_internal, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
 from . import access
 from .auth import get_current_user
-from .internal_auth import require_collector_token, require_internal_bills_write_token, require_internal_control_token, require_internal_kepco_write_token, require_internal_token
+from .internal_auth import has_valid_collector_token, require_collector_token, require_internal_bills_write_token, require_internal_control_token, require_internal_kepco_write_token, require_internal_token
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 load_dotenv()
@@ -2174,16 +2174,22 @@ async def create_aircon_data(
 async def create_daily_energy(
     payload: DailyEnergyPayload,
     db: Session = Depends(database.get_db),
+    authorization: Optional[str] = Header(default=None),
 ):
     """日別の電力使用量を受け取る（Raspberry Pi の収集スクリプトから）。
 
     同じ (date, source) は上書きする。当日ぶんは1日のあいだ増えていくため、
     追記だと二重計上になる。
+
+    受け口自体は無認証のままだが、`device_id`（取得元の対応表 `energy_links` を書き換える）は
+    収集専用トークン（`COLLECTOR_API_KEY`）の Bearer が付いているときだけ受ける。
+    無いときは黙って捨て、行の upsert だけにする（#828）。
     """
     if database.DB_MOCK:
         return {"status": "mock_ok", "received": len(payload.records)}
 
     default_source = payload.source or energy.DEFAULT_SOURCE
+    accept_device_id = has_valid_collector_token(authorization)
     try:
         records = [
             {
@@ -2192,7 +2198,7 @@ async def create_daily_energy(
                 "kwh": item.kwh,
                 "cost_yen": item.cost_yen,
                 "power_w": item.power_w,
-                "device_id": item.device_id,
+                "device_id": item.device_id if accept_device_id else None,
             }
             for item in payload.records
         ]
