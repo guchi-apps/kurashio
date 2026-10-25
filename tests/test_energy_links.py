@@ -213,7 +213,7 @@ def test_receiving_again_is_idempotent(db):
 
 def test_legacy_collector_without_device_id_still_works(db):
     energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:PC", 1.0)], now=NOW)
-    assert energy_links.get_document(db) == {"devices": {}, "links": {}}
+    assert energy_links.get_document(db) == {"devices": {}, "links": {}, "declined": {}}
     assert len(energy.fetch_all_rows(db, D(2026, 10, 1), D(2026, 10, 11))) == 1
 
 
@@ -331,3 +331,18 @@ def test_breakdown_label_follows_the_latest_name():
     breakdown = energy.build_breakdown(rows, D(2026, 10, 11), 30.0)
     assert breakdown["sources"][0]["source"] == "tapo:サブPC"
     assert breakdown["sources"][0]["default_label"] == "PC"
+
+
+def test_unlinked_rename_is_not_relinked_by_the_next_receipt(db):
+    energy.upsert_records(db, [_record(D(2026, 10, 10), "tapo:サブPC", 1.5, "AA11")], now=NOW)
+    energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:PC", 0.4, "AA11")], now=NOW)
+    assert energy_links.get_document(db)["links"] == {"tapo:PC": "tapo:サブPC"}
+
+    energy_links.unlink(db, "tapo:PC")
+    energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:PC", 0.5, "AA11")], now=NOW + datetime.timedelta(minutes=5))
+    assert energy_links.get_document(db)["links"] == {}
+
+    # 利用者が改めて結べば有効に戻る
+    energy_links.link(db, "tapo:PC", "tapo:サブPC")
+    assert energy_links.get_document(db)["declined"] == {}
+    assert energy_links.get_document(db)["links"] == {"tapo:PC": "tapo:サブPC"}
