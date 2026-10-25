@@ -32,6 +32,8 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: model.failure)
+        // Universal Links（#843）。リンクから起動・復帰したとき、アプリのURLならWebViewで開く
+        .onOpenURL { url in model.openUniversalLink(url) }
         .onAppear {
             appDelegate.webViewModel = model
             model.startIfNeeded()
