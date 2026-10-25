@@ -740,6 +740,7 @@ def get_links_overview(db: Session, today: datetime.date) -> Dict[str, Any]:
             probe = {
                 "devices": dict(document["devices"]),
                 "links": dict(document["links"]),
+                "declined": dict(document["declined"]),
             }
             try:
                 energy_links._check_link(probe, old, new)
