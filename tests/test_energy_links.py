@@ -114,6 +114,19 @@ def test_rename_is_linked_by_device_id(db):
     }
 
 
+def test_overview_marks_alias_rows_by_the_canonical_device_id(db):
+    energy.upsert_records(db, [_record(D(2026, 10, 10), "tapo:サブPC", 1.5, "AA11")], now=NOW)
+    energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:PC", 0.4, "AA11")], now=NOW)
+    energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:旧", 0.2)], now=NOW)
+    energy_links.link(db, "tapo:旧", "tapo:サブPC")
+
+    overview = energy.get_links_overview(db, D(2026, 10, 12))
+    by_source = {row["source"]: row for row in overview["sources"]}
+    # 別名の行は、正規の側が機器IDを持つかで決まる（自動でも手動でも）
+    assert by_source["tapo:PC"]["linked"] and by_source["tapo:PC"]["device_id_known"]
+    assert by_source["tapo:旧"]["linked"] and by_source["tapo:旧"]["device_id_known"]
+
+
 def test_same_name_on_a_different_device_does_not_overwrite_saved_rows(db):
     energy.upsert_records(db, [_record(D(2026, 10, 11), "tapo:PC", 1.0, "AA11")], now=NOW)
     # 別の機器IDが同じ日・同じ名前で送っても、保存済みの行を上書きしない（#778）
