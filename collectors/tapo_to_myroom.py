@@ -1017,7 +1017,7 @@ async def run_collect(
         return 0
 
     try:
-        result = post_payload(config["api_url"], payload)
+        result = post_payload(config["api_url"], payload, bearer=collector_api_key())
     except urllib.error.HTTPError as exc:
         LOGGER.error("POST が %s で失敗しました: %s", exc.code, exc.read().decode("utf-8", "replace"))
         return 1

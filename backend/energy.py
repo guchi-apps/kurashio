@@ -713,7 +713,7 @@ def get_links_overview(db: Session, today: datetime.date) -> Dict[str, Any]:
                 "label": source_label(source),
                 "canonical": canonical,
                 "linked": canonical != source,
-                "device_id_known": source in device_canonicals,
+                "device_id_known": canonical in device_canonicals,
                 "first_date": first.isoformat(),
                 "last_date": last.isoformat(),
                 "days": int(days),
