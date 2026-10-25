@@ -3389,6 +3389,31 @@ def _resolve_within_directory(base_dir: str, relative_path: str) -> Optional[str
     return candidate
 
 
+# iOSアプリのUniversal Links（#843）。アプリID（チームID.バンドルID）は ios/Kurashio.xcodeproj と
+# ios/scripts/check-consistency.mjs で照合している。`.well-known` を静的ファイルに任せると拡張子が
+# 無く Content-Type が application/json にならず、フロントの書き出しが無い環境では index.html の
+# 200 が返るため、明示のルートで返す。対象はルート `/` のみ（通知側 issue-deck の launchUrl と揃える）
+APPLE_APP_SITE_ASSOCIATION = {
+    "applinks": {
+        "details": [
+            {
+                "appIDs": ["6AA3WFTR94.com.gucchii.kurashio"],
+                "components": [{"/": "/"}],
+            }
+        ]
+    }
+}
+
+
+@app.get("/.well-known/apple-app-site-association", include_in_schema=False)
+def apple_app_site_association():
+    return JSONResponse(
+        APPLE_APP_SITE_ASSOCIATION,
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
 # Serve Next.js static export (frontend/out)
 frontend_dist = os.path.join(os.path.dirname(__file__), "../frontend/out")
 
