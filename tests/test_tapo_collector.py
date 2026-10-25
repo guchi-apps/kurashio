@@ -593,7 +593,7 @@ class TestRunCollect:
         posted = []
         monkeypatch.setattr(tapo, "resolve_hosts", fake_resolve)
         monkeypatch.setattr(tapo, "collect", fake_collect)
-        monkeypatch.setattr(tapo, "post_payload", lambda url, payload: posted.append((url, payload)))
+        monkeypatch.setattr(tapo, "post_payload", lambda url, payload, **_kw: posted.append((url, payload)))
 
         assert asyncio.run(tapo.run_collect(self.CONFIG, dry_run=False, days=1)) == 0
         assert posted[0][0] == self.CONFIG["api_url"]
@@ -663,7 +663,7 @@ class TestRefreshRequest:
             return candidates
 
         monkeypatch.setattr(tapo, "discover_candidates", fake_discover)
-        monkeypatch.setattr(tapo, "post_payload", lambda url, payload: posted.append((url, payload)))
+        monkeypatch.setattr(tapo, "post_payload", lambda url, payload, **_kw: posted.append((url, payload)))
         path = str(tmp_path / "c.json")
 
         asyncio.run(tapo.answer_refresh_request(self.CONFIG, path, now=1000.0))
@@ -678,7 +678,7 @@ class TestRefreshRequest:
             return []
 
         monkeypatch.setattr(tapo, "discover_candidates", fake_discover)
-        monkeypatch.setattr(tapo, "post_payload", lambda url, payload: posted.append(payload))
+        monkeypatch.setattr(tapo, "post_payload", lambda url, payload, **_kw: posted.append(payload))
         path = str(tmp_path / "c.json")
         tapo.save_hosts_cache(path, [("a", "冷蔵庫")], 900.0)
 
@@ -694,7 +694,7 @@ class TestRefreshRequest:
             raise TimeoutError("discovery timed out")
 
         monkeypatch.setattr(tapo, "discover_candidates", fail_discovery)
-        monkeypatch.setattr(tapo, "post_payload", lambda url, payload: posted.append(payload))
+        monkeypatch.setattr(tapo, "post_payload", lambda url, payload, **_kw: posted.append(payload))
         path = str(tmp_path / "c.json")
         tapo.save_hosts_cache(path, [("a", "冷蔵庫")], 900.0)
 
@@ -772,7 +772,7 @@ class TestRefetch:
         done = []
         monkeypatch.setattr(tapo, "resolve_hosts", fake_resolve)
         monkeypatch.setattr(tapo, "collect", fake_collect)
-        monkeypatch.setattr(tapo, "post_payload", lambda url, payload: {"status": "ok"})
+        monkeypatch.setattr(tapo, "post_payload", lambda url, payload, **_kw: {"status": "ok"})
         monkeypatch.setattr(tapo, "report_refetch_done", lambda url, r: done.append(r))
         assert asyncio.run(tapo.run_collect(config, dry_run=False, days=2)) == 0
         return done
