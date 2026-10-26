@@ -34,6 +34,15 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "4.47.0",
+    date: "2026-10-26",
+    changes: [
+      "iOSアプリで、対応するリンクを開いたときにアプリが直接立ち上がるようになりました。",
+      "センサーの異常通知がDiscordに届くようになりました。",
+      "ログイン時の通知と、通常の通知は送られなくなりました。",
+    ],
+  },
+  {
     version: "4.46.1",
     date: "2026-10-25",
     changes: [

@@ -571,26 +571,6 @@ export async function fetchSensorsStatus(): Promise<SensorsStatusResponse> {
   return fetchJson<SensorsStatusResponse>("/api/sensors/status");
 }
 
-/**
- * ログインしたことをバックエンドへ知らせる（Signaly のログイン通知の起点。#240）。
- *
- * Supabase Auth ではコールバックが Supabase 側でホストされるため、バックエンドには
- * 「ログインした瞬間」が通らない。認証コールバックの完了時にここから1回だけ叩く。
- * **通知はおまけなので、失敗してもログインは通す。**
- */
-export async function notifyLogin(): Promise<void> {
-  try {
-    // fetchWithAuth を使わないのは、401 でサインアウトさせないため。
-    // 通知はおまけなので、ここでの失敗がセッションに影響してはいけない。
-    await fetch("/api/auth/login-notify", {
-      method: "POST",
-      headers: await authHeaders(),
-    });
-  } catch {
-    // 通知先が未設定・到達不能でもログインを止めない
-  }
-}
-
 export async function fetchGarbageSchedule(): Promise<GarbageSchedule> {
   return fetchJson<GarbageSchedule>("/api/garbage");
 }

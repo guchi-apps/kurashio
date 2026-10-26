@@ -459,6 +459,13 @@ extension WebViewModel {
         open(path: path)
     }
 
+    /// Universal Links（#843）で渡されたURLをWebViewで開く。
+    /// `kurashio://auth-callback` のようなカスタムスキームはここでは扱わず、Web版のURLだけを受ける
+    func openUniversalLink(_ url: URL) {
+        guard AppConfig.isAppURL(url) else { return }
+        load(url)
+    }
+
     private func open(path: String) {
         guard let url = URL(string: path, relativeTo: AppConfig.baseURL), AppConfig.isAppURL(url) else {
             load(AppConfig.baseURL)

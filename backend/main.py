@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import datetime
 import random
 from dotenv import load_dotenv
-from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_links, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, kepco_internal, light_history, login_notify, push_notify, push_subscriptions, remote, signaly_notify, sensor_monitor, tapo_candidates, ui_settings
+from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_links, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, kepco_internal, light_history, push_notify, push_subscriptions, remote, sensor_monitor, tapo_candidates, ui_settings
 from . import access
 from .auth import get_current_user
 from .internal_auth import has_valid_collector_token, require_collector_token, require_internal_bills_write_token, require_internal_control_token, require_internal_kepco_write_token, require_internal_token
@@ -1579,28 +1579,6 @@ def save_remote_config(
 @app.get("/api/auth/me")
 async def auth_me(user: dict = Depends(get_current_user)):
     return {"email": user.get("email")}
-
-
-@app.post("/api/auth/login-notify", status_code=204)
-def notify_login(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    user: dict = Depends(get_current_user),
-):
-    """ログイン成功を Signaly へ通知する（#240）。
-
-    Supabase Auth ではコールバックが Supabase 側にあるため、バックエンドには
-    「ログインした瞬間」が通らない。フロントエンドの `/auth/callback` が
-    OAuth のコード交換を終えた直後に1回だけ叩く。
-
-    **通知の送信はレスポンスを返した後に回す。** Webhook が詰まっている間
-    ログイン後の画面遷移を待たせないため。送信の成否は呼び出し元へ返さない。
-    """
-    payload = login_notify.build_login_notification(
-        str(user.get("email") or ""),
-        request,
-    )
-    background_tasks.add_task(login_notify.send_login_notification, payload)
 
 
 @app.get("/api/outdoor-location")
@@ -3387,6 +3365,31 @@ def _resolve_within_directory(base_dir: str, relative_path: str) -> Optional[str
     if os.path.commonpath([base_real, candidate]) != base_real:
         return None
     return candidate
+
+
+# iOSアプリのUniversal Links（#843）。アプリID（チームID.バンドルID）は ios/Kurashio.xcodeproj と
+# ios/scripts/check-consistency.mjs で照合している。`.well-known` を静的ファイルに任せると拡張子が
+# 無く Content-Type が application/json にならず、フロントの書き出しが無い環境では index.html の
+# 200 が返るため、明示のルートで返す。対象はルート `/` のみ（通知側 issue-deck の launchUrl と揃える）
+APPLE_APP_SITE_ASSOCIATION = {
+    "applinks": {
+        "details": [
+            {
+                "appIDs": ["6AA3WFTR94.com.gucchii.kurashio"],
+                "components": [{"/": "/"}],
+            }
+        ]
+    }
+}
+
+
+@app.get("/.well-known/apple-app-site-association", include_in_schema=False)
+def apple_app_site_association():
+    return JSONResponse(
+        APPLE_APP_SITE_ASSOCIATION,
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 # Serve Next.js static export (frontend/out)

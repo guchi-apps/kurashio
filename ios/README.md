@@ -662,3 +662,12 @@ Copy Bundle Resources に入り `Multiple commands produce ... Info.plist` に�
 スクリプトで機械的に確認したが、**Xcodeでの実際のビルドは未確認。** Mac miniで開いて
 初回ビルドがうまくいかない場合、Xcodeが提案する自動修正（署名・Capabilities周り）を
 受け入れて直してよい。
+
+## Universal Links（#843）
+
+`https://myroom.gucchii.com/`（ルートのみ）のリンクを押すとアプリで開く（リリース通知の「アプリを開く」など）。
+
+- 配信: バックエンド `backend/main.py` の `/.well-known/apple-app-site-association`（認証・リダイレクトなしの `application/json`）。appID は `6AA3WFTR94.com.gucchii.kurashio`
+- アプリ側: `Kurashio.entitlements` の `applinks:myroom.gucchii.com` と `WebViewModel.openUniversalLink`。ホストを変えるときは `AppConfig.baseURL`・`WKAppBoundDomains` と一緒に揃える
+- 対象パスを増やすなら `components` と、通知側 issue-deck `webview-ios-repos.ts` の `launchUrl` を揃える
+- **entitlements を変えたので入れ直しが必要**。Associated Domains は Apple Developer のアプリID側でも有効化が要る（自動署名なら初回ビルドで付く）。iOS は AASA を端末へ入れる時に取得するため、反映は再インストール後

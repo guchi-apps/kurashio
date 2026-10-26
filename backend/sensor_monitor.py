@@ -1,4 +1,4 @@
-"""センサーデータの鮮度・室温湿度の異常を監視し、Signaly と PWA Push で通知する。"""
+"""センサーデータの鮮度・室温湿度の異常を監視し、異常のときだけ Discord と PWA Push で通知する（復旧・通常時は通知しない・#844）。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from . import database, device_config, notify_events, signaly_notify, ui_settings
+from . import database, device_config, discord_notify, notify_events, ui_settings
 
 load_dotenv()
 
@@ -24,7 +24,6 @@ STATE_PATH = Path(__file__).resolve().parent.parent / "data" / "sensor_alert_sta
 
 STALE_THRESHOLD_MINUTES = int(os.getenv("SENSOR_STALE_MINUTES", "15"))
 REMINDER_INTERVAL_MINUTES = int(os.getenv("SENSOR_ALERT_REMINDER_MINUTES", "60"))
-NOTIFY_ON_RECOVERY = os.getenv("SENSOR_NOTIFY_ON_RECOVERY", "true").lower() == "true"
 
 #: 室温・湿度の異常判定の対象と表示（#293）。ui_settings.ROOM_ANOMALY_METRICS と揃える
 METRIC_LABELS: Dict[str, "tuple[str, str]"] = {
@@ -33,6 +32,8 @@ METRIC_LABELS: Dict[str, "tuple[str, str]"] = {
 }
 #: 上限・下限の境界からこの幅だけ内側に戻るまでは「まだ異常」として扱う（連続通知の抑止）
 ANOMALY_HYSTERESIS: Dict[str, float] = {"temperature": 0.5, "humidity": 3.0}
+#: Discord へ送った値からこの幅だけ異常側へ進んだら「悪化」として再通知する（同程度の超過は繰り返さない）
+ANOMALY_WORSEN_STEP: Dict[str, float] = {"temperature": 2.0, "humidity": 10.0}
 
 
 class SensorStatus(TypedDict):
@@ -229,26 +230,14 @@ def _evaluate_device_anomalies(
 
         if previous_direction in ("high", "low"):
             if _has_recovered(value, thresholds, previous_direction, hysteresis):
-                if NOTIFY_ON_RECOVERY:
-                    _send_anomaly_notification(
-                        device=device,
-                        metric=metric,
-                        label=label,
-                        unit=unit,
-                        value=value,
-                        thresholds=thresholds,
-                        direction=None,
-                        now=now,
-                    )
+                # 復旧は通知しない。状態だけ戻して、次の超過を新たな異常として扱う
                 metric_state["direction"] = None
                 metric_state["notified_at"] = None
+                metric_state.pop("discord_value", None)
                 changed = True
             else:
-                should_remind = _should_send_reminder(
-                    metric_state.get("notified_at"), now, reminder_minutes
-                )
-                if should_remind:
-                    _send_anomaly_notification(
+                if _should_send_reminder(metric_state.get("notified_at"), now, reminder_minutes):
+                    _send_anomaly_push(
                         device=device,
                         metric=metric,
                         label=label,
@@ -260,11 +249,22 @@ def _evaluate_device_anomalies(
                     )
                     metric_state["notified_at"] = now_str
                     changed = True
+                if _send_discord_anomaly(
+                    device=device,
+                    metric=metric,
+                    label=label,
+                    unit=unit,
+                    value=value,
+                    thresholds=thresholds,
+                    direction=previous_direction,
+                    metric_state=metric_state,
+                ):
+                    changed = True
             continue
 
         direction = _direction_for_value(value, thresholds)
         if direction is not None:
-            _send_anomaly_notification(
+            _send_anomaly_push(
                 device=device,
                 metric=metric,
                 label=label,
@@ -276,12 +276,34 @@ def _evaluate_device_anomalies(
             )
             metric_state["direction"] = direction
             metric_state["notified_at"] = now_str
+            metric_state.pop("discord_value", None)
+            _send_discord_anomaly(
+                device=device,
+                metric=metric,
+                label=label,
+                unit=unit,
+                value=value,
+                thresholds=thresholds,
+                direction=direction,
+                metric_state=metric_state,
+            )
             changed = True
 
     return changed
 
 
-def _send_anomaly_notification(
+def _discord_worsened(
+    metric: str, value: float, direction: str, sent_value: Optional[float]
+) -> bool:
+    if sent_value is None:
+        return False
+    step = ANOMALY_WORSEN_STEP.get(metric, 0.0)
+    if direction == "high":
+        return value >= sent_value + step
+    return value <= sent_value - step
+
+
+def _send_discord_anomaly(
     *,
     device: SensorStatus,
     metric: str,
@@ -289,34 +311,63 @@ def _send_anomaly_notification(
     unit: str,
     value: float,
     thresholds: Dict[str, float],
-    direction: Optional[str],
+    direction: str,
+    metric_state: Dict[str, Any],
+) -> bool:
+    """Discord へ送る必要があるときだけ送る。送れたら状態を更新して True。
+
+    新たな異常（`discord_value` が無い）と、送った値からの悪化だけを送る。送れなかった異常は
+    `discord_value` を残さないので、次回の実行で送り直す。
+    """
+    sent_value = metric_state.get("discord_value")
+    worsened = _discord_worsened(metric, value, direction, sent_value)
+    if sent_value is not None and not worsened:
+        return False
+    sent = discord_notify.send_room_anomaly_alert(
+        device_name=device["name"],
+        device_id=device["device_id"],
+        label=label,
+        unit=unit,
+        value=value,
+        limit=thresholds["max"] if direction == "high" else thresholds["min"],
+        direction=direction,
+        worsened=worsened,
+    )
+    if sent:
+        metric_state["discord_value"] = value
+    return sent
+
+
+def _send_anomaly_push(
+    *,
+    device: SensorStatus,
+    metric: str,
+    label: str,
+    unit: str,
+    value: float,
+    thresholds: Dict[str, float],
+    direction: str,
     now: datetime.datetime,
 ) -> None:
     device_name = device["name"]
     device_id = device["device_id"]
 
-    if direction is None:
-        title = f"{label}が正常に戻りました"
-        body = f"{device_name}の{label}は現在{value}{unit}です"
-        state_word = "recovered"
-    elif direction == "high":
+    if direction == "high":
         title = f"{label}が高くなっています"
         body = f"{device_name}の現在の{label}は{value}{unit}です。設定上限の{thresholds['max']}{unit}を超えました"
-        state_word = "high"
     else:
         title = f"{label}が低くなっています"
         body = f"{device_name}の現在の{label}は{value}{unit}です。設定下限の{thresholds['min']}{unit}を下回りました"
-        state_word = "low"
 
     notify_events.dispatch_push_event(
         notify_events.NotificationEvent(
-            kind=f"room_anomaly_{metric}_{state_word}",
+            kind=f"room_anomaly_{metric}_{direction}",
             title=title,
             body=body,
-            priority="high" if direction else "normal",
+            priority="high",
             url="/",
             occurred_at=now.isoformat(),
-            dedupe_key=f"room-anomaly-{device_id}-{metric}-{state_word}",
+            dedupe_key=f"room-anomaly-{device_id}-{metric}-{direction}",
         )
     )
 
@@ -353,17 +404,9 @@ def run_monitor(db: Optional[Session] = None, notify: bool = True) -> List[Senso
             previous = entry.get("status", "ok")
 
             if is_stale:
-                should_notify = previous != "alerting" or _should_send_reminder(
+                if previous != "alerting" or _should_send_reminder(
                     entry.get("notified_at"), now, REMINDER_INTERVAL_MINUTES
-                )
-                if should_notify:
-                    signaly_notify.send_sensor_stale_notification(
-                        device_name=status["name"],
-                        device_id=device_id,
-                        last_seen=status["last_seen"],
-                        age_minutes=status["age_minutes"],
-                        threshold_minutes=stale_threshold_minutes(),
-                    )
+                ):
                     notify_events.dispatch_push_event(
                         notify_events.NotificationEvent(
                             kind="sensor_stale",
@@ -378,26 +421,22 @@ def run_monitor(db: Optional[Session] = None, notify: bool = True) -> List[Senso
                     entry["status"] = "alerting"
                     entry["notified_at"] = now_str
                     changed = True
+                # Discord は検知時の1回だけ。送れなかったときは次回の実行で送り直す
+                if not entry.get("discord_notified") and discord_notify.send_sensor_stale_alert(
+                    device_name=status["name"],
+                    device_id=device_id,
+                    last_seen=status["last_seen"],
+                    age_minutes=status["age_minutes"],
+                    threshold_minutes=stale_threshold_minutes(),
+                ):
+                    entry["status"] = "alerting"
+                    entry["discord_notified"] = True
+                    changed = True
             elif previous == "alerting":
-                if NOTIFY_ON_RECOVERY:
-                    signaly_notify.send_sensor_recovered_notification(
-                        device_name=status["name"],
-                        device_id=device_id,
-                        last_seen=status["last_seen"],
-                    )
-                    notify_events.dispatch_push_event(
-                        notify_events.NotificationEvent(
-                            kind="sensor_recovered",
-                            title="センサーデータが復旧しました",
-                            body=f"{status['name']}のデータを受信しました",
-                            priority="normal",
-                            url="/",
-                            occurred_at=now.isoformat(),
-                            dedupe_key=f"sensor-stale-{device_id}",
-                        )
-                    )
+                # 復旧は通知しない。状態だけ戻す
                 entry["status"] = "ok"
                 entry["notified_at"] = None
+                entry.pop("discord_notified", None)
                 changed = True
             else:
                 entry["status"] = "ok"
