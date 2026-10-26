@@ -767,7 +767,7 @@ DaySpan・AIDE が読むタスク一覧に「次の掃除」を並べること�
 - **最近の記録**: 直近7日分から表示し、「もっと見る」で追加読み込み
 - **モバイルアプリ対応 (PWA)**: ホーム画面に追加して全画面起動可能。専用アプリアイコン設定済み
 - **オフライン表示**: ネットワーク切断時、IndexedDB に保存した最新値と直近24時間のグラフを表示
-- **センサー未到達通知**: API 側で鮮度を監視し、Signaly で通知。ダッシュボードに警告表示
+- **センサー未到達通知**: API 側で鮮度を監視し、検知時に Discord と PWA Push で通知（復旧は通知しない）。ダッシュボードに警告表示
 - **死活監視用 API**: `/api/health` が `GET` / `HEAD` で `200 OK` を返す
 - **ログイン管理**:
   - ダッシュボードのデータ取得 API は **認証必須**（`Authorization: Bearer <Supabaseアクセストークン>`）。センサー POST（`/api/sensor`）・エアコン POST（`/api/aircon`）は認証なし
@@ -776,9 +776,8 @@ DaySpan・AIDE が読むタスク一覧に「次の掃除」を並べること�
   - 本番: GitHub の organization variable `SUPABASE_PROJECT_URL` / `SUPABASE_PUBLISHABLE_KEY` と、このリポジトリの secret `ALLOWED_GOOGLE_EMAILS` を、それぞれ `SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_URL`・`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` / `ALLOWED_GOOGLE_EMAILS` としてサーバー `.env` と GitHub Actions のフロントエンドビルドへ反映（`deploy.yml`。対応表は `.github/secrets-manifest.tsv`）
   - ローカル開発: 本番と誤って同じ Supabase プロジェクトを操作しないよう、1Password 共有アイテム `Supabase` の `dev-project-url` / `dev-publishable-key`（開発用の別 Supabase プロジェクト）を使用。**ローカルは自動同期されない**ため、バックエンドはローカルの `.env` に `SUPABASE_URL` を、フロントエンドは `frontend/.env.local` に `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` を、それぞれ 1Password アプリから値をコピーして書き込む（詳細は「3. フロントエンド (Next.js)」参照）
   - Supabase ダッシュボードの Authentication → URL Configuration → Redirect URLs に、本番用プロジェクトには本番ドメインの、開発用プロジェクトにはローカル開発用の `/auth/callback` を、それぞれ**完全一致**で登録しておく必要がある（生の IP アドレスをホスト名にした URL は無条件で拒否される）
-  - ログイン成功時: Signaly へ通知（`LOGIN_WEBHOOK_URL`）。Supabase Auth ではコールバックが Supabase 側にあり、バックエンドに「ログインした瞬間」が通らないため、フロントエンドの `/auth/callback` が `POST /api/auth/login-notify` を1回だけ叩いて起点にしている（#240）。宛先は**全アプリ共通の1チャンネル**で、どのアプリのログインかはペイロードの `source`（`backend/login_notify.py` の `APP_NAME`）で見分ける（guchi-apps/signaly#192）。**未設定なら通知が飛ばないだけで、ログイン自体は通る**
     - **`/auth/callback` に来たこと自体を「いまログインした」の合図にしている。** URL の `?code=` の有無では判定できない。Supabase クライアント（`frontend/lib/supabase-client.ts`）は `flowType` を指定しておらず、既定の **implicit フロー**で動くため、本物のログインではアクセストークンがハッシュ（`#access_token=...`）で返り、`code` は付かない
-  - センサー異常・復旧時: Signaly（1Password の `sensor-webhook-url`）へ通知
+  - センサー異常時のみ: Discord（1Password の `apps/Notify/alert-webhook-url`、`DISCORD_ALERT_WEBHOOK_URL` として同期）へ通知。新たな異常と、送った値からの悪化（室温 2℃・湿度 10% 以上）だけを送り、同程度の超過の継続・復旧・通常時は送らない。送れなかった異常は次回（10分後）の実行で送り直し、失敗は `Discord alert delivery failed` としてログに残る（Webhook URL は出さない）。PWA Push も復旧は通知しない（#844）
   - GitHub Actions（CI / デプロイ）の成功・失敗: Signaly へ通知
 
 ## API 概要
@@ -787,7 +786,6 @@ DaySpan・AIDE が読むタスク一覧に「次の掃除」を並べること�
 |----------|------|------|
 | GET/HEAD | `/api/health` | 死活監視 |
 | GET | `/api/auth/me` | ログイン確認（Supabaseセッションの許可判定、要認証） |
-| POST | `/api/auth/login-notify` | ログイン成功を Signaly へ通知（要認証。フロントの `/auth/callback` から呼ぶ） |
 | GET | `/api/latest?device=1` | 最新の屋内＋屋外データ（要認証） |
 | GET | `/api/history?range=day&device=1` | 履歴（`range`: day/week/month/year、または `start`/`end`、要認証） |
 | GET | `/api/daily-stats?device=1` | 日次統計（最近の記録、要認証） |
@@ -979,7 +977,6 @@ ALTER 権限がない場合は、スクリプトが表示する SQL を管理者
 | フィールド名 | 内容 |
 |-------------|------|
 | `allowed-google-emails` | ログインを許可する Google アカウントのメールアドレス（カンマ区切り、`ALLOWED_GOOGLE_EMAILS` としてサーバー `.env` に同期） |
-| `sensor-webhook-url` | センサー異常・復旧通知用 Signaly Webhook URL（`SENSOR_WEBHOOK_URL` として同期） |
 | `garbage-notion-token` | ゴミの日を書き出す Notion インテグレーションのトークン（`GARBAGE_NOTION_TOKEN` として同期） |
 | `garbage-notion-data-source-id` | 書き出し先の Notion データソースID（`GARBAGE_NOTION_DATA_SOURCE_ID` として同期。`database_id` ではない） |
 | `cleaning-notion-token` | 次の掃除を書き出す Notion インテグレーションのトークン（`CLEANING_NOTION_TOKEN` として同期）。`garbage-notion-token` と同じ値でよいが、Task データベース側にもそのインテグレーションを接続しておくこと |
@@ -1035,7 +1032,6 @@ cd ~/apps/issue-deck && scripts/provision-secret.sh --repo guchi-apps/myroom --k
 
 | フィールド名 | 内容 |
 |-------------|------|
-| `login-webhook-url` | 全アプリ共通のログイン通知用 Signaly Webhook URL。organization secret `SIGNALY_LOGIN_WEBHOOK_URL` として GitHub へ入っており、`LOGIN_WEBHOOK_URL` としてサーバー `.env` に同期される（guchi-apps/signaly#192） |
 
 **アイテム `Server`**（セキュアノート等・organization 共通。このリポジトリからは同期しない）
 
@@ -1115,7 +1111,6 @@ python3 /tmp/virtualenv.pyz venv
 | `SUPABASE_URL` | variable `SUPABASE_PROJECT_URL` | organization 共通 |
 | `ALLOWED_GOOGLE_EMAILS` | secret `ALLOWED_GOOGLE_EMAILS` | このリポジトリ |
 | `SENSOR_WEBHOOK_URL` | secret `SENSOR_WEBHOOK_URL` | このリポジトリ |
-| `LOGIN_WEBHOOK_URL` | secret `SIGNALY_LOGIN_WEBHOOK_URL` | organization 共通 |
 | `GARBAGE_NOTION_TOKEN` | secret `GARBAGE_NOTION_TOKEN` | このリポジトリ |
 | `GARBAGE_NOTION_DATA_SOURCE_ID` | secret `GARBAGE_NOTION_DATA_SOURCE_ID` | このリポジトリ |
 | `CLEANING_NOTION_TOKEN` | secret `CLEANING_NOTION_TOKEN` | このリポジトリ |
