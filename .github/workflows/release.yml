@@ -34,35 +34,3 @@ jobs:
         with:
           generate_release_notes: true
           prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
-
-  notify:
-    runs-on: ubuntu-latest
-    needs: release
-    if: always()
-
-    # GitHub側の値をここで明示的に渡す。以前は実行のたびに1Passwordから読んで
-    # いたが、サービスアカウントの日次レート制限を使い切ってフリート全体の
-    # デプロイが止まった（guchi-apps/issue-deck#1302）。SERVER_*・SHARED_DB_*・
-    # SUPABASE_* はorganizationの共通値。
-    #
-    # このブロックは scripts/generate-workflow-env-block.sh で生成する（guchi-apps/issue-deck#1307）。
-    env:
-      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Signaly に通知
-        # 通知はCIやデプロイの合否そのものではない。ここが失敗してもrun全体を
-        # 落とさない（guchi-apps/issue-deck#1302）。
-        continue-on-error: true
-        env:
-          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
-          NOTIFY_STATUS: ${{ needs.release.result }}
-          NOTIFY_APP: kurashio
-          SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}
-          NOTIFY_KIND: リリース
-          NOTIFY_VERSION: ${{ github.ref_name }}
-          NOTIFY_JOB: release
-        run: bash .github/scripts/signaly-notify.sh
