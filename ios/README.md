@@ -98,7 +98,7 @@ Deploy to Production 成功
 
 - **古い sha を手動 dispatch すると、印（タグ `ios-testflight/<番号>`）が新しい番号のまま古いコミットを指す。**
   判定は最新の印を基準にするため、以後の判定が古い基準になる（多めに配るだけで取りこぼしはない）。通常の運用では起きない
-- **Web と iOS は別の run。** Web が成功して iOS だけが失敗することがある（Signaly にも別通知が出る）。
+- **Web と iOS は別の run。** Web が成功して iOS だけが失敗することがある（Actions の run は別々に成功・失敗する）。
   iOS の失敗を Web の成功として隠さない
 - **版番号:** 表示バージョン（`MARKETING_VERSION`）は `frontend/package.json` と同期済み（#535）。
   ビルド番号は `run_number * 100 + run_attempt`（Actions が発行する値なので重複しない・Re-run all jobs でも新しい番号）。
@@ -147,8 +147,7 @@ Deploy to Production 成功
 ### キーの失効・期限切れ
 
 APIキーは自動では期限切れにならないが、App Store Connect で**取り消す・権限を下げると 401/403** になる。
-その場合は上の1〜2をやり直す（新しいキーを発行して`apps/AppStoreConnect` の値を差し替え、同期）。通知先は Signaly
-（CI・デプロイと同じチャンネル。種別「iOS配布（TestFlight）」）。**チームのライセンス更新（年1回）**が切れると署名自体が
+その場合は上の1〜2をやり直す（新しいキーを発行して`apps/AppStoreConnect` の値を差し替え、同期）。**チームのライセンス更新（年1回）**が切れると署名自体が
 できなくなるので、Apple Developer Program の更新も本人の操作。
 
 ### 対象外・既知の制約
