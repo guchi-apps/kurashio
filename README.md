@@ -778,7 +778,7 @@ DaySpan・AIDE が読むタスク一覧に「次の掃除」を並べること�
   - Supabase ダッシュボードの Authentication → URL Configuration → Redirect URLs に、本番用プロジェクトには本番ドメインの、開発用プロジェクトにはローカル開発用の `/auth/callback` を、それぞれ**完全一致**で登録しておく必要がある（生の IP アドレスをホスト名にした URL は無条件で拒否される）
     - **`/auth/callback` に来たこと自体を「いまログインした」の合図にしている。** URL の `?code=` の有無では判定できない。Supabase クライアント（`frontend/lib/supabase-client.ts`）は `flowType` を指定しておらず、既定の **implicit フロー**で動くため、本物のログインではアクセストークンがハッシュ（`#access_token=...`）で返り、`code` は付かない
   - センサー異常時のみ: Discord（1Password の `apps/Notify/alert-webhook-url`、`DISCORD_ALERT_WEBHOOK_URL` として同期）へ通知。新たな異常と、送った値からの悪化（室温 2℃・湿度 10% 以上）だけを送り、同程度の超過の継続・復旧・通常時は送らない。送れなかった異常は次回（10分後）の実行で送り直し、失敗は `Discord alert delivery failed` としてログに残る（Webhook URL は出さない）。PWA Push も復旧は通知しない（#844）
-  - GitHub Actions（CI / デプロイ）の成功・失敗: Signaly へ通知
+  - GitHub Actions（CI / デプロイ）の成功・失敗の通知は行わない（Signaly 廃止に伴い撤去・#849）
 
 ## API 概要
 
@@ -1110,7 +1110,7 @@ python3 /tmp/virtualenv.pyz venv
 |----------|----------------|----------|
 | `SUPABASE_URL` | variable `SUPABASE_PROJECT_URL` | organization 共通 |
 | `ALLOWED_GOOGLE_EMAILS` | secret `ALLOWED_GOOGLE_EMAILS` | このリポジトリ |
-| `SENSOR_WEBHOOK_URL` | secret `SENSOR_WEBHOOK_URL` | このリポジトリ |
+| `DISCORD_ALERT_WEBHOOK_URL` | secret `DISCORD_ALERT_WEBHOOK_URL` | このリポジトリ |
 | `GARBAGE_NOTION_TOKEN` | secret `GARBAGE_NOTION_TOKEN` | このリポジトリ |
 | `GARBAGE_NOTION_DATA_SOURCE_ID` | secret `GARBAGE_NOTION_DATA_SOURCE_ID` | このリポジトリ |
 | `CLEANING_NOTION_TOKEN` | secret `CLEANING_NOTION_TOKEN` | このリポジトリ |
@@ -1135,11 +1135,10 @@ python3 /tmp/virtualenv.pyz venv
 1. `frontend/package.json` のバージョンから Git タグ（`v*`）を作成
 2. フロントエンドのビルド（`npm run build` → `frontend/out` に静的出力）
 3. 配布物（tar.gz）の作成と、VPS の `app-deploy-gate` への転送（`upload`）。鍵はこのアプリ専用の `SSH_PRIVATE_KEY`（#803）
-4. GitHub の secret / variable から `SUPABASE_URL` / `SENSOR_WEBHOOK_URL` / `LOGIN_WEBHOOK_URL` / `GARBAGE_NOTION_*` / `CLEANING_NOTION_*` / `INTERNAL_API_KEY` / `INTERNAL_CONTROL_API_KEY` / DB 接続情報などを gate へ送り（`env`）、gate がサーバー `.env` に同期（対応は「1-4. 本番サーバーの `.env`」の表）
+4. GitHub の secret / variable から `SUPABASE_URL` / `DISCORD_ALERT_WEBHOOK_URL` / `GARBAGE_NOTION_*` / `CLEANING_NOTION_*` / `INTERNAL_API_KEY` / `INTERNAL_CONTROL_API_KEY` / DB 接続情報などを gate へ送り（`env`）、gate がサーバー `.env` に同期（対応は「1-4. 本番サーバーの `.env`」の表）
 5. gate が置き場（`/home/github-user/apps/myroom`）へ展開し、配布物の `deploy/gate-install.sh` が venv の用意・依存関係の更新・DB マイグレーション（`migrate_db.py`）・PM2 による再起動（`pm2 restart` では cwd が変わらないため、毎回 `delete` → `start`）を行う（`deploy`）
 6. gate が `127.0.0.1:8000/api/app-version` の `sha` とデプロイしたコミットの一致を確かめる
 7. **デプロイ成功後** GitHub Release を作成
-8. CI 用 Webhook へデプロイ・リリース結果を Signaly 通知
 
 ※ Actions の `GITHUB_TOKEN` で push したタグは別ワークフローを起動しないため、Release も `deploy.yml` 内で実行します。手動でタグ push した場合のみ `release.yml` が走ります。
 
