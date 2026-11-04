@@ -4,6 +4,7 @@
 //
 //   node ios/scripts/asc-api.mjs build-exists   --version 4.30.0 --build 1234
 //   node ios/scripts/asc-api.mjs wait-and-assign --version 4.30.0 --build 1234
+//   node ios/scripts/asc-api.mjs revoke-api-dev-certs [--dry-run true]   （#855。--version/--build は不要）
 //
 // 環境変数: ASC_KEY_ID・ASC_ISSUER_ID・ASC_KEY_P8（.p8 の中身をbase64にした1行）
 //   TESTFLIGHT_GROUP（内部グループ名。省略時は内部グループが1つだけなら自動で選ぶ）
@@ -54,6 +55,19 @@ export function pickInternalGroup(groups, name) {
   throw new Error(
     `内部グループを1つに決められません（${internal.length}件）。TESTFLIGHT_GROUP で名前を指定してください`
   );
+}
+
+/** API経由の自動署名が作った Development 証明書（表示名が「Created via API」）だけを選ぶ。
+ *  Mac の Xcode が作った自分用の証明書（表示名が利用者の名前）・Distribution証明書は選ばない。
+ *  API の `name` は種別の接頭辞付き（「Apple Development: Created via API」）で、素の名前は `displayName` にある。
+ *  `name` の完全一致では1件も選べない（yoteiflow#1010）。displayName を見て、無い場合だけ name の末尾で見る。 */
+export function pickApiCreatedDevCertificates(certs) {
+  return certs.filter((c) => {
+    const a = c.attributes ?? {};
+    if (!/DEVELOPMENT$/.test(a.certificateType ?? "")) return false;
+    if (a.displayName !== undefined) return a.displayName === "Created via API";
+    return /(^|: )Created via API$/.test(a.name ?? "");
+  });
 }
 
 class AscClient {
@@ -179,6 +193,22 @@ async function waitAndAssign(client, { version, build, bundleId, groupName }) {
   console.log(`  内部テストで利用可能（${state}）`);
 }
 
+/** 使い捨てランナーでは秘密鍵が残らず、-allowProvisioningUpdates のたびに Development 証明書が Apple 側へ溜まり、
+ *  Team共用の上限に達して全アプリの署名が失敗する（#855）。署名の前後に呼び、API作成の Development 証明書を失効させる。 */
+async function revokeApiDevCerts(client, { dryRun }) {
+  const certs = (await client.request("GET", "/v1/certificates?limit=200")).data ?? [];
+  const targets = pickApiCreatedDevCertificates(certs);
+  console.log(`証明書 ${certs.length} 件のうち、API作成の Development 証明書は ${targets.length} 件`);
+  for (const c of targets) {
+    if (dryRun) {
+      console.log(`  （dry-run）${c.id} を失効させます`);
+      continue;
+    }
+    await client.request("DELETE", `/v1/certificates/${c.id}`);
+    console.log(`  ${c.id} を失効させました`);
+  }
+}
+
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   const opts = {};
@@ -188,10 +218,14 @@ function parseArgs(argv) {
 
 async function main() {
   const { command, opts } = parseArgs(process.argv.slice(2));
+  const client = new AscClient(process.env);
+  if (command === "revoke-api-dev-certs") {
+    await revokeApiDevCerts(client, { dryRun: opts["dry-run"] === "true" });
+    return;
+  }
   if (!opts.version || !opts.build) {
     throw new Error("--version と --build が要ります");
   }
-  const client = new AscClient(process.env);
   const bundleId = process.env.BUNDLE_ID || "com.gucchii.kurashio";
   if (command === "build-exists") {
     const app = await findApp(client, bundleId);

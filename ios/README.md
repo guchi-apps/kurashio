@@ -123,6 +123,7 @@ Deploy to Production 成功
 | `ASC_KEY_ID が未登録です` | 下の初期設定をしていない |
 | `App Store Connect APIの認証に失敗しました（HTTP 401/403）` | **キーの失効**（下記）または権限不足（「App管理」以上） |
 | `Communication with Apple failed` / プロファイル作成失敗 | 同じキー・チームで App ID・App Group（Widget）が作れない。初回は Xcode で一度 Archive して App ID・App Group・配布用証明書を作っておく |
+| 署名で「Maximum number of certificates generated」系のエラー | Team共用の Development 証明書が上限。ワークフローは署名の前後に `asc-api.mjs revoke-api-dev-certs` で表示名「Created via API」の Development 証明書を失効させる（#855）。手元では `--dry-run true` を付けると対象だけ表示する |
 | `内部グループを1つに決められません` | 内部グループが複数。repository variable `TESTFLIGHT_GROUP` に名前を入れる |
 | `MISSING_EXPORT_COMPLIANCE` | `ITSAppUsesNonExemptEncryption`（下の「暗号化非該当フラグ」）を確認 |
 | `MARKETING_VERSION がずれています` | `node ios/scripts/sync-version.mjs` を実行して develop へ反映 |

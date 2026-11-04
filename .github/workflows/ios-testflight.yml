@@ -138,6 +138,11 @@ jobs:
           cp "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" ~/.appstoreconnect/private_keys/
           chmod 600 "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
 
+      # API作成の Development 証明書は使い捨てランナーに秘密鍵が残らず、配布のたびに溜まって
+      # Team共用の上限に達し、全アプリの署名が失敗する（#855）。署名の前にも掃除する（前回の失敗で残った分）
+      - name: 溜まった Development 証明書を失効させる（署名の前）
+        run: node ios/scripts/asc-api.mjs revoke-api-dev-certs
+
       - name: 署名・アーカイブ（アプリ本体とWidgetに同じビルド番号）
         run: |
           # パイプの左（xcodebuild）の失敗を握り潰さない（既定の bash -e は pipefail なし）
@@ -181,6 +186,11 @@ jobs:
           xcrun altool --upload-app --type ios \
             --file "$(ls "$RUNNER_TEMP"/export/*.ipa | head -n 1)" \
             --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: 今回作られた Development 証明書を失効させる（署名の後）
+        if: always()
+        continue-on-error: true
+        run: node ios/scripts/asc-api.mjs revoke-api-dev-certs
 
       - name: APIキーを消す
         if: always()
