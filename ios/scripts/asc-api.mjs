@@ -4,7 +4,9 @@
 //
 //   node ios/scripts/asc-api.mjs build-exists   --version 4.30.0 --build 1234
 //   node ios/scripts/asc-api.mjs wait-and-assign --version 4.30.0 --build 1234
-//   node ios/scripts/asc-api.mjs revoke-api-dev-certs [--dry-run true]   （#855。--version/--build は不要）
+//   node ios/scripts/asc-api.mjs snapshot-api-dev-certs --out FILE        （署名の前。既存の証明書IDを控える・#859）
+//   node ios/scripts/asc-api.mjs revoke-api-dev-certs --baseline FILE [--dry-run true]
+//       （署名の後。控えに無い＝この実行が作った分だけ失効・#855/#859。--version/--build は不要）
 //
 // 環境変数: ASC_KEY_ID・ASC_ISSUER_ID・ASC_KEY_P8（.p8 の中身をbase64にした1行）
 //   TESTFLIGHT_GROUP（内部グループ名。省略時は内部グループが1つだけなら自動で選ぶ）
@@ -17,6 +19,7 @@
 //   1=それ以外の失敗（認証・処理失敗・割当て失敗）
 
 import { createPrivateKey, sign } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const API = "https://api.appstoreconnect.apple.com";
@@ -68,6 +71,15 @@ export function pickApiCreatedDevCertificates(certs) {
     if (a.displayName !== undefined) return a.displayName === "Created via API";
     return /(^|: )Created via API$/.test(a.name ?? "");
   });
+}
+
+/** 失効させてよい証明書＝署名の前に取った一覧（baseline）に無かったもの、つまりこの実行が作ったもの。
+ *  Teamは他リポジトリ（issue-deck など）と共用で、証明書にはどのリポジトリが作ったかの印が無い。
+ *  「Created via API」を全件消すと相手の署名中の証明書まで失効させる（#859）ので、
+ *  署名前から存在していた分は誰のものか分からないものとして触らない。 */
+export function pickCertsCreatedSince(certs, baselineIds) {
+  const before = new Set(baselineIds);
+  return pickApiCreatedDevCertificates(certs).filter((c) => !before.has(c.id));
 }
 
 class AscClient {
@@ -193,12 +205,34 @@ async function waitAndAssign(client, { version, build, bundleId, groupName }) {
   console.log(`  内部テストで利用可能（${state}）`);
 }
 
-/** 使い捨てランナーでは秘密鍵が残らず、-allowProvisioningUpdates のたびに Development 証明書が Apple 側へ溜まり、
- *  Team共用の上限に達して全アプリの署名が失敗する（#855）。署名の前後に呼び、API作成の Development 証明書を失効させる。 */
-async function revokeApiDevCerts(client, { dryRun }) {
+async function listApiDevCertIds(client) {
   const certs = (await client.request("GET", "/v1/certificates?limit=200")).data ?? [];
-  const targets = pickApiCreatedDevCertificates(certs);
-  console.log(`証明書 ${certs.length} 件のうち、API作成の Development 証明書は ${targets.length} 件`);
+  return { certs, ids: pickApiCreatedDevCertificates(certs).map((c) => c.id) };
+}
+
+/** 署名の前に、すでにある API作成の Development 証明書のIDを控える（失効の対象から外すため）。 */
+async function snapshotApiDevCerts(client, { out }) {
+  if (!out) throw new Error("--out（控えの保存先）が要ります");
+  const { ids } = await listApiDevCertIds(client);
+  writeFileSync(out, JSON.stringify(ids));
+  console.log(`署名前から存在する API作成の Development 証明書 ${ids.length} 件を控えました（これらは失効させません）`);
+}
+
+/** 使い捨てランナーでは秘密鍵が残らず、-allowProvisioningUpdates のたびに Development 証明書が Apple 側へ溜まり、
+ *  Team共用の上限に達して全アプリの署名が失敗する（#855）。署名の後に呼び、**この実行が作った分だけ**を失効させる（#859）。
+ *  控え（baseline）が読めないときは、誰のものか分からないので何も消さない。 */
+async function revokeApiDevCerts(client, { dryRun, baseline }) {
+  let baselineIds;
+  try {
+    baselineIds = JSON.parse(readFileSync(baseline ?? "", "utf8"));
+    if (!Array.isArray(baselineIds)) throw new Error("not an array");
+  } catch {
+    console.log("::warning::署名前の控えが読めないため、証明書は失効させません（他のリポジトリの証明書を消さないため）");
+    return;
+  }
+  const certs = (await client.request("GET", "/v1/certificates?limit=200")).data ?? [];
+  const targets = pickCertsCreatedSince(certs, baselineIds);
+  console.log(`証明書 ${certs.length} 件のうち、この実行が作った Development 証明書は ${targets.length} 件`);
   for (const c of targets) {
     if (dryRun) {
       console.log(`  （dry-run）${c.id} を失効させます`);
@@ -220,7 +254,11 @@ async function main() {
   const { command, opts } = parseArgs(process.argv.slice(2));
   const client = new AscClient(process.env);
   if (command === "revoke-api-dev-certs") {
-    await revokeApiDevCerts(client, { dryRun: opts["dry-run"] === "true" });
+    await revokeApiDevCerts(client, { dryRun: opts["dry-run"] === "true", baseline: opts.baseline });
+    return;
+  }
+  if (command === "snapshot-api-dev-certs") {
+    await snapshotApiDevCerts(client, { out: opts.out });
     return;
   }
   if (!opts.version || !opts.build) {
