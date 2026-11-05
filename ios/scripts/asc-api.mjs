@@ -4,9 +4,7 @@
 //
 //   node ios/scripts/asc-api.mjs build-exists   --version 4.30.0 --build 1234
 //   node ios/scripts/asc-api.mjs wait-and-assign --version 4.30.0 --build 1234
-//   node ios/scripts/asc-api.mjs snapshot-api-dev-certs --out FILE        （署名の前。既存の証明書IDを控える・#859）
-//   node ios/scripts/asc-api.mjs revoke-api-dev-certs --baseline FILE [--dry-run true]
-//       （署名の後。控えに無い＝この実行が作った分だけ失効・#855/#859。--version/--build は不要）
+//   node ios/scripts/asc-api.mjs count-api-dev-certs   （読み取りのみ。件数を表示する・#859。--version/--build は不要）
 //
 // 環境変数: ASC_KEY_ID・ASC_ISSUER_ID・ASC_KEY_P8（.p8 の中身をbase64にした1行）
 //   TESTFLIGHT_GROUP（内部グループ名。省略時は内部グループが1つだけなら自動で選ぶ）
@@ -19,7 +17,6 @@
 //   1=それ以外の失敗（認証・処理失敗・割当て失敗）
 
 import { createPrivateKey, sign } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const API = "https://api.appstoreconnect.apple.com";
@@ -71,15 +68,6 @@ export function pickApiCreatedDevCertificates(certs) {
     if (a.displayName !== undefined) return a.displayName === "Created via API";
     return /(^|: )Created via API$/.test(a.name ?? "");
   });
-}
-
-/** 失効させてよい証明書＝署名の前に取った一覧（baseline）に無かったもの、つまりこの実行が作ったもの。
- *  Teamは他リポジトリ（issue-deck など）と共用で、証明書にはどのリポジトリが作ったかの印が無い。
- *  「Created via API」を全件消すと相手の署名中の証明書まで失効させる（#859）ので、
- *  署名前から存在していた分は誰のものか分からないものとして触らない。 */
-export function pickCertsCreatedSince(certs, baselineIds) {
-  const before = new Set(baselineIds);
-  return pickApiCreatedDevCertificates(certs).filter((c) => !before.has(c.id));
 }
 
 class AscClient {
@@ -205,52 +193,15 @@ async function waitAndAssign(client, { version, build, bundleId, groupName }) {
   console.log(`  内部テストで利用可能（${state}）`);
 }
 
-// 1ページ分(最大200件)しか取らない。上限に達したら一覧が不完全なので、控えも失効も行わない
-const CERT_PAGE_LIMIT = 200;
-
-async function listApiDevCertIds(client) {
-  const certs = (await client.request("GET", `/v1/certificates?limit=${CERT_PAGE_LIMIT}`)).data ?? [];
-  return { certs, ids: pickApiCreatedDevCertificates(certs).map((c) => c.id) };
-}
-
-/** 署名の前に、すでにある API作成の Development 証明書のIDを控える（失効の対象から外すため）。 */
-async function snapshotApiDevCerts(client, { out }) {
-  if (!out) throw new Error("--out（控えの保存先）が要ります");
-  const { certs, ids } = await listApiDevCertIds(client);
-  if (certs.length >= CERT_PAGE_LIMIT) {
-    throw new Error(`証明書が ${CERT_PAGE_LIMIT} 件以上あり一覧を取り切れません。署名前の控えが不完全になるため止めます。Apple Developer の画面で不要な証明書を整理してください`);
-  }
-  writeFileSync(out, JSON.stringify(ids));
-  console.log(`署名前から存在する API作成の Development 証明書 ${ids.length} 件を控えました（これらは失効させません）`);
-}
-
-/** 使い捨てランナーでは秘密鍵が残らず、-allowProvisioningUpdates のたびに Development 証明書が Apple 側へ溜まり、
- *  Team共用の上限に達して全アプリの署名が失敗する（#855）。署名の後に呼び、**この実行が作った分だけ**を失効させる（#859）。
- *  控え（baseline）が読めないときは、誰のものか分からないので何も消さない。 */
-async function revokeApiDevCerts(client, { dryRun, baseline }) {
-  let baselineIds;
-  try {
-    baselineIds = JSON.parse(readFileSync(baseline ?? "", "utf8"));
-    if (!Array.isArray(baselineIds)) throw new Error("not an array");
-  } catch {
-    console.log("::warning::署名前の控えが読めないため、証明書は失効させません（他のリポジトリの証明書を消さないため）");
-    return;
-  }
-  const certs = (await client.request("GET", `/v1/certificates?limit=${CERT_PAGE_LIMIT}`)).data ?? [];
-  if (certs.length >= CERT_PAGE_LIMIT) {
-    console.log("::warning::証明書の一覧を取り切れていない可能性があるため、失効させません");
-    return;
-  }
-  const targets = pickCertsCreatedSince(certs, baselineIds);
-  console.log(`証明書 ${certs.length} 件のうち、この実行が作った Development 証明書は ${targets.length} 件`);
-  for (const c of targets) {
-    if (dryRun) {
-      console.log(`  （dry-run）${c.id} を失効させます`);
-      continue;
-    }
-    await client.request("DELETE", `/v1/certificates/${c.id}`);
-    console.log(`  ${c.id} を失効させました`);
-  }
+/** API作成の Development 証明書の件数を表示するだけ（読み取りのみ・#859）。
+ *  **証明書を失効させる処理は持たない。** Team は他リポジトリ（issue-deck など）と共用で、証明書に作成者の印が無い。
+ *  「署名前に無かったもの」を自分の分とみなして消すと、同時に走る他リポジトリの署名中の証明書まで失効させる。
+ *  溜まった分は Apple Developer の画面で手動で整理する（ios/README.md）。 */
+async function countApiDevCerts(client) {
+  const certs = (await client.request("GET", "/v1/certificates?limit=200")).data ?? [];
+  const n = pickApiCreatedDevCertificates(certs).length;
+  console.log(`証明書 ${certs.length} 件のうち、API作成の Development 証明書は ${n} 件（読み取りのみ。失効はしません）`);
+  if (certs.length >= 200) console.log("::warning::証明書が200件以上あり、一覧を取り切れていません");
 }
 
 function parseArgs(argv) {
@@ -263,12 +214,8 @@ function parseArgs(argv) {
 async function main() {
   const { command, opts } = parseArgs(process.argv.slice(2));
   const client = new AscClient(process.env);
-  if (command === "revoke-api-dev-certs") {
-    await revokeApiDevCerts(client, { dryRun: opts["dry-run"] === "true", baseline: opts.baseline });
-    return;
-  }
-  if (command === "snapshot-api-dev-certs") {
-    await snapshotApiDevCerts(client, { out: opts.out });
+  if (command === "count-api-dev-certs") {
+    await countApiDevCerts(client);
     return;
   }
   if (!opts.version || !opts.build) {

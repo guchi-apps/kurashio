@@ -138,12 +138,6 @@ jobs:
           cp "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8" ~/.appstoreconnect/private_keys/
           chmod 600 "$KEY_DIR/AuthKey_${ASC_KEY_ID}.p8"
 
-      # API作成の Development 証明書は使い捨てランナーに秘密鍵が残らず、配布のたびに溜まって
-      # Team共用の上限に達する（#855）。ただしTeamは他リポジトリ（issue-deck など）と共用で、証明書に持ち主の印は無い。
-      # 署名の前に既存のIDを控え、署名の後に「控えに無い＝この実行が作った分」だけを失効させる（#859）
-      - name: 署名前から存在する Development 証明書を控える
-        run: node ios/scripts/asc-api.mjs snapshot-api-dev-certs --out "$RUNNER_TEMP/dev-cert-baseline.json"
-
       - name: 署名・アーカイブ（アプリ本体とWidgetに同じビルド番号）
         run: |
           # パイプの左（xcodebuild）の失敗を握り潰さない（既定の bash -e は pipefail なし）
@@ -188,10 +182,12 @@ jobs:
             --file "$(ls "$RUNNER_TEMP"/export/*.ipa | head -n 1)" \
             --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
 
-      - name: 今回作られた Development 証明書を失効させる（署名の後・控えに無い分だけ）
+      # Development 証明書は使い捨てランナーで配布のたびに溜まる(#855)が、Team は他リポジトリと共用で作成者の印が無く、
+      # 自動で失効させると他リポジトリの署名中の証明書を壊す(#859)。件数を表示するだけにし、整理は手動で行う
+      - name: API作成の Development 証明書の件数を表示（読み取りのみ）
         if: always()
         continue-on-error: true
-        run: node ios/scripts/asc-api.mjs revoke-api-dev-certs --baseline "$RUNNER_TEMP/dev-cert-baseline.json"
+        run: node ios/scripts/asc-api.mjs count-api-dev-certs
 
       - name: APIキーを消す
         if: always()
