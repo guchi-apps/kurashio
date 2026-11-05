@@ -205,15 +205,21 @@ async function waitAndAssign(client, { version, build, bundleId, groupName }) {
   console.log(`  内部テストで利用可能（${state}）`);
 }
 
+// 1ページ分(最大200件)しか取らない。上限に達したら一覧が不完全なので、控えも失効も行わない
+const CERT_PAGE_LIMIT = 200;
+
 async function listApiDevCertIds(client) {
-  const certs = (await client.request("GET", "/v1/certificates?limit=200")).data ?? [];
+  const certs = (await client.request("GET", `/v1/certificates?limit=${CERT_PAGE_LIMIT}`)).data ?? [];
   return { certs, ids: pickApiCreatedDevCertificates(certs).map((c) => c.id) };
 }
 
 /** 署名の前に、すでにある API作成の Development 証明書のIDを控える（失効の対象から外すため）。 */
 async function snapshotApiDevCerts(client, { out }) {
   if (!out) throw new Error("--out（控えの保存先）が要ります");
-  const { ids } = await listApiDevCertIds(client);
+  const { certs, ids } = await listApiDevCertIds(client);
+  if (certs.length >= CERT_PAGE_LIMIT) {
+    throw new Error(`証明書が ${CERT_PAGE_LIMIT} 件以上あり一覧を取り切れません。署名前の控えが不完全になるため止めます。Apple Developer の画面で不要な証明書を整理してください`);
+  }
   writeFileSync(out, JSON.stringify(ids));
   console.log(`署名前から存在する API作成の Development 証明書 ${ids.length} 件を控えました（これらは失効させません）`);
 }
@@ -230,7 +236,11 @@ async function revokeApiDevCerts(client, { dryRun, baseline }) {
     console.log("::warning::署名前の控えが読めないため、証明書は失効させません（他のリポジトリの証明書を消さないため）");
     return;
   }
-  const certs = (await client.request("GET", "/v1/certificates?limit=200")).data ?? [];
+  const certs = (await client.request("GET", `/v1/certificates?limit=${CERT_PAGE_LIMIT}`)).data ?? [];
+  if (certs.length >= CERT_PAGE_LIMIT) {
+    console.log("::warning::証明書の一覧を取り切れていない可能性があるため、失効させません");
+    return;
+  }
   const targets = pickCertsCreatedSince(certs, baselineIds);
   console.log(`証明書 ${certs.length} 件のうち、この実行が作った Development 証明書は ${targets.length} 件`);
   for (const c of targets) {
