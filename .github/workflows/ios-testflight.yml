@@ -182,6 +182,13 @@ jobs:
             --file "$(ls "$RUNNER_TEMP"/export/*.ipa | head -n 1)" \
             --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
 
+      # Development 証明書は使い捨てランナーで配布のたびに溜まる(#855)が、Team は他リポジトリと共用で作成者の印が無く、
+      # 自動で失効させると他リポジトリの署名中の証明書を壊す(#859)。件数を表示するだけにし、整理は手動で行う
+      - name: API作成の Development 証明書の件数を表示（読み取りのみ）
+        if: always()
+        continue-on-error: true
+        run: node ios/scripts/asc-api.mjs count-api-dev-certs
+
       - name: APIキーを消す
         if: always()
         run: rm -rf "$RUNNER_TEMP/asc" ~/.appstoreconnect/private_keys

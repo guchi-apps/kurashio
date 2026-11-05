@@ -4,6 +4,7 @@
 //
 //   node ios/scripts/asc-api.mjs build-exists   --version 4.30.0 --build 1234
 //   node ios/scripts/asc-api.mjs wait-and-assign --version 4.30.0 --build 1234
+//   node ios/scripts/asc-api.mjs count-api-dev-certs   （読み取りのみ。件数を表示する・#859。--version/--build は不要）
 //
 // 環境変数: ASC_KEY_ID・ASC_ISSUER_ID・ASC_KEY_P8（.p8 の中身をbase64にした1行）
 //   TESTFLIGHT_GROUP（内部グループ名。省略時は内部グループが1つだけなら自動で選ぶ）
@@ -54,6 +55,19 @@ export function pickInternalGroup(groups, name) {
   throw new Error(
     `内部グループを1つに決められません（${internal.length}件）。TESTFLIGHT_GROUP で名前を指定してください`
   );
+}
+
+/** API経由の自動署名が作った Development 証明書（表示名が「Created via API」）だけを選ぶ。
+ *  Mac の Xcode が作った自分用の証明書（表示名が利用者の名前）・Distribution証明書は選ばない。
+ *  API の `name` は種別の接頭辞付き（「Apple Development: Created via API」）で、素の名前は `displayName` にある。
+ *  `name` の完全一致では1件も選べない（yoteiflow#1010）。displayName を見て、無い場合だけ name の末尾で見る。 */
+export function pickApiCreatedDevCertificates(certs) {
+  return certs.filter((c) => {
+    const a = c.attributes ?? {};
+    if (!/DEVELOPMENT$/.test(a.certificateType ?? "")) return false;
+    if (a.displayName !== undefined) return a.displayName === "Created via API";
+    return /(^|: )Created via API$/.test(a.name ?? "");
+  });
 }
 
 class AscClient {
@@ -179,6 +193,17 @@ async function waitAndAssign(client, { version, build, bundleId, groupName }) {
   console.log(`  内部テストで利用可能（${state}）`);
 }
 
+/** API作成の Development 証明書の件数を表示するだけ（読み取りのみ・#859）。
+ *  **証明書を失効させる処理は持たない。** Team は他リポジトリ（issue-deck など）と共用で、証明書に作成者の印が無い。
+ *  「署名前に無かったもの」を自分の分とみなして消すと、同時に走る他リポジトリの署名中の証明書まで失効させる。
+ *  溜まった分は Apple Developer の画面で手動で整理する（ios/README.md）。 */
+async function countApiDevCerts(client) {
+  const certs = (await client.request("GET", "/v1/certificates?limit=200")).data ?? [];
+  const n = pickApiCreatedDevCertificates(certs).length;
+  console.log(`証明書 ${certs.length} 件のうち、API作成の Development 証明書は ${n} 件（読み取りのみ。失効はしません）`);
+  if (certs.length >= 200) console.log("::warning::証明書が200件以上あり、一覧を取り切れていません");
+}
+
 function parseArgs(argv) {
   const [command, ...rest] = argv;
   const opts = {};
@@ -188,10 +213,14 @@ function parseArgs(argv) {
 
 async function main() {
   const { command, opts } = parseArgs(process.argv.slice(2));
+  const client = new AscClient(process.env);
+  if (command === "count-api-dev-certs") {
+    await countApiDevCerts(client);
+    return;
+  }
   if (!opts.version || !opts.build) {
     throw new Error("--version と --build が要ります");
   }
-  const client = new AscClient(process.env);
   const bundleId = process.env.BUNDLE_ID || "com.gucchii.kurashio";
   if (command === "build-exists") {
     const app = await findApp(client, bundleId);

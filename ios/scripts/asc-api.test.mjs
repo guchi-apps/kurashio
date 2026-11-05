@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, verify } from "node:crypto";
 import { describe, it } from "node:test";
 
-import { createJwt, pickInternalGroup } from "./asc-api.mjs";
+import { createJwt, pickApiCreatedDevCertificates, pickInternalGroup } from "./asc-api.mjs";
 
 const g = (name, isInternalGroup) => ({ id: name, attributes: { name, isInternalGroup } });
 
@@ -37,5 +37,33 @@ describe("pickInternalGroup", () => {
   });
   it("指定した名前が無いと失敗する", () => {
     assert.throws(() => pickInternalGroup([g("A", true)], "Z"), /見つかりません/);
+  });
+});
+
+describe("pickApiCreatedDevCertificates", () => {
+  const c = (id, certificateType, attrs) => ({ id, attributes: { certificateType, ...attrs } });
+  it("displayName が「Created via API」の Development 証明書だけを選ぶ", () => {
+    const certs = [
+      c("a", "DEVELOPMENT", { name: "Apple Development: Created via API", displayName: "Created via API" }),
+      c("b", "IOS_DEVELOPMENT", { name: "Apple Development: Created via API", displayName: "Created via API" }),
+      c("c", "DEVELOPMENT", { name: "Apple Development: Guchi (X)", displayName: "Guchi" }),
+      c("d", "DISTRIBUTION", { name: "Apple Distribution: Created via API", displayName: "Created via API" }),
+    ];
+    assert.deepEqual(pickApiCreatedDevCertificates(certs).map((x) => x.id), ["a", "b"]);
+  });
+  it("name の完全一致では選べない（接頭辞つき）が、displayName が無ければ name の末尾で見る", () => {
+    const certs = [
+      c("a", "DEVELOPMENT", { name: "Apple Development: Created via API" }),
+      c("b", "DEVELOPMENT", { name: "Apple Development: Someone" }),
+    ];
+    assert.deepEqual(pickApiCreatedDevCertificates(certs).map((x) => x.id), ["a"]);
+  });
+});
+
+describe("asc-api.mjs は証明書を失効させない（#859）", () => {
+  it("DELETE の呼び出しをソースに持たない（共有Teamの他リポジトリの証明書を壊さない）", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("./asc-api.mjs", import.meta.url), "utf8");
+    assert.doesNotMatch(src, /["']DELETE["']/);
   });
 });
