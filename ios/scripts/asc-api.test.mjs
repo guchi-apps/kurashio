@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { generateKeyPairSync, verify } from "node:crypto";
 import { describe, it } from "node:test";
 
-import { createJwt, pickApiCreatedDevCertificates, pickCertsCreatedSince, pickInternalGroup } from "./asc-api.mjs";
+import { createJwt, pickApiCreatedDevCertificates, pickInternalGroup } from "./asc-api.mjs";
 
 const g = (name, isInternalGroup) => ({ id: name, attributes: { name, isInternalGroup } });
 
@@ -60,18 +60,10 @@ describe("pickApiCreatedDevCertificates", () => {
   });
 });
 
-describe("pickCertsCreatedSince（#859: この実行が作った分だけ）", () => {
-  const api = (id) => ({ id, attributes: { certificateType: "DEVELOPMENT", displayName: "Created via API" } });
-  it("署名前の控えにあるID（他リポジトリの署名中の証明書など）は選ばない", () => {
-    const certs = [api("other-repo"), api("mine-1"), api("mine-2")];
-    assert.deepEqual(pickCertsCreatedSince(certs, ["other-repo"]).map((x) => x.id), ["mine-1", "mine-2"]);
-  });
-  it("控えが空なら API作成の Development 証明書だけが対象で、手元の証明書・Distributionは選ばない", () => {
-    const certs = [
-      api("a"),
-      { id: "mac", attributes: { certificateType: "DEVELOPMENT", displayName: "Guchi" } },
-      { id: "dist", attributes: { certificateType: "DISTRIBUTION", displayName: "Created via API" } },
-    ];
-    assert.deepEqual(pickCertsCreatedSince(certs, []).map((x) => x.id), ["a"]);
+describe("asc-api.mjs は証明書を失効させない（#859）", () => {
+  it("DELETE の呼び出しをソースに持たない（共有Teamの他リポジトリの証明書を壊さない）", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("./asc-api.mjs", import.meta.url), "utf8");
+    assert.doesNotMatch(src, /["']DELETE["']/);
   });
 });
