@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import datetime
 import random
 from dotenv import load_dotenv
-from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, cleaning, cleaning_notion, energy, energy_links, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, kepco_internal, light_history, push_notify, push_subscriptions, remote, sensor_monitor, tapo_candidates, ui_settings
+from . import database, device_tokens, weather, outdoor_config, device_config, aircon_config, aircon_control, apns_notify, apns_subscriptions, bambu, bills, energy, energy_links, energy_refetch, filament, garbage, garbage_notify, garbage_notion, kepco_import, kepco_internal, light_history, push_notify, push_subscriptions, remote, sensor_monitor, tapo_candidates, ui_settings
 from . import access
 from .auth import get_current_user
 from .internal_auth import has_valid_collector_token, require_collector_token, require_internal_bills_write_token, require_internal_control_token, require_internal_kepco_write_token, require_internal_token
@@ -96,21 +96,6 @@ async def _garbage_notion_sync_loop() -> None:
         except Exception:  # Notion 側の障害で API を落とさない
             logger.exception("Garbage Notion sync failed")
         await asyncio.sleep(GARBAGE_NOTION_SYNC_INTERVAL_SECONDS)
-
-
-#: 次の掃除の Notion への書き出し間隔。掃除は画面からいつでも足せるので、
-#: 「今日はもう同期したか」では間引かずに毎回差分を取る（書き込みは差分があるときだけ）。
-CLEANING_NOTION_SYNC_INTERVAL_SECONDS = 3600
-
-
-async def _cleaning_notion_sync_loop() -> None:
-    """次の掃除を Notion のタスクへ書き出し、完了になったものを読み戻す。"""
-    while True:
-        try:
-            await asyncio.to_thread(cleaning_notion.run_sync)
-        except Exception:  # Notion 側の障害で API を落とさない
-            logger.exception("Cleaning Notion sync failed")
-        await asyncio.sleep(CLEANING_NOTION_SYNC_INTERVAL_SECONDS)
 
 
 #: Nature Remo に登録した照明の状態を読む間隔（#368）。レート制限は30回/5分なので、
@@ -205,7 +190,6 @@ async def lifespan(_app: FastAPI):
     if not database.DB_MOCK:
         tasks.append(asyncio.create_task(_garbage_notify_loop()))
         tasks.append(asyncio.create_task(_garbage_notion_sync_loop()))
-        tasks.append(asyncio.create_task(_cleaning_notion_sync_loop()))
         tasks.append(asyncio.create_task(_light_state_poll_loop()))
         tasks.append(asyncio.create_task(_access_heartbeat_loop()))
     try:
@@ -333,8 +317,8 @@ class UiSettingsUpdate(BaseModel):
     room_anomaly_thresholds: Optional[Dict[str, Dict[str, float]]] = None
     #: 同じ異常が続く間の再通知間隔（分）
     room_anomaly_reminder_minutes: Optional[int] = None
-    #: 部屋の3Dビュー（#399）の、3D上の場所とセンサー・エアコン・掃除タスクの対応表。
-    #: {"zones": [{"key": "ldk", "device_id": 1, "ac_id": 1, "cleaning_task_ids": [...]}]}
+    #: 部屋の3Dビュー（#399）の、3D上の場所とセンサー・エアコンの対応表。
+    #: {"zones": [{"key": "ldk", "device_id": 1, "ac_id": 1}]}
     #: どのゾーンが存在するかはフロント（lib/room-layout.ts）が正で、ここは素通しする
     room_layout: Optional[Dict[str, Any]] = None
 
@@ -362,24 +346,6 @@ class ApnsRegisterBody(BaseModel):
 
 class ApnsUnregisterRequest(BaseModel):
     token: str
-
-
-class CleaningTaskUpdate(BaseModel):
-    """掃除の予定1件。画面から送られる定義（実施履歴はサーバー側で引き継ぐ）。"""
-
-    id: Optional[str] = None
-    name: str
-    interval_days: int
-    steps: List[str] = []
-
-
-class CleaningTasksUpdate(BaseModel):
-    tasks: List[CleaningTaskUpdate]
-
-
-class CleaningDoneRequest(BaseModel):
-    #: 実施日（YYYY-MM-DD）。省略時は今日（JST）
-    date: Optional[str] = None
 
 
 class FilamentSpoolCreate(BaseModel):
@@ -1263,83 +1229,6 @@ def send_test_apns(_: dict = Depends(get_current_user)):
         raise HTTPException(status_code=503, detail="APNs is not configured")
     result = apns_notify.send_test_push()
     return {"status": "ok", **result}
-
-
-@app.get("/api/cleaning")
-def get_cleaning(
-    db: Session = Depends(database.get_db),
-    _: dict = Depends(get_current_user),
-):
-    """掃除の予定と、次にやる日・残り日数。定義は app_settings に入っている。"""
-    return cleaning.build_payload(cleaning.get_tasks(db))
-
-
-@app.put("/api/cleaning/tasks")
-def update_cleaning_tasks(
-    body: CleaningTasksUpdate,
-    db: Session = Depends(database.get_db),
-    _: dict = Depends(get_current_user),
-):
-    """定義をまとめて置き換える（追加・編集・削除・並べ替えを1回で受ける）。"""
-    tasks = cleaning.save_tasks([item.model_dump() for item in body.tasks], db=db)
-    return cleaning.build_payload(tasks)
-
-
-def _parse_cleaning_done_date(value: Optional[str]) -> Optional[datetime.date]:
-    """掃除した日を受ける。未指定は None（＝今日）、未来の日と読めない値は400。
-
-    未来の日を黙って落とすと `_normalize_history` が捨てて「押したのに増えない」に
-    見えるので、ここで弾いて理由を返す。
-    """
-    if not value:
-        return None
-    try:
-        parsed = datetime.date.fromisoformat(value)
-    except ValueError:
-        raise HTTPException(
-            status_code=400, detail="date は YYYY-MM-DD で指定してください"
-        ) from None
-    if parsed > cleaning.get_today_jst():
-        raise HTTPException(status_code=400, detail="未来の日付は指定できません")
-    return parsed
-
-
-@app.post("/api/cleaning/tasks/{task_id}/done")
-def mark_cleaning_done(
-    task_id: str,
-    body: Optional[CleaningDoneRequest] = None,
-    db: Session = Depends(database.get_db),
-    _: dict = Depends(get_current_user),
-):
-    """掃除をやった記録を足す。次にやる日はこの日から数え直す。
-
-    `date` は「掃除した日」で、省略すると今日（JST）。当日に押し忘れたときのために
-    過去の日を受けるが、**未来の日は受けない**（#294）。登録した日時は別に記録される。
-    """
-    done_on = _parse_cleaning_done_date(body.date if body is not None else None)
-
-    tasks, found = cleaning.mark_done(task_id, db, done_on=done_on)
-    if not found:
-        raise HTTPException(status_code=404, detail="指定された掃除が見つかりません")
-    return cleaning.build_payload(tasks)
-
-
-@app.delete("/api/cleaning/tasks/{task_id}/done/{done_date}")
-def delete_cleaning_done(
-    task_id: str,
-    done_date: str,
-    db: Session = Depends(database.get_db),
-    _: dict = Depends(get_current_user),
-):
-    """掃除の記録を1件取り消す。日付を間違えて登録したときの直し方（#294）。"""
-    done_on = _parse_cleaning_done_date(done_date)
-    if done_on is None:
-        raise HTTPException(status_code=400, detail="date は YYYY-MM-DD で指定してください")
-
-    tasks, removed = cleaning.remove_done(task_id, done_on, db)
-    if not removed:
-        raise HTTPException(status_code=404, detail="指定された掃除の記録が見つかりません")
-    return cleaning.build_payload(tasks)
 
 
 def _filament_response(action):

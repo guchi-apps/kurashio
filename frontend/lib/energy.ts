@@ -483,7 +483,7 @@ export function energySourceRatio(
 
 /**
  * `date` を `days` 日ずらす。UTC正午を基準に計算し、タイムゾーンによる日またぎのずれを避ける
- * （`frontend/lib/cleaning.ts` の `shiftDate` と同じ考え方。日付文字列を扱う場所ごとに持つ）。
+ * （`frontend/lib/date-utils.ts` の `shiftDate` と同じ考え方。日付文字列を扱う場所ごとに持つ）。
  */
 export function shiftEnergyDate(date: string, days: number): string {
   const parsed = new Date(`${date}T12:00:00Z`);

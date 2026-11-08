@@ -15,13 +15,8 @@ import { LoginScreen } from "@/components/login-screen";
 import { METRIC_ICONS } from "@/components/current-readings";
 import { TrendPanel } from "@/components/trend-panel";
 import { BillCard } from "@/components/bill-card";
-import { CleaningCard } from "@/components/cleaning-card";
 import { PrinterCard } from "@/components/printer-card";
 import { FilamentSheet } from "@/components/filament-sheet";
-import {
-  CleaningDetailPanel,
-  CleaningSettingsPanel,
-} from "@/components/cleaning-detail-panel";
 import { ComingSoonCard } from "@/components/coming-soon-card";
 import { GarbageCard } from "@/components/garbage-card";
 import { NativeWidgetSnapshotSync } from "@/components/native-widget-snapshot-sync";
@@ -34,10 +29,8 @@ import { VersionHistoryDialog } from "@/components/version-history-dialog";
 import { AirconControlPanel } from "@/components/aircon-control-panel";
 import { AirconDetailPanel } from "@/components/aircon-detail-panel";
 import {
-  deleteCleaningDone,
   fetchBillsSummary,
   fetchBambuPrinter,
-  fetchCleaningSchedule,
   fetchDashboardData,
   fetchDevices,
   fetchEnergyBreakdown,
@@ -48,9 +41,7 @@ import {
   fetchAirconUnitsResponse,
   fetchRemoteButtons,
   fetchSensorsStatus,
-  markCleaningDone,
   saveRemoteConfig,
-  updateCleaningTasks,
 } from "@/lib/api";
 import {
   buildDashboardOfflineSnapshot,
@@ -108,7 +99,6 @@ import {
 import {
   COMING_SOON_CARDS,
   BILL_CARD_KEY,
-  CLEANING_CARD_KEY,
   COMING_SOON_SECTION_KEY,
   DASHBOARD_SECTION_LABELS,
   ENERGY_CARD_KEY,
@@ -118,11 +108,6 @@ import {
 } from "@/lib/dashboard-sections";
 import type { BambuPrinterResponse } from "@/lib/bambu";
 import type { FilamentPayload } from "@/lib/filament";
-import type {
-  CleaningSchedule,
-  CleaningTask,
-  CleaningTaskInput,
-} from "@/lib/cleaning";
 import { buildGarbageHighlight, type GarbageSchedule } from "@/lib/garbage";
 import {
   NATIVE_BACKGROUND_SENSORS_EVENT,
@@ -403,13 +388,6 @@ export function MyRoomDashboard() {
   const [staleThresholdMinutes, setStaleThresholdMinutes] = useState<number | null>(null);
   const [garbageSchedule, setGarbageSchedule] = useState<GarbageSchedule | null>(null);
   const [garbageError, setGarbageError] = useState(false);
-  const [cleaningSchedule, setCleaningSchedule] = useState<CleaningSchedule | null>(null);
-  const [cleaningError, setCleaningError] = useState(false);
-  const [cleaningTaskId, setCleaningTaskId] = useState<string | null>(null);
-  const [cleaningSettingsOpen, setCleaningSettingsOpen] = useState(false);
-  const [cleaningBusyId, setCleaningBusyId] = useState<string | null>(null);
-  const [cleaningSaving, setCleaningSaving] = useState(false);
-  const [cleaningSaveError, setCleaningSaveError] = useState<string | null>(null);
   const [bambuPrinter, setBambuPrinter] = useState<BambuPrinterResponse | null>(null);
   const [bambuError, setBambuError] = useState(false);
   // フィラメント在庫（#445）。プリンターの接続とは別に取り、取れなかったときは欄を出さない
@@ -546,10 +524,6 @@ export function MyRoomDashboard() {
     return `ボタン${countVisibleRemoteButtons(remoteButtons)}件を表示中（全${total}件）`;
   }, [remoteButtons]);
 
-  // 開いている項目は id で覚える。実施を記録すると一覧が作り直されるため、
-  // オブジェクトを持つと古い「次にやる日」がシートに残る
-  const activeCleaningTask =
-    cleaningSchedule?.tasks.find((task) => task.id === cleaningTaskId) ?? null;
   const comingSoonVisible = isHiddenKeyVisible(hiddenDeviceKeys, COMING_SOON_SECTION_KEY);
 
   const {
@@ -618,7 +592,6 @@ export function MyRoomDashboard() {
         setEnergyBreakdown((prev) => prev ?? life.energyBreakdown);
         setRemoteButtons((prev) => prev ?? life.remoteButtons);
         setBillSummary((prev) => prev ?? life.billSummary);
-        setCleaningSchedule((prev) => prev ?? life.cleaningSchedule);
         setFilament((prev) => prev ?? life.filament);
         setSensorStatuses((prev) => (prev.length ? prev : life.sensorStatuses));
         setStaleThresholdMinutes((prev) => prev ?? life.staleThresholdMinutes);
@@ -824,66 +797,6 @@ export function MyRoomDashboard() {
     }
   }, []);
 
-  /**
-   * 掃除をやった記録を足す。応答が次の予定まで含んだ一覧なので、
-   * 取り直さずにそのまま置き換える。
-   *
-   * `date` は掃除した日。カードの「やった」ボタンは渡さず、サーバーの今日になる。
-   * 詳細シートからは選んだ日が渡る（当日に押し忘れたぶんを後から入れられる・#294）。
-   */
-  const handleMarkCleaningDone = useCallback(async (task: CleaningTask, date?: string) => {
-    setCleaningBusyId(task.id);
-    try {
-      setCleaningSchedule(await markCleaningDone(task.id, date));
-      setCleaningError(false);
-    } catch (err) {
-      if (err instanceof AuthError) {
-        setIsAuthenticated(false);
-        return;
-      }
-      setCleaningError(true);
-    } finally {
-      setCleaningBusyId(null);
-    }
-  }, [setIsAuthenticated]);
-
-  /** 掃除の記録を1件取り消す。日付を間違えて登録したときの直し方（#294） */
-  const handleDeleteCleaningDone = useCallback(async (task: CleaningTask, date: string) => {
-    setCleaningBusyId(task.id);
-    try {
-      setCleaningSchedule(await deleteCleaningDone(task.id, date));
-      setCleaningError(false);
-    } catch (err) {
-      if (err instanceof AuthError) {
-        setIsAuthenticated(false);
-        return;
-      }
-      setCleaningError(true);
-    } finally {
-      setCleaningBusyId(null);
-    }
-  }, [setIsAuthenticated]);
-
-  const handleSaveCleaningTasks = useCallback(async (tasks: CleaningTaskInput[]) => {
-    setCleaningSaving(true);
-    setCleaningSaveError(null);
-    try {
-      setCleaningSchedule(await updateCleaningTasks(tasks));
-      setCleaningError(false);
-      setCleaningSettingsOpen(false);
-    } catch (err) {
-      if (err instanceof AuthError) {
-        setIsAuthenticated(false);
-        return;
-      }
-      setCleaningSaveError(
-        err instanceof Error ? err.message : "保存できませんでした"
-      );
-    } finally {
-      setCleaningSaving(false);
-    }
-  }, [setIsAuthenticated]);
-
   const fetchData = useCallback(
     async (options?: { showChartLoading?: boolean; reloadHistory?: boolean }) => {
       const showChartLoading = options?.showChartLoading ?? false;
@@ -906,7 +819,6 @@ export function MyRoomDashboard() {
           energy,
           remote,
           bills,
-          cleaning,
           bambu,
           filamentData,
           outdoorList,
@@ -918,7 +830,6 @@ export function MyRoomDashboard() {
           fetchEnergyBreakdown().catch(() => null),
           fetchRemoteButtons().catch(() => null),
           fetchBillsSummary().catch(() => null),
-          fetchCleaningSchedule().catch(() => null),
           fetchBambuPrinter().catch(() => null),
           fetchFilament().catch(() => null),
           fetchOutdoorLocations().catch(() => null),
@@ -946,8 +857,6 @@ export function MyRoomDashboard() {
         setRemoteError(remote == null);
         if (bills) setBillSummary(bills);
         setBillError(bills == null);
-        if (cleaning) setCleaningSchedule(cleaning);
-        setCleaningError(cleaning == null);
         if (bambu) setBambuPrinter(bambu);
         setBambuError(bambu == null);
         if (filamentData) setFilament(filamentData);
@@ -1028,7 +937,6 @@ export function MyRoomDashboard() {
         energyBreakdown,
         remoteButtons,
         billSummary,
-        cleaningSchedule,
         filament,
         sensorStatuses,
         staleThresholdMinutes,
@@ -1050,7 +958,6 @@ export function MyRoomDashboard() {
     energyBreakdown,
     remoteButtons,
     billSummary,
-    cleaningSchedule,
     filament,
     sensorStatuses,
     staleThresholdMinutes,
@@ -1782,25 +1689,6 @@ export function MyRoomDashboard() {
                       />
                     );
                   }
-                  if (card.key === CLEANING_CARD_KEY) {
-                    return (
-                      <CleaningCard
-                        key={card.key}
-                        schedule={cleaningSchedule}
-                        loading={!dashboardDataLoaded && cleaningSchedule == null}
-                        error={cleaningError && cleaningSchedule == null}
-                        busyTaskId={cleaningBusyId}
-                        onOpenTask={(task) => setCleaningTaskId(task.id)}
-                        onOpenSettings={() => {
-                          setCleaningSaveError(null);
-                          setCleaningSettingsOpen(true);
-                        }}
-                        onMarkDone={(task) => {
-                          void handleMarkCleaningDone(task);
-                        }}
-                      />
-                    );
-                  }
                   if (card.key === PRINTER_CARD_KEY) {
                     return (
                       <PrinterCard
@@ -1989,35 +1877,6 @@ export function MyRoomDashboard() {
             void fetchBillsSummary()
               .then((next) => setBillSummary(next))
               .catch(() => {});
-          }}
-        />
-      )}
-
-      {activeCleaningTask && (
-        <CleaningDetailPanel
-          open={cleaningTaskId != null}
-          task={activeCleaningTask}
-          today={cleaningSchedule?.today ?? ""}
-          busy={cleaningBusyId === activeCleaningTask.id}
-          onClose={() => setCleaningTaskId(null)}
-          onMarkDone={(task, date) => {
-            void handleMarkCleaningDone(task, date);
-          }}
-          onDeleteDone={(task, date) => {
-            void handleDeleteCleaningDone(task, date);
-          }}
-        />
-      )}
-
-      {cleaningSettingsOpen && (
-        <CleaningSettingsPanel
-          open={cleaningSettingsOpen}
-          schedule={cleaningSchedule}
-          saving={cleaningSaving}
-          error={cleaningSaveError}
-          onClose={() => setCleaningSettingsOpen(false)}
-          onSave={(tasks) => {
-            void handleSaveCleaningTasks(tasks);
           }}
         />
       )}

@@ -201,7 +201,7 @@ SwitchBot 風のスマートホーム UI をベースに、スマホ向け（最
 
 朝いちばんに知りたい予定を先頭に置き、時系列グラフは掘り下げる情報として下へ回しています。
 
-1. **暮らし（1列）** — 電気の操作・ゴミの日・消費電力・掃除など、推移グラフの凡例を持たないカード
+1. **暮らし（1列）** — 電気の操作・ゴミの日・消費電力など、推移グラフの凡例を持たないカード
 2. **センサー（2列グリッド・PCでは3列）** — 屋内デバイス / 屋外 / エアコン。カードタップでデバイス詳細（グラフ・記録一覧）
 3. **推移（履歴グラフ）** — 指標タブ（温度・湿度・気圧・CO2・照度）で切り替え。スマホではグラフ上と画面下部の固定バーの両方から操作可能
 4. **最近の記録** — 日ごとの最高・最低値をバー表示
@@ -726,42 +726,6 @@ Nature Remo に登録済みのリモコン操作を、ダッシュボードの�
   収集ルールを直したあと翌日まで反映されないのを避けるため、設定のハッシュを
   `data/garbage_notion_state.json`（gitignore）に残して比べています
 
-### 掃除
-
-場所ごとに「何日に1回」「何をするか」を持ち、**最後にやった日 + 間隔（日数）**で次にやる日を決めます。
-曜日固定にしないのは、1日ずれただけで次の週まで飛んでしまい、掃除の実態と合わないためです。
-
-- カード先頭の「今日やること」に出るのは、**期限を過ぎたものと今日が期限のもの**だけです。
-  ここに全部を並べると「そろそろやる」と「もうやるべき」の区別が付きません。1件も無ければブロックごと消えます
-- 場所・間隔・やることは**アプリ画面から**編集します（カード右上の「設定」）。
-  1件ずつ保存せず、開いている間の編集をまとめて `PUT /api/cleaning/tasks` で置き換えるため、
-  追加・削除・並べ替えが1回の保存に収まります。実施履歴は送らず、同じ `id` の項目からサーバー側が引き継ぎます
-- **定義と実施履歴の保存先は既存の `app_settings` テーブル**（キー `cleaning_tasks`）です。
-  掃除のためにテーブルを増やすと `migrate_db.py` へ DDL を足すことになり、本番のアプリ用DBユーザーには
-  CREATE 権限が無いのでデプロイが落ちます（#193）。項目数はせいぜい十数件で1行の JSON に収まるため、
-  既存の器を使っています。**マイグレーションは不要です**
-- 実施履歴は1項目あたり10件まで。画面に出すのは直近3件で、残りは間隔を見直すときの手がかりです
-
-#### Notion のタスクへの書き出し（`backend/cleaning_notion.py`）
-
-ゴミの日と同じ考え方で、次の掃除を Notion の `☑️ Task` データベースへ書き出します。
-DaySpan・AIDE が読むタスク一覧に「次の掃除」を並べることが目的で、掃除の正は myroom 側のままです。
-
-- **書き出すのは場所ごとに「次の1件」だけ。** 先の予定まで並べるとタスク一覧が掃除で埋まります
-- **myroom が書いたページかどうかは multi_select「タグ」に `掃除` が入っているかで判断します。**
-  ゴミの日の書き出し先には目印用の select「種類」がありましたが、Task データベースには無いため、
-  既存のタグへ1つ足して目印にしています。既存の手書きタスクには触りません
-- 照合キーはタイトル（`掃除: <場所名>`）。場所の名前を変えると別物になり、古いページはアーカイブされて
-  新しい名前で作り直されます
-- **日付は「期限」に書きます。** Task データベースには日付型が「期限」「予定日」の2つあるため、
-  型だけでは決まりません。名前で当たらなければ同期を中止します
-- **Notion 側で「完了」にすると、次の同期でその掃除を実施済みとして myroom へ記録します**（読み戻し）。
-  実施日は**同期した日**です。チェックを入れた瞬間は分からないため。同期は1時間ごとなのでずれは小さく収まります
-- 環境変数 `CLEANING_NOTION_TOKEN` と `CLEANING_NOTION_DATA_SOURCE_ID` の両方が設定されているときだけ動きます。
-  **未設定でも掃除カードはそのまま動きます**（書き出しだけが行われない）。トークンはゴミの日と同じ値でよいですが、
-  Notion の権限はページ単位のため、Task データベース側にもそのインテグレーションを接続しておく必要があります
-- 手動で試すときは `python -m backend.cleaning_notion --dry-run`
-
 ### その他
 
 - **最近の記録**: 直近7日分から表示し、「もっと見る」で追加読み込み
@@ -808,9 +772,6 @@ DaySpan・AIDE が読むタスク一覧に「次の掃除」を並べること�
 | GET | `/api/outdoor-location/search?q=大阪` | 地名検索（要認証） |
 | GET | `/api/sensors/status` | センサー鮮度ステータス（要認証） |
 | GET | `/api/garbage` | ゴミの日（今日・明日・この先の予定・品目ごとの次の収集、要認証） |
-| GET | `/api/cleaning` | 掃除の予定と次にやる日（要認証） |
-| PUT | `/api/cleaning/tasks` | 掃除の定義をまとめて置き換え（追加・編集・削除・並べ替え、要認証） |
-| POST | `/api/cleaning/tasks/{id}/done` | 掃除をやった記録を追加（要認証） |
 | GET | `/api/internal/room-state` | 部屋の状態のスナップショット（**サーバー間専用**・下記） |
 | GET | `/api/internal/remote/buttons` | 「電気の操作」で押せるボタンの一覧（**サーバー間専用・操作用トークン**・下記） |
 | POST | `/api/internal/remote/buttons/{button_id}/send` | 登録済みのボタンを押す（**サーバー間専用・操作用トークン**・下記） |
@@ -926,7 +887,6 @@ curl -s -X POST -H "Authorization: Bearer <操作用トークン>" -H "Content-T
 | `data/devices.json` | デバイス表示名 | gitignore、UI から自動生成 |
 | `data/outdoor_location.json` | 屋外地点 | gitignore、UI から自動生成 |
 | `data/garbage.json` | ゴミ収集日のルール | **リポジトリに含まれる**（手で編集してデプロイする） |
-| `data/cleaning.json` | 掃除の予定（モック実行時のみ） | gitignore、UI から自動生成。本番は `app_settings` テーブル |
 
 ## データベース
 
@@ -979,8 +939,6 @@ ALTER 権限がない場合は、スクリプトが表示する SQL を管理者
 | `allowed-google-emails` | ログインを許可する Google アカウントのメールアドレス（カンマ区切り、`ALLOWED_GOOGLE_EMAILS` としてサーバー `.env` に同期） |
 | `garbage-notion-token` | ゴミの日を書き出す Notion インテグレーションのトークン（`GARBAGE_NOTION_TOKEN` として同期） |
 | `garbage-notion-data-source-id` | 書き出し先の Notion データソースID（`GARBAGE_NOTION_DATA_SOURCE_ID` として同期。`database_id` ではない） |
-| `cleaning-notion-token` | 次の掃除を書き出す Notion インテグレーションのトークン（`CLEANING_NOTION_TOKEN` として同期）。`garbage-notion-token` と同じ値でよいが、Task データベース側にもそのインテグレーションを接続しておくこと |
-| `cleaning-notion-data-source-id` | 書き出し先（Notion の `☑️ Task`）のデータソースID（`CLEANING_NOTION_DATA_SOURCE_ID` として同期。`database_id` ではない） |
 | `internal-api-key` | サーバー間参照用APIのトークン（`INTERNAL_API_KEY` として同期）。issue-deck の共有トークン `MYROOM_INTERNAL_API_KEY` が優先で、これはフォールバック（#525） |
 | `internal-control-api-key` | 照明などの操作専用のサーバー間トークン（`INTERNAL_CONTROL_API_KEY` として同期）。共有トークン `MYROOM_INTERNAL_CONTROL_API_KEY` が優先で、これはフォールバック。`internal-api-key` とは**別の値**にする（#419・#525） |
 | `shared-token-api-secret`（item は `apps/issue-deck`） | issue-deck の共有トークンAPIのBearer（`SHARED_TOKEN_API_SECRET` として同期）。取得先URLは organization variable `APP_BASE_URL`。未登録でも環境変数へフォールバックするだけなので、issue-deck の設定画面で `MYROOM_INTERNAL_API_KEY`・`MYROOM_INTERNAL_CONTROL_API_KEY` の利用元に `myroom` が出ているかで確認する（#525） |
@@ -1113,8 +1071,6 @@ python3 /tmp/virtualenv.pyz venv
 | `DISCORD_ALERT_WEBHOOK_URL` | secret `DISCORD_ALERT_WEBHOOK_URL` | このリポジトリ |
 | `GARBAGE_NOTION_TOKEN` | secret `GARBAGE_NOTION_TOKEN` | このリポジトリ |
 | `GARBAGE_NOTION_DATA_SOURCE_ID` | secret `GARBAGE_NOTION_DATA_SOURCE_ID` | このリポジトリ |
-| `CLEANING_NOTION_TOKEN` | secret `CLEANING_NOTION_TOKEN` | このリポジトリ |
-| `CLEANING_NOTION_DATA_SOURCE_ID` | secret `CLEANING_NOTION_DATA_SOURCE_ID` | このリポジトリ |
 | `INTERNAL_API_KEY` | secret `INTERNAL_API_KEY` | このリポジトリ |
 | `INTERNAL_CONTROL_API_KEY` | secret `INTERNAL_CONTROL_API_KEY` | このリポジトリ |
 | `SHARED_TOKEN_API_SECRET` | secret `SHARED_TOKEN_API_SECRET` | このリポジトリ |
@@ -1135,7 +1091,7 @@ python3 /tmp/virtualenv.pyz venv
 1. `frontend/package.json` のバージョンから Git タグ（`v*`）を作成
 2. フロントエンドのビルド（`npm run build` → `frontend/out` に静的出力）
 3. 配布物（tar.gz）の作成と、VPS の `app-deploy-gate` への転送（`upload`）。鍵はこのアプリ専用の `SSH_PRIVATE_KEY`（#803）
-4. GitHub の secret / variable から `SUPABASE_URL` / `DISCORD_ALERT_WEBHOOK_URL` / `GARBAGE_NOTION_*` / `CLEANING_NOTION_*` / `INTERNAL_API_KEY` / `INTERNAL_CONTROL_API_KEY` / DB 接続情報などを gate へ送り（`env`）、gate がサーバー `.env` に同期（対応は「1-4. 本番サーバーの `.env`」の表）
+4. GitHub の secret / variable から `SUPABASE_URL` / `DISCORD_ALERT_WEBHOOK_URL` / `GARBAGE_NOTION_*` / `INTERNAL_API_KEY` / `INTERNAL_CONTROL_API_KEY` / DB 接続情報などを gate へ送り（`env`）、gate がサーバー `.env` に同期（対応は「1-4. 本番サーバーの `.env`」の表）
 5. gate が置き場（`/home/github-user/apps/myroom`）へ展開し、配布物の `deploy/gate-install.sh` が venv の用意・依存関係の更新・DB マイグレーション（`migrate_db.py`）・PM2 による再起動（`pm2 restart` では cwd が変わらないため、毎回 `delete` → `start`）を行う（`deploy`）
 6. gate が `127.0.0.1:8000/api/app-version` の `sha` とデプロイしたコミットの一致を確かめる
 7. **デプロイ成功後** GitHub Release を作成

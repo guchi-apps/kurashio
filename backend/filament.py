@@ -27,7 +27,7 @@ MQTT（`backend/bambu.py`）には使用グラム数が無い。使用量は次�
 ------
 **`app_settings` の `filament_spools` 1行。** スプールは数本〜数十本で1行のJSONに収まるため、
 DDL（`migrate_db.py`）は要らない（本番のアプリ用DBユーザーにはCREATE権限が無い・#193）。
-DB_MOCK のときは `data/filament.json` へ書く（`cleaning.py` と同じ二本立て）。
+DB_MOCK のときは `data/filament.json` へ書く（本番は `app_settings`、モックはファイルの二本立て）。
 
 **Notionの既存データは自動では移さない。** 値が古く使い切りも混ざっているため、画面から
 登録する。使用中のスプールは、登録時に「いまの全体重量」を入れればその値が最初の計量になる。
@@ -376,8 +376,7 @@ def build_payload(
 ) -> Dict[str, Any]:
     """`GET /api/filament` が返す形。使い切りは末尾へ寄せ、それ以外は保存順のまま。
 
-    `today` は日付入力の初期値と上限に使う。端末の時計ではなくサーバー（JST）の今日を返す
-    （掃除の `today` と同じ理由・#294）。
+    `today` は日付入力の初期値と上限に使う。端末の時計ではなくサーバー（JST）の今日を返す。
     """
     today = today or get_today_jst()
     active_id = document["active_id"]

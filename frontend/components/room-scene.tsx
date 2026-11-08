@@ -5,13 +5,11 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
 import { Color, DoubleSide } from "three";
 import type { Group, Mesh, MeshBasicMaterial } from "three";
-import { formatCleaningCountdown } from "@/lib/cleaning";
 import {
   ROOM_AIRCON_MOUNTS,
   ROOM_APPLIANCE_ACTIVE_COLOR,
   ROOM_APPLIANCE_IDLE_COLOR,
   ROOM_CEILING_LIGHTS,
-  ROOM_CLEANING_STATUS_COLORS,
   ROOM_FURNITURE,
   ROOM_WALL_PARTS,
   roomTemperatureColor,
@@ -219,13 +217,6 @@ function RoomZoneParts({
   const lampRadius = Math.min(0.42, Math.max(0.16, shortSide * 0.22));
   const coneRadius = Math.min(1.75, Math.max(0.3, shortSide / 2 - 0.08));
 
-  // 掃除は「いちばん急ぐ1件」だけを3Dに出す。1つの場所に複数を重ねると帯もピンも読めない
-  const urgentCleaning =
-    zone.cleaning.length > 0
-      ? [...zone.cleaning].sort((a, b) => a.days_until - b.days_until)[0]
-      : null;
-  const cleaningRadius = Math.max(shortSide / 2 - 0.35, 0.3);
-
   return (
     <group>
       {/* 床。温度の色を敷き、押すとその場所を選ぶ。玄関は上がり框ぶん高く、バルコニーは低い */}
@@ -315,20 +306,6 @@ function RoomZoneParts({
         </group>
       ) : null}
 
-      {/* 掃除。その場所の床を状態の色で囲う */}
-      {layers.cleaning && urgentCleaning ? (
-        <mesh rotation-x={-Math.PI / 2} position={[centerX, 0.015 + floorTop, centerZ]}>
-          <ringGeometry args={[cleaningRadius - 0.09, cleaningRadius, 48]} />
-          <meshBasicMaterial
-            color={ROOM_CLEANING_STATUS_COLORS[urgentCleaning.status]}
-            transparent
-            opacity={0.55}
-            side={DoubleSide}
-            depthWrite={false}
-          />
-        </mesh>
-      ) : null}
-
       {/* 値のピン。3Dの中ではなくDOMとして重ねる */}
       {layers.temperature && zone.temperature != null ? (
         <RoomPin
@@ -346,16 +323,6 @@ function RoomZoneParts({
           color={lightOn ? "#e8a13a" : "#93999f"}
           name="照明"
           value={lightOn ? "点灯" : "消灯"}
-          highlighted={focused}
-        />
-      ) : null}
-
-      {layers.cleaning && urgentCleaning ? (
-        <RoomPin
-          position={[centerX, 1.55, centerZ + 0.5]}
-          color={ROOM_CLEANING_STATUS_COLORS[urgentCleaning.status]}
-          name={urgentCleaning.name}
-          value={formatCleaningCountdown(urgentCleaning)}
           highlighted={focused}
         />
       ) : null}

@@ -8,7 +8,7 @@
 **保存先は `app_settings` の `bambu_printer_state` 1行。** 保存するのは「最新の1件」だけ
 なので、DDL（`migrate_db.py`）は要らない（本番のアプリ用DBユーザーにはCREATE権限が無い・#193）。
 履歴（過去の印刷の一覧など）が要る場合は、時系列で伸びるためテーブルを足す別の話になる。
-DB_MOCK のときは `data/bambu_state.json` へ書く（`cleaning.py` と同じ二本立て）。
+DB_MOCK のときは `data/bambu_state.json` へ書く（本番は `app_settings`、モックはファイルの二本立て）。
 
 古い値を現在値として返さない
 -----------------------------

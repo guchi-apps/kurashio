@@ -1,11 +1,10 @@
-import type { CleaningStatus, CleaningTask } from "@/lib/cleaning";
 import { getLightThreshold, resolveLightStatus, type LightStatusResult } from "@/lib/light-status";
 import type { AirconData, EnergySourceRow, LatestData } from "@/lib/types";
 
 /**
  * 部屋の3Dビュー（`/room`・#399）の間取りと、場所ごとの紐付け。
  *
- * センサー・エアコン・掃除タスクは、どれも「部屋のどこにあるか」を持っていない
+ * センサー・エアコンは、どれも「部屋のどこにあるか」を持っていない
  * （持っているのは `id` と表示名だけ）。そこで**場所（ゾーン）を軸にした対応表**を
  * ここで定義し、保存は `app_settings` の `room_layout` キー1つで済ませる。
  * テーブルを増やさないので本番DBのマイグレーションは要らない。
@@ -304,8 +303,6 @@ export interface RoomZoneBinding {
   device_id: number | null;
   /** その場所にあるエアコンの ac_id。null = 無し */
   ac_id: number | null;
-  /** その場所でやる掃除タスクのID（`GET /api/cleaning` の `tasks[].id`） */
-  cleaning_task_ids: string[];
   /** その場所にあるTapoスマートプラグの `source`（`GET /api/energy/breakdown` の `sources[].source`） */
   tapo_sources: string[];
 }
@@ -318,16 +315,15 @@ export interface RoomLayout {
  * 初期の紐付け。`display_order` の既定（`["device:1", "device:2", …]`）と同じく、
  * このアプリの標準構成（LDK=1・洋室=2）を置いている。エアコンは実物どおり洋室（#406）。
  * バルコニーの屋外センサーはどの device_id かを決め打ちできないので、設定シートで選ぶ。
- * 掃除タスクのIDは名前から作られるスラッグで推測できないため、空で始める。
  */
 export const DEFAULT_ROOM_BINDINGS: Readonly<Record<string, Omit<RoomZoneBinding, "key">>> = {
-  ldk: { device_id: 1, ac_id: null, cleaning_task_ids: [], tapo_sources: [] },
-  bedroom: { device_id: 2, ac_id: 1, cleaning_task_ids: [], tapo_sources: [] },
+  ldk: { device_id: 1, ac_id: null, tapo_sources: [] },
+  bedroom: { device_id: 2, ac_id: 1, tapo_sources: [] },
 };
 
 /** 紐付けの無い状態。配列を共有しないよう、使うたびに新しく作る */
 function emptyRoomBinding(): Omit<RoomZoneBinding, "key"> {
-  return { device_id: null, ac_id: null, cleaning_task_ids: [], tapo_sources: [] };
+  return { device_id: null, ac_id: null, tapo_sources: [] };
 }
 
 export function buildDefaultRoomLayout(): RoomLayout {
@@ -336,7 +332,6 @@ export function buildDefaultRoomLayout(): RoomLayout {
       key: zone.key,
       ...emptyRoomBinding(),
       ...(DEFAULT_ROOM_BINDINGS[zone.key] ?? {}),
-      cleaning_task_ids: [...(DEFAULT_ROOM_BINDINGS[zone.key]?.cleaning_task_ids ?? [])],
       tapo_sources: [...(DEFAULT_ROOM_BINDINGS[zone.key]?.tapo_sources ?? [])],
     })),
   };
@@ -349,7 +344,7 @@ function toNullableId(raw: unknown): number | null {
   return value;
 }
 
-/** 重複の無い文字列配列へ整える。掃除タスクIDとTapoの `source` の両方で使う */
+/** 重複の無い文字列配列へ整える。Tapoの `source` で使う */
 function toStringList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const ids: string[] = [];
@@ -387,7 +382,6 @@ export function normalizeRoomLayout(raw: unknown): RoomLayout {
       key,
       device_id: toNullableId((entry as { device_id?: unknown }).device_id),
       ac_id: toNullableId((entry as { ac_id?: unknown }).ac_id),
-      cleaning_task_ids: toStringList((entry as { cleaning_task_ids?: unknown }).cleaning_task_ids),
       tapo_sources: toStringList((entry as { tapo_sources?: unknown }).tapo_sources),
     });
   }
@@ -452,17 +446,6 @@ export function roomTemperatureColor(temperature: number): string {
   return `#${rgb.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
 }
 
-/**
- * 掃除の状態を表す色。3Dの床の縁と一覧のバッジで同じ色を使う。
- * `app/globals.css` のトークンではなく hex で持つのは、three のマテリアルが
- * CSS変数を解釈できないため（画面側もここから引いて、2か所で色がずれないようにする）。
- */
-export const ROOM_CLEANING_STATUS_COLORS: Record<CleaningStatus, string> = {
-  overdue: "#d9534f",
-  today: "#e2973b",
-  upcoming: "#93999f",
-};
-
 export const ROOM_TEMPERATURE_RAMP_MIN = TEMPERATURE_RAMP[0][0];
 export const ROOM_TEMPERATURE_RAMP_MAX = TEMPERATURE_RAMP[TEMPERATURE_RAMP.length - 1][0];
 
@@ -508,7 +491,7 @@ export function isApplianceActive(
 
 /* ────────── 重ねる情報のレイヤ ────────── */
 
-export type RoomLayerKey = "temperature" | "aircon" | "light" | "cleaning" | "appliance";
+export type RoomLayerKey = "temperature" | "aircon" | "light" | "appliance";
 
 export interface RoomLayerDefinition {
   key: RoomLayerKey;
@@ -521,14 +504,13 @@ export const ROOM_LAYERS: readonly RoomLayerDefinition[] = [
   { key: "temperature", label: "温度", colorVar: "--temp-color" },
   { key: "aircon", label: "エアコン", colorVar: "--temp-color" },
   { key: "light", label: "照明", colorVar: "--remote-color" },
-  { key: "cleaning", label: "掃除", colorVar: "--energy-color" },
   { key: "appliance", label: "家電", colorVar: "--bill-color" },
 ];
 
 export type RoomLayerState = Record<RoomLayerKey, boolean>;
 
 /**
- * 初期状態。5種類すべてを重ねるとピンが混み合うため、狭い画面では温度とエアコンだけで開く。
+ * 初期状態。4種類すべてを重ねるとピンが混み合うため、狭い画面では温度とエアコンだけで開く。
  * 出す・出さないはチップからいつでも変えられる。
  */
 export function buildDefaultRoomLayers(compact: boolean): RoomLayerState {
@@ -536,7 +518,6 @@ export function buildDefaultRoomLayers(compact: boolean): RoomLayerState {
     temperature: true,
     aircon: true,
     light: !compact,
-    cleaning: !compact,
     appliance: !compact,
   };
 }
@@ -570,7 +551,6 @@ export interface ResolvedRoomZone {
   light: LightStatusResult | null;
   acId: number | null;
   aircon: AirconData | null;
-  cleaning: CleaningTask[];
   /** この場所に紐付けたTapoスマートプラグ */
   appliances: ResolvedRoomAppliance[];
 }
@@ -580,7 +560,6 @@ export interface RoomZoneSources {
   latestByDevice: Record<number, LatestData | null>;
   lightThresholds: Record<string, number>;
   airconByAcId: Record<number, AirconData | null>;
-  cleaningTasks: readonly CleaningTask[];
   /** `GET /api/energy/breakdown` の `sources`。Tapoスマートプラグの動作判定に使う */
   energySources: readonly EnergySourceRow[];
   /** 動作中判定の鮮度チェックの基準時刻。省略時は呼び出し時点（テストでは固定値を渡す） */
@@ -594,7 +573,7 @@ function finiteOrNull(value: number | null | undefined): number | null {
 /**
  * 間取りと各APIの最新値を突き合わせて、ゾーンごとの表示内容を作る。
  *
- * 判定そのもの（照明の点灯・掃除の遅れ）は既存の実装をそのまま使う。ここは
+ * 判定そのもの（照明の点灯）は既存の実装をそのまま使う。ここは
  * 「どの場所の値か」を決めるだけで、同じ判定をもう一度書かないこと。
  */
 export function resolveRoomZones(sources: RoomZoneSources): ResolvedRoomZone[] {
@@ -635,21 +614,7 @@ export function resolveRoomZones(sources: RoomZoneSources): ResolvedRoomZone[] {
           : null,
       acId: binding.ac_id,
       aircon,
-      cleaning: binding.cleaning_task_ids
-        .map((id) => sources.cleaningTasks.find((task) => task.id === id))
-        .filter((task): task is CleaningTask => task != null),
       appliances,
     };
   });
-}
-
-/** どの掃除タスクがどのゾーンにも紐付いていないか（設定シートの案内に使う） */
-export function findUnassignedCleaningTaskIds(
-  layout: RoomLayout,
-  tasks: readonly CleaningTask[]
-): string[] {
-  const assigned = new Set(
-    normalizeRoomLayout(layout).zones.flatMap((zone) => zone.cleaning_task_ids)
-  );
-  return tasks.filter((task) => !assigned.has(task.id)).map((task) => task.id);
 }

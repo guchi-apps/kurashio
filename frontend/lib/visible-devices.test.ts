@@ -26,7 +26,6 @@ import { outdoorMetricVisibilityKey } from "@/lib/chart-line-visibility";
 import { AIRCON_CHART_DEVICE_ID, getSensorDeviceIds } from "@/lib/types";
 import {
   BILL_CARD_KEY,
-  CLEANING_CARD_KEY,
   COMING_SOON_SECTION_KEY,
   ENERGY_CARD_KEY,
   GARBAGE_CARD_KEY,
@@ -60,7 +59,6 @@ describe("visible-devices", () => {
         GARBAGE_CARD_KEY,
         ENERGY_CARD_KEY,
         BILL_CARD_KEY,
-        CLEANING_CARD_KEY,
         PRINTER_CARD_KEY,
         COMING_SOON_SECTION_KEY,
       ].sort()
@@ -191,7 +189,6 @@ describe("visible-devices", () => {
     expect(buildAllDashboardTargetKeys([1, 2]).has(GARBAGE_CARD_KEY)).toBe(true);
     expect(buildAllDashboardTargetKeys([1, 2]).has(ENERGY_CARD_KEY)).toBe(true);
     expect(buildAllDashboardTargetKeys([1, 2]).has(BILL_CARD_KEY)).toBe(true);
-    expect(buildAllDashboardTargetKeys([1, 2]).has(CLEANING_CARD_KEY)).toBe(true);
   });
 
   it("近日公開セクションはセクションごと表示・非表示を切り替えられる", () => {
