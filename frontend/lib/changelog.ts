@@ -34,6 +34,14 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "5.0.0",
+    date: "2026-11-08",
+    changes: [
+      "掃除の記録・管理機能を終了しました。ダッシュボードの掃除カードと詳細画面、暮らしの設定にあった掃除の項目、部屋の3Dビューの掃除表示がなくなります。",
+      "消費電力の日別グラフは、上下には動かず左右にだけスクロールするようになりました。",
+    ],
+  },
+  {
     version: "4.47.0",
     date: "2026-10-26",
     changes: [
