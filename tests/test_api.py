@@ -940,82 +940,6 @@ def test_post_bills_rejects_a_malformed_billing_month(client):
     assert response.status_code == 422
 
 
-# --- 掃除した日の指定（#294） -------------------------------------------------
-
-
-def _register_cleaning_task(authed_client):
-    response = authed_client.put(
-        "/api/cleaning/tasks",
-        json={"tasks": [{"id": "sink", "name": "シンク", "interval_days": 3, "steps": []}]},
-    )
-    assert response.status_code == 200
-    return response.json()["today"]
-
-
-def test_cleaning_done_defaults_to_today(authed_client):
-    today = _register_cleaning_task(authed_client)
-
-    response = authed_client.post("/api/cleaning/tasks/sink/done")
-    assert response.status_code == 200
-    task = response.json()["tasks"][0]
-    assert task["last_done"] == today
-    assert task["history"][0]["date"] == today
-    # 登録日時は掃除した日とは別に持つ（監査用）
-    assert task["history"][0]["recorded_at"].startswith(today)
-
-
-def test_cleaning_done_accepts_a_past_date(authed_client):
-    """当日に押し忘れても、前日ぶんとして登録できる。"""
-    _register_cleaning_task(authed_client)
-
-    response = authed_client.post(
-        "/api/cleaning/tasks/sink/done", json={"date": "2026-08-25"}
-    )
-    assert response.status_code == 200
-    task = response.json()["tasks"][0]
-    assert task["last_done"] == "2026-08-25"
-    # 次にやる日は登録した日ではなく掃除した日から数える
-    assert task["next_due"] == "2026-08-28"
-
-
-def test_cleaning_done_rejects_a_future_date(authed_client):
-    _register_cleaning_task(authed_client)
-
-    response = authed_client.post(
-        "/api/cleaning/tasks/sink/done", json={"date": "2099-01-01"}
-    )
-    assert response.status_code == 400
-    assert "未来" in response.json()["detail"]
-
-
-def test_cleaning_done_rejects_a_malformed_date(authed_client):
-    _register_cleaning_task(authed_client)
-
-    response = authed_client.post(
-        "/api/cleaning/tasks/sink/done", json={"date": "2026/08/25"}
-    )
-    assert response.status_code == 400
-
-
-def test_cleaning_done_can_be_deleted(authed_client):
-    """日付を間違えて登録したときは、その1件を取り消して入れ直す。"""
-    _register_cleaning_task(authed_client)
-    authed_client.post("/api/cleaning/tasks/sink/done", json={"date": "2026-08-25"})
-
-    response = authed_client.delete("/api/cleaning/tasks/sink/done/2026-08-25")
-    assert response.status_code == 200
-    task = response.json()["tasks"][0]
-    assert task["history"] == []
-    assert task["last_done"] is None
-
-
-def test_cleaning_delete_reports_an_unknown_record(authed_client):
-    _register_cleaning_task(authed_client)
-
-    response = authed_client.delete("/api/cleaning/tasks/sink/done/2026-08-25")
-    assert response.status_code == 404
-
-
 def test_energy_source_names_reach_the_breakdown_label(authed_client):
     """画面から付けた別名が、そのまま消費電力の取得元のラベルになる（#335）"""
     before = authed_client.get("/api/energy/breakdown").json()
@@ -1056,15 +980,15 @@ def test_ui_settings_room_layout_round_trip(authed_client):
                         "key": "ldk",
                         "device_id": 1,
                         "ac_id": 1,
-                        "cleaning_task_ids": ["yuka", "yuka"],
+                        "tapo_sources": ["tapo:冷蔵庫", "tapo:冷蔵庫"],
                     },
-                    {"key": "bath", "device_id": None, "ac_id": None, "cleaning_task_ids": []},
+                    {"key": "bath", "device_id": None, "ac_id": None, "tapo_sources": []},
                 ]
             }
         },
     )
     assert updated.status_code == 200
-    assert updated.json()["room_layout"]["zones"][0]["cleaning_task_ids"] == ["yuka"]
+    assert updated.json()["room_layout"]["zones"][0]["tapo_sources"] == ["tapo:冷蔵庫"]
 
     # 別のキーだけを保存しても消えないこと（save_settings の merged 漏れを拾う）
     authed_client.put("/api/ui-settings", json={"energy_unit_price": 29.5})

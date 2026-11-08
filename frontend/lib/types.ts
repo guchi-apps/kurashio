@@ -190,7 +190,7 @@ export interface UiSettings {
   /** 同じ異常が続く間の再通知間隔（分） */
   room_anomaly_reminder_minutes: number;
   /**
-   * 部屋の3Dビュー（`/room`・#399）で、3D上の場所とセンサー・エアコン・掃除タスクを
+   * 部屋の3Dビュー（`/room`・#399）で、3D上の場所とセンサー・エアコンを
    * 結ぶ対応表。`zones` が空 = まだ一度も保存していない（既定の紐付けで開く）。
    * ゾーンの一覧・寸法の正は `lib/room-layout.ts` で、ここには紐付けだけが入る
    */
@@ -203,7 +203,6 @@ export interface RoomLayoutSetting {
     key: string;
     device_id: number | null;
     ac_id: number | null;
-    cleaning_task_ids: string[];
   }[];
 }
 

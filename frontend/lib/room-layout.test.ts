@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { CleaningTask } from "@/lib/cleaning";
 import type { EnergySourceRow } from "@/lib/types";
 import {
   buildDefaultRoomLayers,
   buildDefaultRoomLayout,
   buildRoomWallParts,
-  findUnassignedCleaningTaskIds,
   getRoomZoneBinding,
   isApplianceActive,
   normalizeRoomLayout,
@@ -37,21 +35,6 @@ function energySource(
   };
 }
 
-function task(id: string, overrides: Partial<CleaningTask> = {}): CleaningTask {
-  return {
-    id,
-    name: id,
-    interval_days: 7,
-    steps: [],
-    history: [],
-    last_done: null,
-    next_due: "2026-09-08",
-    days_until: 0,
-    status: "today",
-    ...overrides,
-  };
-}
-
 describe("normalizeRoomLayout", () => {
   it("保存が無ければ既定の紐付けで始める", () => {
     const layout = normalizeRoomLayout(null);
@@ -80,22 +63,21 @@ describe("normalizeRoomLayout", () => {
     // 仮の1LDK時代に保存した紐付けは、キーが同じなので新しい間取りでも失われない
     const layout = normalizeRoomLayout({
       zones: [
-        { key: "ldk", device_id: 1, ac_id: 1, cleaning_task_ids: [] },
-        { key: "bedroom", device_id: 2, ac_id: null, cleaning_task_ids: [] },
-        { key: "bath", device_id: 3, ac_id: null, cleaning_task_ids: ["furo"] },
-        { key: "entrance", device_id: null, ac_id: null, cleaning_task_ids: ["genkan"] },
+        { key: "ldk", device_id: 1, ac_id: 1 },
+        { key: "bedroom", device_id: 2, ac_id: null },
+        { key: "bath", device_id: 3, ac_id: null },
+        { key: "entrance", device_id: null, ac_id: null },
       ],
     });
     expect(getRoomZoneBinding(layout, "ldk").ac_id).toBe(1);
     expect(getRoomZoneBinding(layout, "bath").device_id).toBe(3);
-    expect(getRoomZoneBinding(layout, "entrance").cleaning_task_ids).toEqual(["genkan"]);
     expect(getRoomZoneBinding(layout, "balcony").device_id).toBeNull();
   });
 
   it("知らないゾーンのキーを落とし、足りないゾーンを空で補う", () => {
     const layout = normalizeRoomLayout({
       zones: [
-        { key: "ldk", device_id: 5, ac_id: 2, cleaning_task_ids: ["a"], tapo_sources: ["tapo:冷蔵庫"] },
+        { key: "ldk", device_id: 5, ac_id: 2, tapo_sources: ["tapo:冷蔵庫"] },
         { key: "kitchen-that-does-not-exist", device_id: 9 },
       ],
     });
@@ -107,21 +89,19 @@ describe("normalizeRoomLayout", () => {
       key: "ldk",
       device_id: 5,
       ac_id: 2,
-      cleaning_task_ids: ["a"],
       tapo_sources: ["tapo:冷蔵庫"],
     });
     // 保存に無かったゾーンは既定へ戻さず空にする。1つでも保存されていれば人の意思なので
     expect(getRoomZoneBinding(layout, "bedroom").device_id).toBeNull();
   });
 
-  it("読めないIDと重複した掃除タスクID・プラグのsourceを落とす", () => {
+  it("読めないIDと重複したプラグのsourceを落とす", () => {
     const layout = normalizeRoomLayout({
       zones: [
         {
           key: "ldk",
           device_id: "abc",
           ac_id: -1,
-          cleaning_task_ids: ["a", "a", "", 3, " b "],
           tapo_sources: ["tapo:冷蔵庫", "tapo:冷蔵庫", "", 3],
         },
       ],
@@ -130,7 +110,6 @@ describe("normalizeRoomLayout", () => {
       key: "ldk",
       device_id: null,
       ac_id: null,
-      cleaning_task_ids: ["a", "b"],
       tapo_sources: ["tapo:冷蔵庫"],
     });
   });
@@ -140,7 +119,6 @@ describe("normalizeRoomLayout", () => {
       ...zone,
       device_id: null,
       ac_id: null,
-      cleaning_task_ids: [],
     }));
     const layout = normalizeRoomLayout({ zones: cleared });
     expect(getRoomZoneBinding(layout, "ldk").device_id).toBeNull();
@@ -167,10 +145,9 @@ describe("resolveRoomZones", () => {
           key: "ldk",
           device_id: 1,
           ac_id: 1,
-          cleaning_task_ids: ["yuka"],
           tapo_sources: ["tapo:冷蔵庫", "tapo:テレビ"],
         },
-        { key: "bedroom", device_id: 2, ac_id: null, cleaning_task_ids: [] },
+        { key: "bedroom", device_id: 2, ac_id: null },
       ],
     }),
     latestByDevice: {
@@ -179,7 +156,6 @@ describe("resolveRoomZones", () => {
     },
     lightThresholds: { "1": 80, "2": 80 },
     airconByAcId: { 1: { ac_id: 1, mode: "COOLING", power: "ON", target_temperature: 26 } },
-    cleaningTasks: [task("yuka"), task("furo")],
     energySources: [
       energySource("tapo:冷蔵庫", 45),
       energySource("tapo:テレビ", 0.4),
@@ -188,14 +164,13 @@ describe("resolveRoomZones", () => {
     now: NOW,
   };
 
-  it("場所ごとに室温・照明・エアコン・掃除をまとめる", () => {
+  it("場所ごとに室温・照明・エアコンをまとめる", () => {
     const zones = resolveRoomZones(sources);
     const ldk = zones.find((zone) => zone.key === "ldk");
 
     expect(ldk?.temperature).toBe(26.4);
     expect(ldk?.light?.status).toBe("on");
     expect(ldk?.aircon?.target_temperature).toBe(26);
-    expect(ldk?.cleaning.map((entry) => entry.id)).toEqual(["yuka"]);
   });
 
   it("紐付けたプラグを、動作中かどうかに関わらずすべて返す", () => {
@@ -219,7 +194,7 @@ describe("resolveRoomZones", () => {
     const zones = resolveRoomZones({
       ...sources,
       layout: normalizeRoomLayout({
-        zones: [{ key: "ldk", device_id: 1, ac_id: null, cleaning_task_ids: [], tapo_sources: ["tapo:未接続"] }],
+        zones: [{ key: "ldk", device_id: 1, ac_id: null, tapo_sources: ["tapo:未接続"] }],
       }),
     });
     expect(zones.find((zone) => zone.key === "ldk")?.appliances).toEqual([
@@ -242,16 +217,6 @@ describe("resolveRoomZones", () => {
     expect(bath?.aircon).toBeNull();
   });
 
-  it("存在しない掃除タスクIDが残っていても落ちない", () => {
-    const zones = resolveRoomZones({
-      ...sources,
-      layout: normalizeRoomLayout({
-        zones: [{ key: "ldk", device_id: 1, ac_id: null, cleaning_task_ids: ["消えたタスク"] }],
-      }),
-    });
-    expect(zones.find((zone) => zone.key === "ldk")?.cleaning).toEqual([]);
-  });
-
   it("全ゾーンを必ず返す（3Dの床は紐付けの有無に関わらず描くため）", () => {
     expect(resolveRoomZones(sources)).toHaveLength(ROOM_ZONE_DEFS.length);
   });
@@ -260,7 +225,7 @@ describe("resolveRoomZones", () => {
     const zones = resolveRoomZones({
       ...sources,
       layout: normalizeRoomLayout({
-        zones: [{ key: "balcony", device_id: 1, ac_id: null, cleaning_task_ids: [] }],
+        zones: [{ key: "balcony", device_id: 1, ac_id: null }],
       }),
     });
     const byKey = Object.fromEntries(zones.map((zone) => [zone.key, zone]));
@@ -271,17 +236,6 @@ describe("resolveRoomZones", () => {
     expect(byKey.balcony.floor).toBe("balcony");
     expect(byKey.balcony.temperature).toBe(26.4);
     expect(byKey.balcony.humidity).toBe(58);
-  });
-});
-
-describe("findUnassignedCleaningTaskIds", () => {
-  it("どの場所にも入れていない掃除だけを返す", () => {
-    const layout = normalizeRoomLayout({
-      zones: [{ key: "ldk", device_id: 1, ac_id: null, cleaning_task_ids: ["yuka"] }],
-    });
-    expect(findUnassignedCleaningTaskIds(layout, [task("yuka"), task("furo")])).toEqual([
-      "furo",
-    ]);
   });
 });
 
@@ -349,10 +303,8 @@ describe("buildDefaultRoomLayers", () => {
       temperature: true,
       aircon: true,
       light: false,
-      cleaning: false,
       appliance: false,
     });
-    expect(buildDefaultRoomLayers(false).cleaning).toBe(true);
     expect(buildDefaultRoomLayers(false).appliance).toBe(true);
   });
 });

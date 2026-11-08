@@ -8,7 +8,6 @@ import {
 } from "@/lib/life-card-order";
 import {
   BILL_CARD_KEY,
-  CLEANING_CARD_KEY,
   ENERGY_CARD_KEY,
   GARBAGE_CARD_KEY,
   LIFE_CARDS,
@@ -25,7 +24,6 @@ describe("life-card-order", () => {
   it("keeps the saved order", () => {
     expect(
       normalizeLifeCardOrder([
-        CLEANING_CARD_KEY,
         GARBAGE_CARD_KEY,
         REMOTE_CARD_KEY,
         ENERGY_CARD_KEY,
@@ -33,7 +31,6 @@ describe("life-card-order", () => {
         PRINTER_CARD_KEY,
       ])
     ).toEqual([
-      CLEANING_CARD_KEY,
       GARBAGE_CARD_KEY,
       REMOTE_CARD_KEY,
       ENERGY_CARD_KEY,
@@ -44,10 +41,15 @@ describe("life-card-order", () => {
 
   // カードを1枚増やしたときに、並べ替え済みの人にだけ出ない状態にならないこと
   it("appends cards that are missing from the saved order", () => {
-    const normalized = normalizeLifeCardOrder([CLEANING_CARD_KEY, GARBAGE_CARD_KEY]);
-    expect(normalized.slice(0, 2)).toEqual([CLEANING_CARD_KEY, GARBAGE_CARD_KEY]);
+    const normalized = normalizeLifeCardOrder([REMOTE_CARD_KEY, GARBAGE_CARD_KEY]);
+    expect(normalized.slice(0, 2)).toEqual([REMOTE_CARD_KEY, GARBAGE_CARD_KEY]);
     expect(normalized).toHaveLength(LIFE_CARDS.length);
     expect(new Set(normalized).size).toBe(LIFE_CARDS.length);
+  });
+
+  // 掃除カードを廃止した（#865）。保存済みの並びに残る "cleaning" は落とす
+  it("drops the removed cleaning card from a saved order", () => {
+    expect(normalizeLifeCardOrder(["cleaning", GARBAGE_CARD_KEY])).not.toContain("cleaning");
   });
 
   it("drops unknown keys and duplicates", () => {

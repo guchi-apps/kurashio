@@ -1,5 +1,4 @@
 import type { ChartColorSettings } from "@/lib/chart-colors";
-import type { CleaningSchedule } from "@/lib/cleaning";
 import type { DisplayOrderItem } from "@/lib/display-order";
 import type { FilamentPayload } from "@/lib/filament";
 import type { GarbageSchedule } from "@/lib/garbage";
@@ -49,7 +48,6 @@ export interface DashboardSnapshotLife {
   energyBreakdown: EnergyBreakdown | null;
   remoteButtons: RemoteButtons | null;
   billSummary: UtilityBillSummary | null;
-  cleaningSchedule: CleaningSchedule | null;
   filament: FilamentPayload | null;
   sensorStatuses: SensorDeviceStatus[];
   staleThresholdMinutes: number | null;

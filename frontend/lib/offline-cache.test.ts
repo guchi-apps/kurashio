@@ -103,7 +103,6 @@ describe("buildDashboardOfflineSnapshot", () => {
       energyBreakdown: null,
       remoteButtons: null,
       billSummary: null,
-      cleaningSchedule: null,
       filament: null,
       sensorStatuses: [],
       staleThresholdMinutes: 30,

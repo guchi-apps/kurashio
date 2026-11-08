@@ -37,7 +37,6 @@ import {
   type UtilityBillSummary,
 } from "@/lib/types";
 import type { BambuPrinterResponse } from "@/lib/bambu";
-import type { CleaningSchedule, CleaningTaskInput } from "@/lib/cleaning";
 import type {
   FilamentPayload,
   FilamentSpoolInput,
@@ -634,73 +633,6 @@ export async function acknowledgeBambuPrinter(): Promise<BambuPrinterResponse> {
     throw new Error(body?.detail || `Request failed: ${res.status}`);
   }
   return res.json() as Promise<BambuPrinterResponse>;
-}
-
-/** 掃除カード用。場所ごとの次にやる日まで計算済みで返る */
-export async function fetchCleaningSchedule(): Promise<CleaningSchedule> {
-  return fetchJson<CleaningSchedule>("/api/cleaning");
-}
-
-/**
- * 掃除の定義をまとめて置き換える（追加・編集・削除・並べ替えを1回で送る）。
- * 実施履歴は送らない。同じ id の項目からサーバー側が引き継ぐ。
- */
-export async function updateCleaningTasks(
-  tasks: CleaningTaskInput[]
-): Promise<CleaningSchedule> {
-  const res = await fetchWithAuth("/api/cleaning/tasks", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tasks }),
-  });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(body?.detail || `Request failed: ${res.status}`);
-  }
-  return res.json() as Promise<CleaningSchedule>;
-}
-
-/**
- * 掃除をやった記録を足す。次にやる日はこの日から数え直される。
- *
- * `date`（YYYY-MM-DD）は掃除した日で、省略するとサーバーの今日（JST）。
- * 当日に押し忘れたときのために過去の日を渡せる。未来の日はサーバーが400で弾く（#294）。
- */
-export async function markCleaningDone(
-  taskId: string,
-  date?: string
-): Promise<CleaningSchedule> {
-  const res = await fetchWithAuth(
-    `/api/cleaning/tasks/${encodeURIComponent(taskId)}/done`,
-    date
-      ? {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date }),
-        }
-      : { method: "POST" }
-  );
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(body?.detail || `Request failed: ${res.status}`);
-  }
-  return res.json() as Promise<CleaningSchedule>;
-}
-
-/** 掃除の記録を1件取り消す。日付を間違えて登録したときの直し方（#294） */
-export async function deleteCleaningDone(
-  taskId: string,
-  date: string
-): Promise<CleaningSchedule> {
-  const res = await fetchWithAuth(
-    `/api/cleaning/tasks/${encodeURIComponent(taskId)}/done/${encodeURIComponent(date)}`,
-    { method: "DELETE" }
-  );
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-    throw new Error(body?.detail || `Request failed: ${res.status}`);
-  }
-  return res.json() as Promise<CleaningSchedule>;
 }
 
 /** フィラメント在庫。残量は計量と使用量からサーバーが計算して返す（#445） */

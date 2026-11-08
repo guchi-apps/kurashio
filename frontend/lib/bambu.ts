@@ -1,4 +1,4 @@
-import { shiftDate } from "@/lib/cleaning";
+import { shiftDate } from "@/lib/date-utils";
 
 /**
  * 3Dプリンター（Bambu Lab A1 mini）カードの型と表示用の整形（#436）。

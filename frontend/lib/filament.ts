@@ -1,4 +1,4 @@
-import { formatCleaningDate } from "@/lib/cleaning";
+import { formatMonthDay } from "@/lib/date-utils";
 
 /**
  * フィラメント在庫の型と表示用の整形（#445）。
@@ -155,7 +155,7 @@ export function formatUsageGrams(value: number): string {
 }
 
 export function formatFilamentDate(date: string): string {
-  return formatCleaningDate(date);
+  return formatMonthDay(date);
 }
 
 /** "在庫 3本（使い切り1本）" */
