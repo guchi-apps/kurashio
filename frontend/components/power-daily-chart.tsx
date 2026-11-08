@@ -175,7 +175,7 @@ export function PowerDailyChart({
           tabIndex={0}
           role="group"
           aria-label="日別の使用量グラフ。左右にスクロールすると過去の日へ移動します"
-          className="overflow-x-auto overscroll-x-contain [scrollbar-width:none] [-webkit-overflow-scrolling:touch] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-scrollbar]:hidden"
+          className="overflow-x-auto overflow-y-hidden overscroll-x-contain[scrollbar-width:none] [-webkit-overflow-scrolling:touch] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-scrollbar]:hidden"
         >
           <div className="relative flex w-max min-w-full justify-end gap-[3px]">
             {startNote && (
