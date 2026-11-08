@@ -212,7 +212,7 @@
   /*
    * 「いまの部屋」専用の見出し・値・単位・副計測値（#473）。`.device-card-title` 等は
    * 「暮らし」セクションの各カード（`.device-card` を使う power-card / garbage-card /
-   * cleaning-card / remote-card / bill-card / printer-card）とも共有しているため、
+   * remote-card / bill-card / printer-card）とも共有しているため、
    * ここを縮めるとそれらの文字サイズまで意図せず変わる。`.device-card-compact` 配下だけに
    * 効く専用クラスとして分離する。
    */

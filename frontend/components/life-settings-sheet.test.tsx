@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { LifeSettingsSheet } from "@/components/life-settings-sheet";
 import {
   BILL_CARD_KEY,
-  CLEANING_CARD_KEY,
   GARBAGE_CARD_KEY,
   REMOTE_CARD_KEY,
 } from "@/lib/dashboard-sections";
@@ -35,16 +34,15 @@ describe("LifeSettingsSheet", () => {
 
   it("暮らしのカードを並び順どおりに出す", () => {
     const html = render({
-      order: [CLEANING_CARD_KEY, GARBAGE_CARD_KEY, REMOTE_CARD_KEY],
+      order: [GARBAGE_CARD_KEY, REMOTE_CARD_KEY, BILL_CARD_KEY],
     });
-    const positions = ["掃除", "ゴミの日", "電気の操作"].map((label) =>
+    const positions = ["ゴミの日", "電気の操作", "電気・ガス・水道料金"].map((label) =>
       html.indexOf(label)
     );
     expect(positions.every((index) => index >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
     // 並びに書いていないカードも落とさず末尾へ出す
     expect(html).toContain("消費電力");
-    expect(html).toContain("電気・ガス・水道料金");
   });
 
   it("端の項目では矢印を押せない", () => {
@@ -77,7 +75,6 @@ describe("LifeSettingsSheet", () => {
       "ゴミの日",
       "消費電力",
       "電気・ガス・水道料金",
-      "掃除",
     ]) {
       expect(html).toContain(label);
     }

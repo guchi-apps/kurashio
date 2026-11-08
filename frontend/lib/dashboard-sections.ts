@@ -45,7 +45,7 @@ export interface LifeCardDefinition {
   label: string;
   /**
    * 設定シートの行に出す色（`globals.css` のCSS変数名）。
-   * カード自身が色を持っていないもの（ゴミの日・掃除）には付けない
+   * カード自身が色を持っていないもの（ゴミの日）には付けない
    */
   accentVar?: string;
 }
@@ -54,7 +54,6 @@ export const GARBAGE_CARD_KEY = "garbage";
 export const ENERGY_CARD_KEY = "energy";
 export const REMOTE_CARD_KEY = "remote";
 export const BILL_CARD_KEY = "bill";
-export const CLEANING_CARD_KEY = "cleaning";
 export const PRINTER_CARD_KEY = "printer";
 
 /**
@@ -64,10 +63,7 @@ export const PRINTER_CARD_KEY = "printer";
  * 電気・ガス・水道料金は消費電力のすぐ後ろに置く。片方が「計測できている分」で
  * もう片方が「実際の請求」なので、離すと突き合わせられない。
  *
- * 掃除は末尾。押すためのカードだが、ゴミの日のように日付が決まっているわけではなく
- * 「そろそろやる」を思い出すためのものなので、毎日見る値より後ろでよい。
- *
- * 3Dプリンターは掃除のさらに後ろ（#436）。読むだけのカードで、印刷していない時間のほうが長く、
+ * 3Dプリンターは末尾（#436）。読むだけのカードで、印刷していない時間のほうが長く、
  * 押して何かをするカードでもないため。
  *
  * これは**並べ替えるまでの既定**で、画面から変えた順は `life_card_order` に入る（#283）。
@@ -77,7 +73,6 @@ export const LIFE_CARDS: readonly LifeCardDefinition[] = [
   { key: GARBAGE_CARD_KEY, label: "ゴミの日" },
   { key: ENERGY_CARD_KEY, label: "消費電力", accentVar: "--energy-color" },
   { key: BILL_CARD_KEY, label: "電気・ガス・水道料金", accentVar: "--bill-color" },
-  { key: CLEANING_CARD_KEY, label: "掃除" },
   { key: PRINTER_CARD_KEY, label: "3Dプリンター", accentVar: "--printer-color" },
 ];
 

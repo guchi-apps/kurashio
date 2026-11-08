@@ -2,10 +2,8 @@
 
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { CleaningTask } from "@/lib/cleaning";
 import { pickRenamableEnergySources } from "@/lib/energy";
 import {
-  findUnassignedCleaningTaskIds,
   getRoomZoneBinding,
   normalizeRoomLayout,
   ROOM_ZONE_DEFS,
@@ -17,7 +15,7 @@ import type { AirconUnitInfo, DeviceInfo, EnergySourceRow } from "@/lib/types";
 /**
  * 部屋の3Dビューの「どの場所が何か」を決めるシート（#399）。
  *
- * センサー・エアコン・掃除タスクは、どれも自分がどの部屋にあるかを持っていない。
+ * センサー・エアコンは、どれも自分がどの部屋にあるかを持っていない。
  * その対応をここで人が決めて `app_settings` の `room_layout` へ保存する。
  * **1回のPUTで対応表をまるごと送る**ので、複数キーを続けて投げたときの
  * 上書き（#377）は起きない。
@@ -33,7 +31,6 @@ interface RoomLayoutSheetProps {
   layout: RoomLayout;
   devices: readonly DeviceInfo[];
   airconUnits: readonly AirconUnitInfo[];
-  cleaningTasks: readonly CleaningTask[];
   energySources: readonly EnergySourceRow[];
   onClose: () => void;
   onChange: (layout: RoomLayout) => void;
@@ -47,7 +44,6 @@ export function RoomLayoutSheet({
   layout,
   devices,
   airconUnits,
-  cleaningTasks,
   energySources,
   onClose,
   onChange,
@@ -55,7 +51,6 @@ export function RoomLayoutSheet({
   if (!open) return null;
 
   const normalized = normalizeRoomLayout(layout);
-  const unassigned = findUnassignedCleaningTaskIds(normalized, cleaningTasks);
   const plugs = pickRenamableEnergySources(energySources);
 
   return (
@@ -74,7 +69,7 @@ export function RoomLayoutSheet({
           <div>
             <h2 className="text-[17px] font-bold text-foreground">部屋の配置</h2>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-              3Dの場所と、センサー・エアコン・掃除・スマートプラグを結び付けます
+              3Dの場所と、センサー・エアコン・スマートプラグを結び付けます
             </p>
           </div>
           <button
@@ -141,43 +136,6 @@ export function RoomLayoutSheet({
                 </label>
 
                 <div className="mt-3">
-                  <span className="text-[11.5px] text-muted-foreground">この場所でやる掃除</span>
-                  {cleaningTasks.length === 0 ? (
-                    <p className="mt-1 text-[11.5px] text-muted-foreground">
-                      掃除の予定がまだ登録されていません
-                    </p>
-                  ) : (
-                    <div className="mt-1.5 flex flex-col gap-1.5">
-                      {cleaningTasks.map((task) => {
-                        const checked = binding.cleaning_task_ids.includes(task.id);
-                        return (
-                          <label
-                            key={task.id}
-                            className="flex items-center gap-2.5 text-[13px] text-foreground"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() =>
-                                onChange(
-                                  setRoomZoneBinding(normalized, zone.key, {
-                                    cleaning_task_ids: checked
-                                      ? binding.cleaning_task_ids.filter((id) => id !== task.id)
-                                      : [...binding.cleaning_task_ids, task.id],
-                                  })
-                                )
-                              }
-                              className="size-4 shrink-0 accent-[var(--temp-color)]"
-                            />
-                            <span className="truncate">{task.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-3">
                   <span className="text-[11.5px] text-muted-foreground">この場所のスマートプラグ</span>
                   {plugs.length === 0 ? (
                     <p className="mt-1 text-[11.5px] text-muted-foreground">
@@ -216,12 +174,6 @@ export function RoomLayoutSheet({
               </section>
             );
           })}
-
-          {unassigned.length > 0 ? (
-            <p className="rounded-2xl border border-dashed px-4 py-3 text-[11.5px] text-muted-foreground">
-              まだどの場所にも入れていない掃除が{unassigned.length}件あります。入れていない掃除は3Dに出ません。
-            </p>
-          ) : null}
         </div>
 
         <div className="border-t px-5 py-3">

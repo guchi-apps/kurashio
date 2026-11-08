@@ -40,7 +40,7 @@ import { LevelBar, SpoolSwatch } from "@/components/filament-parts";
 import { useUnsavedEdits } from "@/lib/unsaved-edits";
 import { cn } from "@/lib/utils";
 
-/** シートの外枠。掃除・ゴミの日の詳細パネルと同じ形にそろえる */
+/** シートの外枠。ゴミの日の詳細パネルと同じ形にそろえる */
 function Sheet({
   title,
   subtitle,

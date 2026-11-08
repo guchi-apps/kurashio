@@ -12,20 +12,17 @@ import { SettingsIconButton } from "@/components/ui/settings-icon-button";
 import {
   fetchAirconLatest,
   fetchAirconUnits,
-  fetchCleaningSchedule,
   fetchDevices,
   fetchEnergyBreakdown,
   fetchLatestBatch,
   fetchUiSettings,
 } from "@/lib/api";
-import { formatCleaningCountdown, type CleaningSchedule, type CleaningTask } from "@/lib/cleaning";
 import { formatUpdatedAt } from "@/lib/format-updated-at";
 import { parseDataTimestamp } from "@/lib/offline-cache";
 import {
   buildDefaultRoomLayers,
   normalizeRoomLayout,
   resolveRoomZones,
-  ROOM_CLEANING_STATUS_COLORS,
   ROOM_LAYERS,
   ROOM_TEMPERATURE_RAMP_MAX,
   ROOM_TEMPERATURE_RAMP_MIN,
@@ -53,11 +50,11 @@ import {
  * 部屋の3Dビュー（`/room`・#399）。
  *
  * 既存のダッシュボードは「指標ごとのカード」で並ぶが、この画面は**場所ごと**に見る。
- * どの部屋が暑いか・どこの照明が点いているか・どこの掃除が遅れているかは、
+ * どの部屋が暑いか・どこの照明が点いているかは、
  * 数字を読むより間取りの上で見たほうが速い。
  *
  * 値そのものは既存のAPIをそのまま読む。この画面のために増やしたのは
- * 「3D上の場所と、センサー・エアコン・掃除タスクの対応表」
+ * 「3D上の場所と、センサー・エアコンの対応表」
  * （`app_settings` の `room_layout`）だけで、DDLは1行も足していない。
  *
  * three.js は `/room` を開いたときだけ読む。ダッシュボードの初期表示を重くしないため、
@@ -79,7 +76,6 @@ interface RoomData {
   lightThresholds: Record<string, number>;
   airconUnits: AirconUnitInfo[];
   airconByAcId: Record<number, AirconData | null>;
-  cleaning: CleaningSchedule | null;
   energySources: EnergySourceRow[];
   layout: RoomLayout;
   /** 届いた記録のうち一番新しい時刻（ms）。1つも取れていなければ null */
@@ -92,7 +88,6 @@ const EMPTY_ROOM_DATA: RoomData = {
   lightThresholds: {},
   airconUnits: [],
   airconByAcId: {},
-  cleaning: null,
   energySources: [],
   layout: normalizeRoomLayout(null),
   updatedAtMs: null,
@@ -106,21 +101,19 @@ function settled<T>(result: PromiseSettledResult<T>, fallback: T): T {
  * この画面が要る値を1回で集める。
  *
  * どれか1つが落ちても残りは出す（`fetchDashboardData()` と同じ考え方）。
- * 例えば Nature Remo が不調でエアコンだけ取れなくても、室温と掃除は見られたほうがよい。
+ * 例えば Nature Remo が不調でエアコンだけ取れなくても、室温は見られたほうがよい。
  */
 async function loadRoomData(): Promise<RoomData> {
-  const [devicesResult, unitsResult, cleaningResult, settingsResult, energyResult] =
+  const [devicesResult, unitsResult, settingsResult, energyResult] =
     await Promise.allSettled([
       fetchDevices(),
       fetchAirconUnits(),
-      fetchCleaningSchedule(),
       fetchUiSettings(),
       fetchEnergyBreakdown(),
     ]);
 
   const devices = settled(devicesResult, [] as DeviceInfo[]);
   const airconUnits = settled(unitsResult, [] as AirconUnitInfo[]);
-  const cleaning = cleaningResult.status === "fulfilled" ? cleaningResult.value : null;
   const settings = settingsResult.status === "fulfilled" ? settingsResult.value : null;
   const energySources = energyResult.status === "fulfilled" ? energyResult.value.sources : [];
 
@@ -147,7 +140,6 @@ async function loadRoomData(): Promise<RoomData> {
     lightThresholds: settings?.light_thresholds ?? {},
     airconUnits,
     airconByAcId,
-    cleaning,
     energySources,
     layout: normalizeRoomLayout(settings?.room_layout),
     updatedAtMs: stamps.length > 0 ? Math.max(...stamps) : null,
@@ -230,7 +222,6 @@ export function RoomView() {
         latestByDevice: data.latestByDevice,
         lightThresholds: data.lightThresholds,
         airconByAcId: data.airconByAcId,
-        cleaningTasks: data.cleaning?.tasks ?? [],
         energySources: data.energySources,
       }),
     [data]
@@ -256,10 +247,6 @@ export function RoomView() {
   const emptyZones = zones.filter(
     (zone) => zone.deviceId == null && zone.aircon == null && zone.appliances.length === 0
   );
-  const cleaningRows = zones
-    .flatMap((zone) => zone.cleaning.map((task) => ({ zone, task })))
-    .sort((a, b) => a.task.days_until - b.task.days_until);
-
   // ログイン状態が確定するまではログイン画面を出さない（#250）。`/devices` と同じ扱い
   const authGate = resolveAuthGate(isAuthenticated);
   if (authGate === "loading") return <AppLoadingScreen />;
@@ -406,28 +393,6 @@ export function RoomView() {
                     }
                   />
                 ))}
-
-                <RoomGroupHeading
-                  label="掃除"
-                  note={cleaningRows.length > 0 ? `${cleaningRows.length}件` : ""}
-                />
-                {cleaningRows.length > 0 ? (
-                  cleaningRows.map(({ zone, task }) => (
-                    <RoomCleaningRow
-                      key={`${zone.key}-${task.id}`}
-                      zoneName={zone.name}
-                      task={task}
-                      focused={focusKey === zone.key}
-                      onSelect={() =>
-                        setFocusKey((current) => (current === zone.key ? null : zone.key))
-                      }
-                    />
-                  ))
-                ) : (
-                  <p className="rounded-2xl border border-dashed px-3.5 py-2.5 text-[11.5px] text-muted-foreground">
-                    掃除の予定をまだ場所に紐付けていません。右上の設定から選べます。
-                  </p>
-                )}
               </>
             )}
           </aside>
@@ -439,7 +404,6 @@ export function RoomView() {
         layout={data.layout}
         devices={data.devices}
         airconUnits={data.airconUnits}
-        cleaningTasks={data.cleaning?.tasks ?? []}
         energySources={data.energySources}
         onClose={() => setSettingsOpen(false)}
         onChange={(next) => void handleLayoutChange(next)}
@@ -557,46 +521,6 @@ function RoomZoneRow({
       ) : (
         <span className="shrink-0 text-[11.5px] text-muted-foreground">--</span>
       )}
-    </button>
-  );
-}
-
-function RoomCleaningRow({
-  zoneName,
-  task,
-  focused,
-  onSelect,
-}: {
-  zoneName: string;
-  task: CleaningTask;
-  focused: boolean;
-  onSelect: () => void;
-}) {
-  const color = ROOM_CLEANING_STATUS_COLORS[task.status];
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={focused}
-      className={`flex w-full items-center gap-3 rounded-2xl border bg-card px-3.5 py-3 text-left shadow-sm transition-colors ${
-        focused ? "border-[var(--temp-color)]" : "border-transparent"
-      }`}
-    >
-      <span
-        className="h-9 w-1 shrink-0 rounded-full"
-        style={{ backgroundColor: color }}
-        aria-hidden
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-bold text-foreground">{task.name}</span>
-        <span className="block truncate text-[11.5px] text-muted-foreground">{zoneName}</span>
-      </span>
-      <span
-        className="shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold"
-        style={{ color, backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)` }}
-      >
-        {formatCleaningCountdown(task)}
-      </span>
     </button>
   );
 }

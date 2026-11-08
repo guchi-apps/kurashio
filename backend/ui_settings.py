@@ -41,8 +41,8 @@ SETTING_ROOM_ANOMALY_NOTIFY_ENABLED = "room_anomaly_notify_enabled"
 SETTING_ROOM_ANOMALY_THRESHOLDS = "room_anomaly_thresholds"
 #: 同じ異常が続く間の再通知間隔（分）
 SETTING_ROOM_ANOMALY_REMINDER_MINUTES = "room_anomaly_reminder_minutes"
-#: 部屋の3Dビュー（#399）で、3D上の場所とセンサー・エアコン・掃除タスクを結ぶ対応表。
-#: {"zones": [{"key": "ldk", "device_id": 1, "ac_id": 1, "cleaning_task_ids": [...]}, ...]}
+#: 部屋の3Dビュー（#399）で、3D上の場所とセンサー・エアコンを結ぶ対応表。
+#: {"zones": [{"key": "ldk", "device_id": 1, "ac_id": 1}, ...]}
 SETTING_ROOM_LAYOUT = "room_layout"
 
 DEFAULT_DISPLAY_ORDER = ["device:1", "device:2", "outdoor", "aircon"]
@@ -530,13 +530,13 @@ def _optional_id(raw: Any) -> Optional[int]:
 
 
 def _normalize_room_layout(raw: Any) -> Dict[str, Any]:
-    """3D上の場所と、センサー・エアコン・掃除タスク・Tapoスマートプラグの対応表（#399・#410）。
+    """3D上の場所と、センサー・エアコン・Tapoスマートプラグの対応表（#399・#410）。
 
     **どのゾーンが存在するかはここでは判断しない。** ゾーンの一覧・寸法を持っているのは
     フロント側の `lib/room-layout.ts` の `ROOM_ZONE_DEFS` で、同じ一覧をここへ写すと
     間取りを直したときに片方だけ古くなる。知らないキーを落として足りないキーを補うのは
     `normalizeRoomLayout()` の仕事なので、ここでは形（キーは文字列・IDは整数か null・
-    掃除タスクIDとTapoの `source` は重複の無い文字列の配列）だけを整える。
+    Tapoの `source` は重複の無い文字列の配列）だけを整える。
     `_normalize_life_card_order()` と同じ考え方。
     """
     if not isinstance(raw, dict):
@@ -556,7 +556,6 @@ def _normalize_room_layout(raw: Any) -> Dict[str, Any]:
             continue
         seen.add(key)
 
-        task_ids = _string_list(entry.get("cleaning_task_ids"))
         tapo_sources = _string_list(entry.get("tapo_sources"))
 
         zones.append(
@@ -564,7 +563,6 @@ def _normalize_room_layout(raw: Any) -> Dict[str, Any]:
                 "key": key,
                 "device_id": _optional_id(entry.get("device_id")),
                 "ac_id": _optional_id(entry.get("ac_id")),
-                "cleaning_task_ids": task_ids,
                 "tapo_sources": tapo_sources,
             }
         )
@@ -572,7 +570,7 @@ def _normalize_room_layout(raw: Any) -> Dict[str, Any]:
 
 
 def _string_list(raw: Any) -> List[str]:
-    """重複の無い文字列配列へ整える。掃除タスクIDとTapoの `source`（#410）の両方で使う。"""
+    """重複の無い文字列配列へ整える。Tapoの `source`（#410）で使う。"""
     values: List[str] = []
     if not isinstance(raw, list):
         return values
