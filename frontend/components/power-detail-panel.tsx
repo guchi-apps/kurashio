@@ -287,8 +287,11 @@ export function PowerDetailPanel({
   );
   const monthlyColumns = buildEnergyMonthlyColumns(monthlyDaily, monthlySources, monthlyColors);
   const monthlyRows = [...monthlyColumns].reverse();
+  // 月別には直近30日にはない過去の取得元も出るため、凡例と詳細を棒と同じ取得元・色へ揃える。
+  const tabSources = tab === "monthly" ? monthlySources : sources;
+  const tabColors = tab === "monthly" ? monthlyColors : colors;
   const dailyHasKepcoOther = hasEnergyKepcoOther(breakdown?.daily ?? []);
-  const selectedRow = sources.find((row) => row.source === selectedSource) ?? null;
+  const selectedRow = tabSources.find((row) => row.source === selectedSource) ?? null;
 
   // 名前を変えられるのはスマートプラグだけ（#335）。エアコンの名前は「いまの環境の設定」が持つ
   const renamableSources = pickRenamableEnergySources(sources);
@@ -342,7 +345,7 @@ export function PowerDetailPanel({
                 <h2 className="flex items-center gap-1.5 truncate text-lg font-bold">
                   <span
                     className="size-2.5 shrink-0 rounded-[3px]"
-                    style={{ backgroundColor: colors[selectedSource] ?? "#95a5a6" }}
+                    style={{ backgroundColor: tabColors[selectedSource] ?? "#95a5a6" }}
                     aria-hidden
                   />
                   <span className="truncate">
@@ -411,7 +414,7 @@ export function PowerDetailPanel({
           {selectedSource ? (
             <PowerSourceDetail
               label={selectedRow?.label ?? selectedSource}
-              color={colors[selectedSource] ?? "#95a5a6"}
+              color={tabColors[selectedSource] ?? "#95a5a6"}
               summary={sourceSummary}
               loading={sourceLoading}
               error={sourceError}
@@ -703,9 +706,9 @@ export function PowerDetailPanel({
               </div>
             )}
 
-            {sources.length > 0 && (
+            {tabSources.length > 0 && (
               <div className="flex flex-wrap gap-x-1 gap-y-1 text-xs text-muted-foreground">
-                {sources.map((row) => (
+                {tabSources.map((row) => (
                   <button
                     key={row.source}
                     type="button"
@@ -715,7 +718,7 @@ export function PowerDetailPanel({
                   >
                     <span
                       className="size-2 rounded-[3px]"
-                      style={{ backgroundColor: colors[row.source] ?? "#95a5a6" }}
+                      style={{ backgroundColor: tabColors[row.source] ?? "#95a5a6" }}
                       aria-hidden
                     />
                     {row.label}
