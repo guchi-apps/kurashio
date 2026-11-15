@@ -325,6 +325,13 @@ export function PowerDetailPanel({
     }
   };
 
+  /** 親の集計を更新したあと、月別の長期履歴も次に取り直す。 */
+  const refreshMonthly = () => {
+    setMonthlyLoading(true);
+    setMonthlyError(null);
+    setMonthlyRevision((current) => current + 1);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex min-h-0 items-end justify-center bg-black/40 sm:items-center sm:p-4">
       <div className="flex min-h-0 max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-[20px] bg-card shadow-lg sm:max-h-[88vh] sm:rounded-[20px]">
@@ -830,12 +837,21 @@ export function PowerDetailPanel({
         <EnergyRefetchSheet
           today={todayIso}
           onClose={() => setRefetchSheetOpen(false)}
-          onCompleted={onKepcoImported}
+          onCompleted={() => {
+            refreshMonthly();
+            onKepcoImported();
+          }}
         />
       )}
 
       {linkSheetOpen && (
-        <EnergyLinkSheet onClose={() => setLinkSheetOpen(false)} onChanged={onKepcoImported} />
+        <EnergyLinkSheet
+          onClose={() => setLinkSheetOpen(false)}
+          onChanged={() => {
+            refreshMonthly();
+            onKepcoImported();
+          }}
+        />
       )}
 
       {/* 開いているあいだだけ描く。下書きは sources から作られるため（#335） */}
