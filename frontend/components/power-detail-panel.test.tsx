@@ -64,6 +64,13 @@ describe("PowerDetailPanel", () => {
     expect(html).toContain("日別（直近2日）");
   });
 
+  it("日別・時間ごとに加えて月別タブを選べる（#872）", () => {
+    const html = render(WITHOUT_OTHER);
+    expect(html).toContain("日別");
+    expect(html).toContain("時間ごと");
+    expect(html).toContain("月別");
+  });
+
   it("「その他」がある日は積み上げに出し、説明の注記も添える（#319）", () => {
     const html = render(WITH_OTHER);
     // 「その他」の色は機器の配色とは別に固定してある

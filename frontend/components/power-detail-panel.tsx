@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  fetchEnergyBreakdown,
   fetchEnergyHourly,
   fetchEnergySummary,
   importKepcoCsv,
@@ -23,6 +24,7 @@ import { EnergyLinkSheet } from "@/components/energy-link-sheet";
 import { EnergyRefetchSheet } from "@/components/energy-refetch-sheet";
 import { EnergySourceNameSheet } from "@/components/energy-source-name-sheet";
 import { PowerFixedChart } from "@/components/power-fixed-chart";
+import { PowerMonthlyChart } from "@/components/power-monthly-chart";
 import { PowerSourceDetail } from "@/components/power-source-detail";
 import { SettingsIconButton } from "@/components/ui/settings-icon-button";
 import {
@@ -37,13 +39,17 @@ import {
   KEPCO_OTHER_SOURCE,
   buildEnergyDailyRows,
   buildEnergyHourlyColumns,
+  buildEnergyMonthlyColumns,
   buildEnergySourceColors,
   buildEnergyStackColumnsFrom,
   buildEnergyStackSegments,
   energyRowRatio,
+  energyMonthlyHistoryDays,
+  filterEnergyDailyBySources,
   formatEnergyDate,
   formatEnergyDateWithWeekday,
   formatEnergyHour,
+  formatEnergyMonthLabel,
   formatKwh,
   formatYen,
   hasEnergyKepcoOther,
@@ -132,11 +138,15 @@ export function PowerDetailPanel({
   const [error, setError] = useState<string | null>(null);
 
   const todayIso = breakdown?.this_month.end ?? null;
-  const [tab, setTab] = useState<"daily" | "hourly">("daily");
+  const [tab, setTab] = useState<"daily" | "hourly" | "monthly">("daily");
   const [hourlyDate, setHourlyDate] = useState<string | null>(() => todayIso);
   const [hourly, setHourly] = useState<EnergyHourly | null>(null);
   const [hourlyLoading, setHourlyLoading] = useState(false);
   const [hourlyError, setHourlyError] = useState<string | null>(null);
+  const [monthly, setMonthly] = useState<EnergyBreakdown | null>(null);
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
+  const [monthlyError, setMonthlyError] = useState<string | null>(null);
+  const [monthlyRevision, setMonthlyRevision] = useState(0);
   // 日付を押すと開くカレンダー（#330）。離れた日へ矢印で何度も送らずに済ませるため
   const [calendarOpen, setCalendarOpen] = useState(false);
   // 取得元（スマートプラグ）の名前を変えるシート（#335）
@@ -164,6 +174,24 @@ export function PowerDetailPanel({
     };
   }, [tab, hourlyDate]);
 
+  useEffect(() => {
+    if (tab !== "monthly" || !todayIso) return;
+    let cancelled = false;
+    fetchEnergyBreakdown(energyMonthlyHistoryDays(todayIso))
+      .then((data) => {
+        if (!cancelled) setMonthly(data);
+      })
+      .catch(() => {
+        if (!cancelled) setMonthlyError("月別のデータを取得できませんでした");
+      })
+      .finally(() => {
+        if (!cancelled) setMonthlyLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, todayIso, monthlyRevision]);
+
   // KEPCO「みるでん」の時間ごとCSVの取り込み（#302）。
   // 取り込んだ値は時間ごと・日別の両方の「その他」の元になるため、
   // 導線はタブに寄せず、どちらのタブを開いていても押せる位置に置く（#319）。
@@ -182,6 +210,9 @@ export function PowerDetailPanel({
     try {
       const result = await importKepcoCsv(file);
       setKepcoResult(result);
+      setMonthlyLoading(true);
+      setMonthlyError(null);
+      setMonthlyRevision((current) => current + 1);
       // 日別（親が持つ breakdown）と時間ごとの両方を取り直す。
       // どちらのタブから取り込んでも、閉じずにもう一方へ切り替えれば反映済みになる。
       onKepcoImported();
@@ -246,6 +277,16 @@ export function PowerDetailPanel({
   const rows = buildEnergyDailyRows(breakdown?.daily ?? []);
   const hourlyColumns = buildEnergyHourlyColumns(hourly, sources, colors);
   const hourlyRows = hourlyColumns.filter((column) => column.kwh != null);
+  const monthlySources = monthly?.sources ?? sources;
+  const monthlyColors = buildEnergySourceColors(monthlySources);
+  // KEPCO差分の「その他」は直近約1か月だけのため、月どうしを比較できるように外す。
+  // 金額は `filterEnergyDailyBySources` が既存と同じ使用量比で按分する。
+  const monthlyDaily = filterEnergyDailyBySources(
+    monthly?.daily ?? [],
+    new Set([KEPCO_OTHER_SOURCE])
+  );
+  const monthlyColumns = buildEnergyMonthlyColumns(monthlyDaily, monthlySources, monthlyColors);
+  const monthlyRows = [...monthlyColumns].reverse();
   const dailyHasKepcoOther = hasEnergyKepcoOther(breakdown?.daily ?? []);
   const selectedRow = sources.find((row) => row.source === selectedSource) ?? null;
 
@@ -271,6 +312,9 @@ export function PowerDetailPanel({
     try {
       const settings = await updateUiSettings({ energy_unit_price: price });
       onUnitPriceSaved(settings.energy_unit_price);
+      setMonthlyLoading(true);
+      setMonthlyError(null);
+      setMonthlyRevision((current) => current + 1);
     } catch {
       setError("単価を保存できませんでした");
     } finally {
@@ -408,6 +452,21 @@ export function PowerDetailPanel({
                 }`}
               >
                 時間ごと
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMonthlyLoading(true);
+                  setMonthlyError(null);
+                  setTab("monthly");
+                }}
+                className={`rounded-full px-3.5 py-1 text-xs font-bold ${
+                  tab === "monthly"
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground"
+                }`}
+              >
+                月別
               </button>
             </div>
 
@@ -584,6 +643,66 @@ export function PowerDetailPanel({
 
             {tab === "daily" && columns.length > 1 && <PowerFixedChart columns={columns} />}
 
+            {tab === "monthly" && (
+              <div className="flex flex-col gap-3">
+                {monthlyLoading ? (
+                  <EnergySkeletonFrame className="gap-2">
+                    <EnergyBarChartSkeleton bars={12} />
+                    <EnergyListSkeleton rows={4} labelWidth="w-16" />
+                  </EnergySkeletonFrame>
+                ) : monthlyError ? (
+                  <p className="py-6 text-center text-sm text-destructive">{monthlyError}</p>
+                ) : monthlyRows.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    まだ月別に表示できる使用量がありません
+                  </p>
+                ) : (
+                  <>
+                    <PowerMonthlyChart columns={monthlyColumns} />
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex justify-between text-[11.5px] text-muted-foreground">
+                        <span>月別</span>
+                        <span>kWh / 円</span>
+                      </div>
+                      {monthlyRows.map((row) => (
+                        <div
+                          key={row.month}
+                          className="flex items-center gap-2.5 text-[13px] tabular-nums"
+                        >
+                          <span className="w-[68px] shrink-0 text-muted-foreground">
+                            {formatEnergyMonthLabel(row.month)}
+                          </span>
+                          <span className="flex h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+                            <span
+                              className="flex h-full"
+                              style={{ width: `${Math.max(4, row.ratio * 100)}%` }}
+                            >
+                              {row.segments.map((segment) => (
+                                <span
+                                  key={segment.source}
+                                  className="block h-full min-w-px"
+                                  style={{
+                                    width: `${segment.share * 100}%`,
+                                    backgroundColor: segment.color,
+                                  }}
+                                />
+                              ))}
+                            </span>
+                          </span>
+                          <span className="w-[62px] shrink-0 text-right font-bold">
+                            {formatKwh(row.kwh)}
+                          </span>
+                          <span className="w-12 shrink-0 text-right text-muted-foreground">
+                            {formatYen(row.cost_yen)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
             {sources.length > 0 && (
               <div className="flex flex-wrap gap-x-1 gap-y-1 text-xs text-muted-foreground">
                 {sources.map((row) => (
@@ -724,6 +843,9 @@ export function PowerDetailPanel({
           onClose={() => setNameSheetOpen(false)}
           onSave={async (names) => {
             await updateUiSettings({ energy_source_names: names });
+            setMonthlyLoading(true);
+            setMonthlyError(null);
+            setMonthlyRevision((current) => current + 1);
             onSourceNamesSaved();
           }}
         />
