@@ -288,6 +288,26 @@ export const ENERGY_DAILY_CHART_HISTORY_DAYS = 365;
 /** 詳細シートの固定グラフと、推移ページの配色で「直近」とみなす日数（#822） */
 export const ENERGY_RECENT_DAYS = 30;
 
+/** 月別表示で当月を含めて見せる月数。`/api/energy/breakdown` の上限400日以内に収まる */
+export const ENERGY_MONTHLY_HISTORY_MONTHS = 12;
+
+/**
+ * `todayIso` を含む当月と過去11か月を、最古月の月初から丸ごと取る日数。
+ *
+ * 365日固定では最古月が途中から始まって合計が欠けるため、表示する月数に合わせて
+ * 計算する。月初から当日まででも最大366日なので、APIの400日上限に収まる。
+ */
+export function energyMonthlyHistoryDays(
+  todayIso: string,
+  months = ENERGY_MONTHLY_HISTORY_MONTHS
+): number {
+  const [year, month, day] = todayIso.split("-").map(Number);
+  if (!year || !month || !day || months < 1) return 0;
+  const start = new Date(Date.UTC(year, month - months, 1, 12));
+  const today = new Date(Date.UTC(year, month - 1, day, 12));
+  return Math.round((today.getTime() - start.getTime()) / 86_400_000) + 1;
+}
+
 /**
  * 推移ページの配色に使う取得元の並び（#822）。
  *
@@ -369,6 +389,54 @@ export function filterEnergyDailyBySources(
       by_source: bySource,
     };
   });
+}
+
+export interface EnergyMonthlyColumn {
+  /** `YYYY-MM`。古い月から新しい月の順 */
+  month: string;
+  kwh: number;
+  cost_yen: number;
+  /** 期間内の最大値を1とした棒の高さ */
+  ratio: number;
+  segments: EnergyStackSegment[];
+}
+
+/**
+ * 日別の使用量を月別へまとめ、積み上げ棒と一覧の共通データを作る。
+ *
+ * 呼び出し元は、比較できない KEPCO 差分（`kepco_other`）を
+ * `filterEnergyDailyBySources` であらかじめ外す。そのとき金額も既存どおり使用量比で按分される。
+ */
+export function buildEnergyMonthlyColumns(
+  daily: readonly EnergyBreakdownDay[],
+  sources: readonly EnergySourceRow[],
+  colors: Record<string, string>
+): EnergyMonthlyColumn[] {
+  const months = new Map<string, EnergyBreakdownDay>();
+  for (const day of daily) {
+    if (day.kwh <= 0) continue;
+    const month = energyMonthOf(day.date);
+    const current = months.get(month) ?? {
+      date: `${month}-01`,
+      kwh: 0,
+      cost_yen: 0,
+      by_source: {},
+    };
+    current.kwh += day.kwh;
+    current.cost_yen += day.cost_yen;
+    for (const [source, kwh] of Object.entries(day.by_source)) {
+      current.by_source[source] = (current.by_source[source] ?? 0) + kwh;
+    }
+    months.set(month, current);
+  }
+  const max = Math.max(...[...months.values()].map((month) => month.kwh), 0);
+  return [...months.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, value]) => ({
+    month,
+    kwh: value.kwh,
+    cost_yen: value.cost_yen,
+    ratio: max > 0 ? value.kwh / max : 0,
+    segments: buildEnergyStackSegments(value, sources, colors),
+  }));
 }
 
 /** `start`〜`end`（両端を含む）の日の、取得元ごとの使用量（#822）。`null` なら全期間 */
