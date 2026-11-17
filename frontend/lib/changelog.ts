@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "5.1.1",
+    date: "2026-11-17",
+    changes: [
+      "ホーム画面の上部に出ていた「前回のデータを表示しています」という案内を表示しないようにしました。",
+    ],
+  },
+  {
     version: "5.1.0",
     date: "2026-11-17",
     changes: [
