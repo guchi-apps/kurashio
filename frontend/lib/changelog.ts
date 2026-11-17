@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "5.1.0",
+    date: "2026-11-17",
+    changes: [
+      "消費電力の詳細画面に「月別」表示が加わり、月ごとの使用量の推移をグラフで比べられるようになりました。月別の凡例や内訳も、グラフの棒と同じ機器・色で表示されます。",
+    ],
+  },
+  {
     version: "5.0.0",
     date: "2026-11-08",
     changes: [
