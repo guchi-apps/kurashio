@@ -5,6 +5,7 @@ import {
   buildEnergyComparison,
   buildEnergyDailyRows,
   buildEnergyHourlyColumns,
+  buildEnergyMonthlyColumns,
   buildEnergySingleColumns,
   buildEnergySourceColors,
   buildEnergyDailyTicks,
@@ -12,6 +13,7 @@ import {
   buildEnergyStackColumnsFrom,
   buildEnergyStackSegments,
   energyVisibleColumnRange,
+  energyMonthlyHistoryDays,
   buildEnergyFilterItems,
   filterEnergyDailyBySources,
   orderEnergySourcesForColors,
@@ -347,6 +349,51 @@ describe("日別一覧とカードの棒", () => {
     const { sources } = buildBreakdown();
     expect(energySourceRatio(sources, sources[0])).toBe(1);
     expect(Number(energySourceRatio(sources, sources[1]).toFixed(2))).toBe(0.46);
+  });
+});
+
+describe("月別（#872）", () => {
+  it("当月と過去11か月を、最古月の月初から取得する日数を返す", () => {
+    // 2026年11月15日なら、2025年12月1日から両端を含めて350日
+    expect(energyMonthlyHistoryDays("2026-11-15")).toBe(350);
+    // うるう年をまたいでもUTC基準で正しく計算する
+    expect(energyMonthlyHistoryDays("2024-03-01")).toBe(336);
+  });
+
+  it("日別を月ごとに集計し、積み上げと金額を保つ", () => {
+    const sources = buildBreakdown().sources;
+    const columns = buildEnergyMonthlyColumns(
+      [
+        { date: "2026-07-31", kwh: 2, cost_yen: 62, by_source: { aircon: 1, "tapo:冷蔵庫": 1 } },
+        { date: "2026-08-01", kwh: 3, cost_yen: 93, by_source: { aircon: 2, "tapo:冷蔵庫": 1 } },
+        { date: "2026-08-02", kwh: 1, cost_yen: 31, by_source: { aircon: 1 } },
+      ],
+      sources,
+      buildEnergySourceColors(sources)
+    );
+    expect(columns.map((column) => column.month)).toEqual(["2026-07", "2026-08"]);
+    expect(columns[1]).toMatchObject({ kwh: 4, cost_yen: 124, ratio: 1 });
+    expect(columns[1].segments.map((segment) => [segment.source, segment.kwh])).toEqual([
+      ["aircon", 3],
+      ["tapo:冷蔵庫", 1],
+    ]);
+  });
+
+  it("KEPCO差分を除いた日別は、既存の割合で金額を按分して月へ集計できる", () => {
+    const daily = filterEnergyDailyBySources(
+      [
+        {
+          date: "2026-08-01",
+          kwh: 4,
+          cost_yen: 124,
+          by_source: { aircon: 3, kepco_other: 1 },
+        },
+      ],
+      new Set(["kepco_other"])
+    );
+    const columns = buildEnergyMonthlyColumns(daily, buildBreakdown().sources, {});
+    expect(columns[0]).toMatchObject({ kwh: 3, cost_yen: 93 });
+    expect(columns[0].segments.map((segment) => segment.source)).not.toContain("kepco_other");
   });
 });
 
