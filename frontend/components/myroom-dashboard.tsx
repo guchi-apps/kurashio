@@ -433,8 +433,6 @@ export function MyRoomDashboard() {
    * オフライン表示（`isOfflineMode`）とは別で、裏では取り直しを続けている
    */
   const [isCachedPreview, setIsCachedPreview] = useState(false);
-  /** 上で出している前回のデータの時点 */
-  const [cachedPreviewAt, setCachedPreviewAt] = useState<string | null>(null);
   /** 前回のデータ（起動直後の先出し・オフライン）を出していて、いまの状態とは限らない */
   const showingCachedData = isOfflineMode || isCachedPreview;
   const showingCachedRef = useRef(false);
@@ -605,7 +603,6 @@ export function MyRoomDashboard() {
         setIsCachedPreview(false);
       } else {
         setIsCachedPreview(true);
-        setCachedPreviewAt(snapshot.dataLatestAt);
       }
     },
     []
@@ -1291,9 +1288,6 @@ export function MyRoomDashboard() {
         minute: "2-digit",
       })
     : null;
-  const cachedPreviewLabel = cachedPreviewAt
-    ? formatUpdatedAt(new Date(cachedPreviewAt).getTime())
-    : null;
 
   return (
     <div className="w-full pb-10">
@@ -1429,12 +1423,6 @@ export function MyRoomDashboard() {
             オフライン表示中
             {offlineCachedAt ? `（${offlineCachedAt} 時点・直近24時間）` : "（直近24時間）"}
           </div>
-        )}
-        {isCachedPreview && !isOfflineMode && (
-          <p className="text-xs text-muted-foreground" role="status">
-            前回のデータを表示しています
-            {cachedPreviewLabel ? `（${cachedPreviewLabel} 時点）` : ""}。最新のデータを読み込み中…
-          </p>
         )}
         {hasStaleSensors && !showingCachedData && !staleAlertDismissed && (
           <div className="relative rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 pr-10 text-sm text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
