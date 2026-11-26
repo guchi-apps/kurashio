@@ -837,6 +837,25 @@ export async function saveWaterBill(input: {
   }
 }
 
+/** 請求1行の使用期間を保存する（#884）。両方 null で消去 */
+export async function saveBillUsagePeriod(input: {
+  billing_month: string;
+  kind: "electricity" | "gas" | "water";
+  contract_key: string;
+  usage_start: string | null;
+  usage_end: string | null;
+}): Promise<void> {
+  const res = await fetchWithAuth("/api/bills/period", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(body?.detail || `Request failed: ${res.status}`);
+  }
+}
+
 /** 手入力した水道料金を1件消す */
 export async function deleteWaterBill(billingMonth: string): Promise<void> {
   const res = await fetchWithAuth(`/api/bills/water/${encodeURIComponent(billingMonth)}`, {

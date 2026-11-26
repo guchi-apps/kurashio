@@ -10,20 +10,26 @@
 二重計上になる。画面では並べて「請求のうちどこまでを機器ごとに追えているか」を出す。
 
 **取れるのは月合計だけ。** 日ごと・時間ごとの使用量はメールに載っていない。
+使用期間も載らないので、電気は時間別データの合計が使用量と合うときだけ入れ、
+それ以外は画面から手で入れる（#884）。
 今月ぶんも検針が終わるまで確定しないため、最新は原則「先月分」になる。
 """
 
 from __future__ import annotations
 
 import datetime
+import logging
 import math
 import re
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import database, energy
+
+logger = logging.getLogger(__name__)
 
 KIND_ELECTRICITY = "electricity"
 KIND_GAS = "gas"
@@ -494,6 +500,8 @@ def _serialize_rows(rows: Sequence[Any]) -> List[Dict[str, Any]]:
             "amount_yen": row.amount_yen,
             "usage_value": row.usage_value,
             "usage_unit": row.usage_unit,
+            "usage_start": row.usage_start,
+            "usage_end": row.usage_end,
             "received_at": row.received_at,
             "updated_at": row.updated_at,
         }
@@ -524,7 +532,183 @@ def _month_end(month: datetime.date) -> datetime.date:
     return _shift_months(month, -1) - datetime.timedelta(days=1)
 
 
+# ------------------------------------------------------------ 使用期間（#884）
+#
+# `usage_start`・`usage_end` を書くのはここだけ。収集（`upsert_records`）も取込（`import_bill`）も
+# 触らないので、入れた期間は日次収集で消えない。
+
+#: 自動で入れる期間の長さ。1か月ぶんの検針期間に収まらないものは候補にしない
+AUTO_PERIOD_MIN_DAYS = 25
+AUTO_PERIOD_MAX_DAYS = 40
+#: 手入力の上限。水道は2か月分をまとめて請求する
+MAX_MANUAL_PERIOD_DAYS = 100
+
+Period = Tuple[datetime.date, datetime.date]
+
+
+def validate_usage_period(
+    start: Optional[datetime.date], end: Optional[datetime.date]
+) -> None:
+    """手入力の期間。両方入れるか、両方空（消去）。誤りは ValueError。"""
+    if start is None and end is None:
+        return
+    if start is None or end is None:
+        raise ValueError("Specify both usage_start and usage_end")
+    if start > end:
+        raise ValueError("usage_start is after usage_end")
+    if (end - start).days + 1 > MAX_MANUAL_PERIOD_DAYS:
+        raise ValueError("Usage period is too long")
+
+
+def set_usage_period(
+    db: Session,
+    billing_month: Any,
+    kind: str,
+    contract_key: str,
+    start: Optional[datetime.date],
+    end: Optional[datetime.date],
+) -> bool:
+    """請求1行の使用期間を書き換える（None で消去）。行が無ければ False。"""
+    validate_usage_period(start, end)
+    row = _find_bill(db, parse_billing_month(billing_month), kind, contract_key)
+    if row is None:
+        return False
+    row.usage_start = start
+    row.usage_end = end
+    db.commit()
+    return True
+
+
+def _period_days(period: Period) -> int:
+    return (period[1] - period[0]).days + 1
+
+
+def _stored_batches(db: Session) -> List[Period]:
+    """同じ取込時刻の行が、隙間なく24時間ずつ並んでいる範囲。
+
+    抽出対象期間は保存していないので、その代わりに使う。後の取込で一部が上書きされた回は
+    行が欠けるか合計が合わなくなり、候補から外れる。
+    """
+    table = database.KepcoHourlyUsageRecord
+    rows = (
+        db.query(func.min(table.date), func.max(table.date), func.count())
+        .filter(table.imported_at.isnot(None))
+        .group_by(table.imported_at)
+        .all()
+    )
+    return [
+        (start, end) for start, end, count in rows if count == _period_days((start, end)) * 24
+    ]
+
+
+def _period_total(db: Session, period: Period) -> Optional[float]:
+    """期間の時間別kWhの合計。長さが対象外か、1時間でも欠けていれば None。"""
+    days = _period_days(period)
+    if not AUTO_PERIOD_MIN_DAYS <= days <= AUTO_PERIOD_MAX_DAYS:
+        return None
+    table = database.KepcoHourlyUsageRecord
+    count, total = (
+        db.query(func.count(), func.sum(table.kwh))
+        .filter(table.date >= period[0], table.date <= period[1])
+        .one()
+    )
+    return float(total) if count == days * 24 else None
+
+
+def _usage_matches(total: float, usage: float) -> bool:
+    """CSVは端数処理前なので、四捨五入して請求の使用量と比べる。"""
+    return abs(math.floor(round(total, 3) + 0.5) - usage) < USAGE_TOLERANCE
+
+
+def fill_usage_periods(db: Session, periods: Optional[Sequence[Period]] = None) -> int:
+    """使用期間が空の電気の請求へ、合計が一致する期間を入れる。入れた件数を返す。
+
+    `periods` はCSVの抽出対象期間。省略すると保存済みの取込のまとまりを候補にする。
+    条件は、期間の終了日が請求月の中にあり、合計の四捨五入が使用量と一致し、
+    期間と請求が1対1であること。**入力済みの期間は変えない。**
+    日付をずらして合う期間を探すことはしない（偶然の一致がいくつも出る）。
+    """
+    candidates = set(periods) if periods is not None else set(_stored_batches(db))
+    table = database.UtilityBillRecord
+    bill_rows = (
+        db.query(table)
+        .filter(table.kind == KIND_ELECTRICITY, table.usage_value.isnot(None))
+        .all()
+    )
+
+    matches = []
+    for period in candidates:
+        end_month = period[1].replace(day=1)
+        in_month = [row for row in bill_rows if row.billing_month == end_month]
+        if not in_month:
+            continue
+        total = _period_total(db, period)
+        if total is None:
+            continue
+        # 入力済みの行も含めて数える（同じ期間が2契約に合うときはどちらにも入れない）
+        matched = [row for row in in_month if _usage_matches(total, row.usage_value)]
+        if len(matched) == 1:
+            matches.append((period, matched[0]))
+
+    targets = []
+    for period, row in matches:
+        if sum(1 for _, other in matches if other is row) != 1:
+            continue
+        if row.usage_start is None and row.usage_end is None:
+            targets.append((period, row.billing_month, row.contract_key))
+
+    filled = 0
+    for period, month, contract_key in targets:
+        # 同時に手入力されたぶんを潰さないよう、空欄であることを更新の条件にする
+        filled += (
+            db.query(table)
+            .filter(
+                table.billing_month == month,
+                table.kind == KIND_ELECTRICITY,
+                table.contract_key == contract_key,
+                table.usage_start.is_(None),
+                table.usage_end.is_(None),
+            )
+            .update(
+                {table.usage_start: period[0], table.usage_end: period[1]},
+                synchronize_session=False,
+            )
+        )
+    db.commit()
+    return filled
+
+
+def try_fill_usage_periods(db: Session, periods: Optional[Sequence[Period]] = None) -> None:
+    """取込・収集の保存が済んだあとに呼ぶ。失敗しても呼び出し元の結果は変えない。"""
+    try:
+        filled = fill_usage_periods(db, periods)
+    except Exception:
+        db.rollback()
+        logger.exception("請求の使用期間の自動入力に失敗")
+        return
+    if filled:
+        logger.info("請求の使用期間を%d件入れました", filled)
+
+
 # --------------------------------------------------------------- 集計（DBを触らない）
+
+
+def _iso_date(value: Optional[datetime.date]) -> Optional[str]:
+    return value.isoformat() if value else None
+
+
+def _electricity_periods(
+    rows: Sequence[Dict[str, Any]], month: Optional[datetime.date]
+) -> Optional[List[Period]]:
+    """その請求月の電気の使用期間。1行でも期間が無ければ None（暦月で数える）。"""
+    items = [
+        row for row in rows if row["billing_month"] == month and row["kind"] == KIND_ELECTRICITY
+    ]
+    if not items or any(
+        not row.get("usage_start") or not row.get("usage_end") for row in items
+    ):
+        return None
+    return [(row["usage_start"], row["usage_end"]) for row in items]
 
 
 def _sum_kind(rows: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -551,6 +735,17 @@ def _sum_kind(rows: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         "usage_unit": units[0] if units else None,
         "plan_name": " / ".join(plans) if plans else None,
         "contracts": len(items),
+        # 使用期間は契約ごとに違うので、合算せず請求1行ずつ持つ（#884）
+        "bills": [
+            {
+                "contract_key": item["contract_key"],
+                "plan_name": item.get("plan_name"),
+                "amount_yen": int(item["amount_yen"]),
+                "usage_start": _iso_date(item.get("usage_start")),
+                "usage_end": _iso_date(item.get("usage_end")),
+            }
+            for item in items
+        ],
     }
 
 
@@ -602,19 +797,23 @@ def build_measured(
     month: Optional[datetime.date],
     unit_price: float,
     electricity_amount_yen: Optional[int],
+    periods: Optional[Sequence[Period]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """請求月の暦月ぶんの実測（エアコン＋スマートプラグ）と、請求に対する割合。
+    """請求に対応する期間の実測（エアコン＋スマートプラグ）と、請求に対する割合。
 
-    **目安であって内訳ではない。** 請求の対象期間は検針日から検針日までで、暦月とは
-    ずれる。それでも「請求のうちどのくらいを機器ごとに追えているか」は桁で分かれば
-    足りるので、暦月で数えたうえで画面側に「目安」と書く。
+    `periods`（使用期間・#884）があればその日を数える。複数契約なら各期間の日を合わせる。
+    無ければ請求月の暦月で数える。請求の対象期間は検針日から検針日までで暦月とはずれるので、
+    暦月で数えたぶんは画面側に「目安」と書く。**どちらでも内訳ではない。**
     """
     if month is None:
         return None
 
-    start = month
-    end = _month_end(month)
-    rows = [row for row in energy_rows if start <= row["date"] <= end]
+    spans = list(periods) if periods else [(month, _month_end(month))]
+    start = min(span[0] for span in spans)
+    end = max(span[1] for span in spans)
+    rows = [
+        row for row in energy_rows if any(a <= row["date"] <= b for a, b in spans)
+    ]
     if not rows:
         return None
 
@@ -638,6 +837,7 @@ def build_measured(
         "share_percent": share,
         "start": start.isoformat(),
         "end": end.isoformat(),
+        "by_usage_period": bool(periods),
     }
 
 
@@ -692,7 +892,11 @@ def build_summary(
         "months": history,
         "total_yen": sum(entry["total_yen"] for entry in history),
         "measured": build_measured(
-            energy_rows, latest_month, unit_price, electricity_amount
+            energy_rows,
+            latest_month,
+            unit_price,
+            electricity_amount,
+            _electricity_periods(rows, latest_month),
         ),
         "unit_price": unit_price,
         "updated_at": updated_at.isoformat() if updated_at else None,
@@ -715,8 +919,14 @@ def get_summary(
         rows = _fetch_rows(db, start)
         # 実測との対比は最新の請求月（原則は先月）ぶんだけ要る。
         # 検針のずれを吸収できるよう2か月ぶん引いておく
-        energy_rows = energy.fetch_all_rows(
-            db, _shift_months(today.replace(day=1), 2), today
+        # 使用期間がさらに前から始まる請求もあるので、そのぶんは広げる
+        latest_month = max(
+            (row["billing_month"] for row in rows if row["kind"] != KIND_WATER), default=None
         )
+        periods = _electricity_periods(rows, latest_month) or []
+        energy_start = min(
+            [_shift_months(today.replace(day=1), 2)] + [period[0] for period in periods]
+        )
+        energy_rows = energy.fetch_all_rows(db, energy_start, today)
 
     return build_summary(rows, energy_rows, unit_price, months=months)
