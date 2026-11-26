@@ -180,6 +180,10 @@ class UtilityBillRecord(Base):
     #: 使用量。電気は kWh、ガスは m3
     usage_value = Column(Float, nullable=True)
     usage_unit = Column(String(8), nullable=True)
+    #: 使用期間（両端を含む・#884）。メールには載らないので、分からなければ NULL。
+    #: 収集（`bills.upsert_records`）はこの2列を書かない＝入れた値は上書きされない
+    usage_start = Column(Date, nullable=True)
+    usage_end = Column(Date, nullable=True)
     #: お知らせメールを受け取った日時（検針日そのものではない）
     received_at = Column(DateTime, nullable=True)
     updated_at = Column(
@@ -604,6 +608,12 @@ MOCK_GAS_BILLS = (
 MOCK_WATER_BILLS = (5120, 4860, 5340, 4980, 5210, 4720)
 
 
+def _mock_usage_period(month: datetime.date) -> dict:
+    """モックの使用期間。前月15日〜請求月14日（検針日が月の半ばの形）。"""
+    previous = (month - datetime.timedelta(days=1)).replace(day=15)
+    return {"usage_start": previous, "usage_end": month.replace(day=14)}
+
+
 def generate_mock_utility_bills(months: int = 12) -> list:
     """モック用の請求。最新の請求月は「先月分」にする。
 
@@ -630,6 +640,7 @@ def generate_mock_utility_bills(months: int = 12) -> list:
                 # 単価は概ね29円/kWh。端数は月ごとに散らす
                 "usage_value": round(electricity / 29.2, 1),
                 "usage_unit": "kWh",
+                **_mock_usage_period(month),
                 "received_at": None,
                 "updated_at": None,
             }
@@ -643,6 +654,7 @@ def generate_mock_utility_bills(months: int = 12) -> list:
                 "amount_yen": gas,
                 "usage_value": round(gas / 190.0, 1),
                 "usage_unit": "m3",
+                **_mock_usage_period(month),
                 "received_at": None,
                 "updated_at": None,
             }
@@ -660,6 +672,8 @@ def generate_mock_utility_bills(months: int = 12) -> list:
                     "amount_yen": water,
                     "usage_value": round(water / 260.0, 1),
                     "usage_unit": "m3",
+                    "usage_start": None,
+                    "usage_end": None,
                     "received_at": None,
                     "updated_at": None,
                 }

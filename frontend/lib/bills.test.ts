@@ -3,7 +3,11 @@ import {
   billKindRatio,
   parseWaterBillDraft,
   buildBillMonthRows,
+  buildBillPeriodRows,
   buildBillStackColumns,
+  formatUsagePeriod,
+  parseUsagePeriodDraft,
+  singleUsagePeriod,
   formatBillAmount,
   formatBillUsage,
   formatBillingMonth,
@@ -209,5 +213,58 @@ describe("水道料金の手入力", () => {
         updated_at: null,
       })
     ).toBe(true);
+  });
+});
+
+describe("使用期間（#884）", () => {
+  const total = (rows: Array<[string, string | null, string | null]>): UtilityBillKindTotal => ({
+    amount_yen: 100 * rows.length,
+    usage_value: null,
+    usage_unit: null,
+    plan_name: null,
+    contracts: rows.length,
+    bills: rows.map(([contract_key, usage_start, usage_end]) => ({
+      contract_key,
+      plan_name: null,
+      amount_yen: 100,
+      usage_start,
+      usage_end,
+    })),
+  });
+
+  it("年をまたぐときだけ終わりに年を付け、無ければ null", () => {
+    expect(formatUsagePeriod("2026-09-15", "2026-10-15")).toBe("2026/9/15〜10/15");
+    expect(formatUsagePeriod("2026-12-15", "2027-01-14")).toBe("2026/12/15〜2027/1/14");
+    expect(formatUsagePeriod(null, null)).toBeNull();
+  });
+
+  it("契約が2つある月は1行ずつ出し、タイルには添えない", () => {
+    const month: UtilityBillMonth = {
+      billing_month: "2026-04",
+      electricity: total([
+        ["a", "2026-03-01", "2026-03-20"],
+        ["b", null, null],
+      ]),
+      gas: null,
+      total_yen: 200,
+    };
+    expect(buildBillPeriodRows([month]).map((row) => row.contractKey)).toEqual(["a", "b"]);
+    expect(singleUsagePeriod(month.electricity)).toBeNull();
+  });
+
+  it("内訳を持たない古い控えは行を出さない", () => {
+    const old = { ...total([]), bills: undefined };
+    expect(
+      buildBillPeriodRows([
+        { billing_month: "2026-04", electricity: old, gas: null, total_yen: 0 },
+      ])
+    ).toEqual([]);
+  });
+
+  it("片方だけ・逆順・長すぎる期間は受けない", () => {
+    expect(parseUsagePeriodDraft({ start: "2026-09-15", end: "" }).ok).toBe(false);
+    expect(parseUsagePeriodDraft({ start: "2026-10-15", end: "2026-09-15" }).ok).toBe(false);
+    expect(parseUsagePeriodDraft({ start: "2026-01-01", end: "2026-09-15" }).ok).toBe(false);
+    expect(parseUsagePeriodDraft({ start: "2026-09-15", end: "2026-10-15" }).ok).toBe(true);
   });
 });

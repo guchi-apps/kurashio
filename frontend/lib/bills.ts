@@ -178,3 +178,72 @@ export function parseWaterBillDraft(
     value: { billing_month: draft.billingMonth, amount_yen: amount, usage_m3: usage },
   };
 }
+
+/** `2026-09-15`〜`2026-10-15` → `2026/9/15〜10/15`。年をまたぐときは終わりにも年を付ける */
+export function formatUsagePeriod(
+  start: string | null | undefined,
+  end: string | null | undefined
+): string | null {
+  if (!start || !end) return null;
+  const [startYear, startMonth, startDay] = start.split("-").map(Number);
+  const [endYear, endMonth, endDay] = end.split("-").map(Number);
+  const tail = `${endMonth}/${endDay}`;
+  return `${startYear}/${startMonth}/${startDay}〜${
+    startYear === endYear ? tail : `${endYear}/${tail}`
+  }`;
+}
+
+export interface BillPeriodRow {
+  billingMonth: string;
+  kind: BillKind;
+  contractKey: string;
+  /** 同じ月・種別に契約が2つあるときだけ、見分けるために入れる */
+  planName: string | null;
+  amountYen: number;
+  start: string | null;
+  end: string | null;
+}
+
+/** 使用期間の一覧。請求1行ずつ、新しい月が上（月の中は電気・ガス・水道の順） */
+export function buildBillPeriodRows(months: readonly UtilityBillMonth[]): BillPeriodRow[] {
+  return buildBillMonthRows(months).flatMap((month) =>
+    (["electricity", "gas", "water"] as const).flatMap((kind) => {
+      const bills = month[kind]?.bills ?? [];
+      return bills.map((bill) => ({
+        billingMonth: month.billing_month,
+        kind,
+        contractKey: bill.contract_key,
+        planName: bills.length > 1 ? bill.plan_name ?? "別の契約" : null,
+        amountYen: bill.amount_yen,
+        start: bill.usage_start,
+        end: bill.usage_end,
+      }));
+    })
+  );
+}
+
+/** その月・種別が請求1行だけのときの使用期間。タイルに添える */
+export function singleUsagePeriod(total: UtilityBillKindTotal | null | undefined): string | null {
+  const bills = total?.bills ?? [];
+  if (bills.length !== 1) return null;
+  return formatUsagePeriod(bills[0].usage_start, bills[0].usage_end);
+}
+
+/** 使用期間の下書き（`type="date"` の値）を確かめる。サーバーと同じ条件 */
+export function parseUsagePeriodDraft(draft: {
+  start: string;
+  end: string;
+}): { ok: true; value: { usage_start: string; usage_end: string } } | { ok: false; message: string } {
+  const pattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!pattern.test(draft.start) || !pattern.test(draft.end)) {
+    return { ok: false, message: "開始日と終了日の両方を選んでください" };
+  }
+  if (draft.start > draft.end) {
+    return { ok: false, message: "終了日は開始日以降にしてください" };
+  }
+  const days = (Date.parse(draft.end) - Date.parse(draft.start)) / 86_400_000 + 1;
+  if (days > 100) {
+    return { ok: false, message: "期間が長すぎます" };
+  }
+  return { ok: true, value: { usage_start: draft.start, usage_end: draft.end } };
+}

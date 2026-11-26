@@ -360,6 +360,18 @@ export interface UtilityBillKindTotal {
   /** `なっトクでんき`。契約が複数あれば ` / ` でつなぐ */
   plan_name: string | null;
   contracts: number;
+  /** 請求1行ずつ（契約ごと）。使用期間はここにだけ持つ（#884）。古い控えには無い */
+  bills?: UtilityBillRow[];
+}
+
+/** 請求1行。`contract_key` は期間を保存するときの宛先 */
+export interface UtilityBillRow {
+  contract_key: string;
+  plan_name: string | null;
+  amount_yen: number;
+  /** 使用期間（`2026-09-15`・両端を含む）。分からなければ null */
+  usage_start: string | null;
+  usage_end: string | null;
 }
 
 /** 請求1か月ぶん。`GET /api/bills/summary` の `months` の1件 */
@@ -381,7 +393,7 @@ export interface UtilityBillComparison {
   base_billing_month: string;
 }
 
-/** 請求月の暦月ぶんの実測（エアコン＋スマートプラグ）。検針期間とはずれるので目安 */
+/** 使用期間（無ければ請求月の暦月）の実測（エアコン＋スマートプラグ） */
 export interface UtilityBillMeasured {
   kwh: number;
   cost_yen: number;
@@ -389,6 +401,8 @@ export interface UtilityBillMeasured {
   share_percent: number | null;
   start: string;
   end: string;
+  /** true なら使用期間で数えた。false（古い控えは無し）は暦月で、目安 */
+  by_usage_period?: boolean;
 }
 
 /** 電気・ガス料金カードが使う集計。`GET /api/bills/summary` の戻り */
