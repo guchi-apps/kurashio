@@ -371,6 +371,18 @@ def migrate():
                 """))
                 print("Table 'utility_bills' created.")
 
+            # 請求の使用期間（#884）。分からない請求は NULL のまま。
+            for column_name in ("usage_start", "usage_end"):
+                print(f"Checking if column 'utility_bills.{column_name}' exists...")
+                if _column_exists(conn, "utility_bills", column_name):
+                    print(f"Column '{column_name}' already exists.")
+                else:
+                    print(f"Adding column 'utility_bills.{column_name}'...")
+                    conn.execute(
+                        text(f"ALTER TABLE utility_bills ADD COLUMN {column_name} DATE NULL")
+                    )
+                    print(f"Column '{column_name}' added.")
+
             # 月次請求の出典（#814）。1通のメールに電気・ガスが載るので (メールID, 種別, 契約) で一意。
             print("Checking if 'utility_bill_imports' table exists...")
             if _table_exists(conn, "utility_bill_imports"):

@@ -524,6 +524,25 @@ class UtilityBillPayload(BaseModel):
     records: List[UtilityBillItem]
 
 
+class BillUsagePeriod(BaseModel):
+    """請求1行の使用期間（#884）。両方 null で消去する。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    billing_month: str
+    kind: str
+    contract_key: str
+    usage_start: Optional[datetime.date]
+    usage_end: Optional[datetime.date]
+
+    @model_validator(mode="after")
+    def check_values(self):
+        bills.parse_billing_month(self.billing_month)
+        bills.normalize_kind(self.kind, bills.KIND_ORDER)
+        bills.validate_usage_period(self.usage_start, self.usage_end)
+        return self
+
+
 class ManualWaterBill(BaseModel):
     """水道料金の手入力1件（#750）。検針の月ごとに1行で、同じ月は上書きする。"""
 
@@ -2290,6 +2309,7 @@ async def import_kepco_hourly_csv(
     raw = await file.read()
     try:
         records = kepco_import.parse_csv(raw)
+        period = kepco_import.parse_period(raw)
     except kepco_import.KepcoCsvError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -2297,17 +2317,19 @@ async def import_kepco_hourly_csv(
         return {"status": "mock_ok", **kepco_import.summarize(records)}
 
     # 同期のDB処理はイベントループを止めないようスレッドへ逃がす（#829）
-    return await asyncio.to_thread(_save_kepco_hourly, db, records)
+    return await asyncio.to_thread(_save_kepco_hourly, db, records, period)
 
 
-def _save_kepco_hourly(db: Session, records: list) -> dict:
+def _save_kepco_hourly(db: Session, records: list, period: tuple) -> dict:
     try:
         result = kepco_import.upsert_kepco_hourly(db, records, now=get_now_jst())
-        return {"status": "ok", **result}
     except Exception as e:
         db.rollback()
         logger.exception("kepco importの保存に失敗")
         raise HTTPException(status_code=500, detail="internal error") from e
+    # 抽出対象期間の合計が請求の使用量と合えば、その請求の使用期間にする（#884）
+    bills.try_fill_usage_periods(db, [period])
+    return {"status": "ok", **result}
 
 
 @app.post("/api/internal/energy/kepco-hourly/import")
@@ -2329,11 +2351,24 @@ def import_internal_kepco_hourly(
     if database.DB_MOCK or db is None:
         return {"status": "mock_ok"}
     try:
-        return kepco_internal.import_hourly(db, payload.model_dump(), today, now=get_now_jst())
+        result = kepco_internal.import_hourly(db, payload.model_dump(), today, now=get_now_jst())
     except Exception as e:
         db.rollback()
         logger.exception("関西電力の時間別kWhの取込に失敗")
         raise HTTPException(status_code=500, detail="internal error") from e
+    # 請求の空の使用期間だけを埋める（#884）。conflict は何も保存していないので判定しない。
+    # 応答は取込の結果のまま
+    if result["status"] != kepco_internal.STATUS_CONFLICT:
+        bills.try_fill_usage_periods(
+            db,
+            [
+                (
+                    datetime.date.fromisoformat(payload.period_start),
+                    datetime.date.fromisoformat(payload.period_end),
+                )
+            ],
+        )
+    return result
 
 
 @app.get("/api/internal/energy/kepco-hourly")
@@ -2536,7 +2571,6 @@ def create_utility_bills(
 
     try:
         written = bills.upsert_records(db, records)
-        return {"status": "ok", "written": written}
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=422, detail=str(e)) from e
@@ -2544,6 +2578,36 @@ def create_utility_bills(
         db.rollback()
         logger.exception("billsの保存に失敗")
         raise HTTPException(status_code=500, detail="internal error") from e
+    # 請求が時間別データより後に届いたぶんと過去分は、日次収集のここで埋まる（#884）
+    bills.try_fill_usage_periods(db)
+    return {"status": "ok", "written": written}
+
+
+@app.put("/api/bills/period")
+def put_bill_usage_period(
+    payload: BillUsagePeriod,
+    db: Session = Depends(database.get_db),
+    _: dict = Depends(get_current_user),
+):
+    """請求1行の使用期間を手で入れる・直す・消す（#884）。"""
+    if database.DB_MOCK:
+        return {"status": "mock_ok"}
+    try:
+        found = bills.set_usage_period(
+            db,
+            payload.billing_month,
+            payload.kind,
+            payload.contract_key,
+            payload.usage_start,
+            payload.usage_end,
+        )
+    except Exception as e:
+        db.rollback()
+        logger.exception("使用期間の保存に失敗")
+        raise HTTPException(status_code=500, detail="internal error") from e
+    if not found:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"status": "ok"}
 
 
 @app.put("/api/bills/water")

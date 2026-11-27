@@ -2,20 +2,28 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
-import { deleteWaterBill, saveWaterBill } from "@/lib/api";
+import { deleteWaterBill, saveBillUsagePeriod, saveWaterBill } from "@/lib/api";
 import {
   BILL_ELECTRICITY_COLOR,
   BILL_GAS_COLOR,
   BILL_WATER_COLOR,
+  billKindColor,
   buildBillMonthRows,
+  buildBillPeriodRows,
   buildBillStackColumns,
   formatBillUsage,
   formatBillingMonth,
   formatBillingMonthShort,
+  formatUsagePeriod,
+  parseUsagePeriodDraft,
   parseWaterBillDraft,
+  singleUsagePeriod,
+  type BillKind,
+  type BillPeriodRow,
 } from "@/lib/bills";
 import { formatYen } from "@/lib/energy";
 import type { UtilityBillMonth, UtilityBillSummary } from "@/lib/types";
+import { useUnsavedEdits } from "@/lib/unsaved-edits";
 
 interface BillDetailPanelProps {
   open: boolean;
@@ -29,10 +37,13 @@ function Tile({
   caption,
   amountYen,
   sub,
+  period,
 }: {
   caption: string;
   amountYen: number | null;
   sub?: string;
+  /** 使用期間（#884）。分からなければ出さない */
+  period?: string | null;
 }) {
   return (
     <div className="rounded-2xl bg-muted px-3 py-2.5">
@@ -42,6 +53,9 @@ function Tile({
       </div>
       {sub && (
         <div className="text-[11.5px] text-muted-foreground tabular-nums">{sub}</div>
+      )}
+      {period && (
+        <div className="text-[11px] text-muted-foreground tabular-nums">{period}</div>
       )}
     </div>
   );
@@ -192,6 +206,196 @@ function WaterBillForm({
   );
 }
 
+const KIND_NAMES: Record<BillKind, string> = {
+  electricity: "電気",
+  gas: "ガス",
+  water: "水道",
+};
+
+/** 畳んでいるときに出す行数 */
+const PERIOD_ROWS_COLLAPSED = 4;
+
+/**
+ * 請求1件の使用期間の入力。開いているあいだだけ描くので、下書きの初期値は保存済みの値になる。
+ */
+function UsagePeriodEditor({
+  row,
+  onDone,
+}: {
+  row: BillPeriodRow;
+  onDone: (saved: boolean) => void;
+}) {
+  const [start, setStart] = useState(row.start ?? "");
+  const [end, setEnd] = useState(row.end ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useUnsavedEdits();
+
+  const save = async (value: { usage_start: string | null; usage_end: string | null }) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await saveBillUsagePeriod({
+        billing_month: row.billingMonth,
+        kind: row.kind,
+        contract_key: row.contractKey,
+        ...value,
+      });
+      onDone(true);
+    } catch {
+      setError("保存できませんでした。もう一度お試しください");
+      setBusy(false);
+    }
+  };
+
+  const handleSave = () => {
+    const parsed = parseUsagePeriodDraft({ start, end });
+    if (!parsed.ok) {
+      setError(parsed.message);
+      return;
+    }
+    void save(parsed.value);
+  };
+
+  const inputClass =
+    "h-10 w-full min-w-0 rounded-xl border bg-background px-2 text-[14px] tabular-nums";
+  const buttonClass = "h-9 rounded-xl px-3 text-[13px] font-bold disabled:opacity-50";
+
+  return (
+    <div className="flex flex-col gap-2 pb-1">
+      <div className="grid grid-cols-2 gap-2">
+        <label className="flex min-w-0 flex-col gap-1 text-[11.5px] text-muted-foreground">
+          使用開始日
+          <input
+            type="date"
+            value={start}
+            onChange={(event) => setStart(event.target.value)}
+            className={inputClass}
+          />
+        </label>
+        <label className="flex min-w-0 flex-col gap-1 text-[11.5px] text-muted-foreground">
+          使用終了日
+          <input
+            type="date"
+            value={end}
+            onChange={(event) => setEnd(event.target.value)}
+            className={inputClass}
+          />
+        </label>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={busy}
+          className={`${buttonClass} bg-primary text-primary-foreground`}
+        >
+          保存
+        </button>
+        <button
+          type="button"
+          onClick={() => onDone(false)}
+          disabled={busy}
+          className={`${buttonClass} border`}
+        >
+          やめる
+        </button>
+        {row.start && (
+          <button
+            type="button"
+            onClick={() => void save({ usage_start: null, usage_end: null })}
+            disabled={busy}
+            className={`${buttonClass} ml-auto text-destructive`}
+          >
+            期間を消す
+          </button>
+        )}
+      </div>
+      {error && (
+        <p role="status" className="text-[12px] text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** 請求ごとの使用期間（#884）。電気は自動で入ることがあり、どの行も手で直せる */
+function UsagePeriodList({
+  months,
+  onSaved,
+}: {
+  months: readonly UtilityBillMonth[];
+  onSaved?: () => void;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const rows = buildBillPeriodRows(months);
+  if (rows.length === 0) return null;
+  const visible = showAll ? rows : rows.slice(0, PERIOD_ROWS_COLLAPSED);
+
+  return (
+    <div className="flex flex-col gap-2 rounded-2xl border p-3.5">
+      <h3 className="text-[13.5px] font-bold">使用期間</h3>
+      <ul className="flex flex-col gap-1.5 text-[13px] tabular-nums">
+        {visible.map((row) => {
+          const key = `${row.billingMonth}:${row.kind}:${row.contractKey}`;
+          const period = formatUsagePeriod(row.start, row.end);
+          const label = `${formatBillingMonth(row.billingMonth)} ${KIND_NAMES[row.kind]}`;
+          return (
+            <li key={key} className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <span
+                  className="size-2 shrink-0 rounded-[3px]"
+                  style={{ backgroundColor: billKindColor(row.kind) }}
+                  aria-hidden
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11.5px] text-muted-foreground">
+                    {label}
+                    {row.planName && `（${row.planName}・${formatYen(row.amountYen)}）`}
+                  </div>
+                  <div className={period ? undefined : "text-muted-foreground"}>
+                    {period ?? "未入力"}
+                  </div>
+                </div>
+                {editing !== key && (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(key)}
+                    aria-label={`${label}の使用期間を${period ? "直す" : "入れる"}`}
+                    className="shrink-0 rounded-lg px-2 py-1 text-[12px] text-primary hover:bg-accent"
+                  >
+                    {period ? "直す" : "入れる"}
+                  </button>
+                )}
+              </div>
+              {editing === key && (
+                <UsagePeriodEditor
+                  row={row}
+                  onDone={(saved) => {
+                    setEditing(null);
+                    if (saved) onSaved?.();
+                  }}
+                />
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {rows.length > PERIOD_ROWS_COLLAPSED && (
+        <button
+          type="button"
+          onClick={() => setShowAll((value) => !value)}
+          className="self-start rounded-lg px-2 py-1 text-[12px] text-muted-foreground hover:bg-accent"
+        >
+          {showAll ? "少なく表示" : `すべて表示（${rows.length}件）`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /**
  * 電気・ガス・水道料金カードの詳細。
  *
@@ -238,11 +442,13 @@ export function BillDetailPanel({ open, summary, onClose, onSaved }: BillDetailP
                   caption="電気"
                   amountYen={latest?.electricity?.amount_yen ?? null}
                   sub={formatBillUsage(latest?.electricity)}
+                  period={singleUsagePeriod(latest?.electricity)}
                 />
                 <Tile
                   caption="ガス"
                   amountYen={latest?.gas?.amount_yen ?? null}
                   sub={formatBillUsage(latest?.gas)}
+                  period={singleUsagePeriod(latest?.gas)}
                 />
                 <Tile
                   caption={
@@ -250,6 +456,7 @@ export function BillDetailPanel({ open, summary, onClose, onSaved }: BillDetailP
                   }
                   amountYen={latestWater?.water?.amount_yen ?? null}
                   sub={formatBillUsage(latestWater?.water)}
+                  period={singleUsagePeriod(latestWater?.water)}
                 />
                 <Tile
                   caption={`直近${months.length}か月`}
@@ -360,6 +567,8 @@ export function BillDetailPanel({ open, summary, onClose, onSaved }: BillDetailP
               )}
             </div>
 
+            <UsagePeriodList months={months} onSaved={onSaved} />
+
             <WaterBillForm months={months} onSaved={onSaved} />
 
             <div className="flex flex-col gap-1.5 border-t pt-3 text-[11.5px] leading-relaxed text-muted-foreground">
@@ -368,11 +577,19 @@ export function BillDetailPanel({ open, summary, onClose, onSaved }: BillDetailP
               </p>
               {measured?.share_percent != null && (
                 <p>
-                  同じ月にエアコンとスマートプラグで計測できたのは{" "}
+                  {measured.by_usage_period
+                    ? `使用期間（${formatUsagePeriod(measured.start, measured.end)}）`
+                    : "同じ月"}
+                  にエアコンとスマートプラグで計測できたのは{" "}
                   {formatYen(measured.cost_yen)}（{measured.kwh} kWh）で、電気の請求額の{" "}
-                  {measured.share_percent}% にあたります。請求の対象期間は検針日から検針日までで暦月とはずれるため、この割合は目安です。
+                  {measured.share_percent}% にあたります。
+                  {!measured.by_usage_period &&
+                    "請求の対象期間は検針日から検針日までで暦月とはずれるため、この割合は目安です。"}
                 </p>
               )}
+              <p>
+                使用期間はメールに載っていません。電気は、取り込んだ時間ごとの使用量の合計が請求の使用量と一致したときに自動で入ります。入らない分は上の「使用期間」で入力してください。
+              </p>
               <p>
                 水道料金は取得元が無いため、検針のたびに明細を見て手で記入します（2か月に1回）。
               </p>

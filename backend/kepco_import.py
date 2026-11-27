@@ -22,7 +22,7 @@ import csv
 import datetime
 import io
 import re
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -49,29 +49,33 @@ def _decode(raw: bytes) -> str:
     raise KepcoCsvError("CSVの文字コードを判別できませんでした。")
 
 
+def _find_period(rows: Sequence[Sequence[str]]) -> Tuple[datetime.date, datetime.date]:
+    for row in rows[:6]:
+        m = _PERIOD_RE.search(",".join(row))
+        if m:
+            return (
+                datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3))),
+                datetime.date(int(m.group(4)), int(m.group(5)), int(m.group(6))),
+            )
+    raise KepcoCsvError(
+        "データ抽出対象期間を読み取れませんでした。"
+        "KEPCO「みるでん」からダウンロードしたCSVをそのまま指定してください。"
+    )
+
+
+def parse_period(raw: bytes) -> Tuple[datetime.date, datetime.date]:
+    """CSVの「データ抽出対象期間」。請求の使用期間の判定に使う（#884）。保存はしない。"""
+    return _find_period(list(csv.reader(io.StringIO(_decode(raw)))))
+
+
 def parse_csv(raw: bytes) -> List[Dict[str, Any]]:
     """CSVのバイト列から `{"date": date, "hour": int, "kwh": float}` の一覧を作る。"""
     text = _decode(raw)
     rows = list(csv.reader(io.StringIO(text)))
 
-    period_start: Optional[datetime.date] = None
-    period_end: Optional[datetime.date] = None
-    hourly_title_found = False
-    for row in rows[:6]:
-        line = ",".join(row)
-        if not hourly_title_found and _HOURLY_TITLE_MARK in line:
-            hourly_title_found = True
-        if period_start is None:
-            m = _PERIOD_RE.search(line)
-            if m:
-                period_start = datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-                period_end = datetime.date(int(m.group(4)), int(m.group(5)), int(m.group(6)))
+    period_start, period_end = _find_period(rows)
+    hourly_title_found = any(_HOURLY_TITLE_MARK in ",".join(row) for row in rows[:6])
 
-    if period_start is None or period_end is None:
-        raise KepcoCsvError(
-            "データ抽出対象期間を読み取れませんでした。"
-            "KEPCO「みるでん」からダウンロードしたCSVをそのまま指定してください。"
-        )
     if not hourly_title_found:
         raise KepcoCsvError(
             "1時間ごとの電力量のCSVではないようです。"
