@@ -34,6 +34,13 @@ export function formatChangelogDate(date: string): string {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "5.2.0",
+    date: "2026-11-28",
+    changes: [
+      "電気・ガス・水道の請求に「使用期間」を記録できるようになりました。請求の詳細画面から期間を手で入力できます。電気は、取り込んだ時間ごとの使用量から期間を自動で入れられる場合もあります。",
+    ],
+  },
+  {
     version: "5.1.1",
     date: "2026-11-17",
     changes: [
